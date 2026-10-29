@@ -8,9 +8,9 @@ MadTracker is software for scoring [track cycling](https://en.wikipedia.org/wiki
 
 MadTracker started as a way to make scoring easier at Detroit's [Mad Track Arena](https://madtrackarena.com/), replacing a set of spreadsheets that calculated the results and displayed them on a scoreboard. The spreadsheets worked well, but there was room for improvement, particularly around ease of use and handing the job off to a new scorer.
 
-As the officials call each sprint, elimination, lap gained or lost, and finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
+As the officials call each sprint, elimination, lap gained or lost, and and each race's finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
 
-MadTracker follows a clear order. A venue's settings carry across all of its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with the same steps, so once you've scored one kind of race, the others are familiar.
+MadTracker follows a clear order. A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar. Each race also keeps the rules it was scored under, and each event keeps its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
 
 Before the racing it exports the night's program, and afterward an archival results sheet, both as PDFs. It imports riders from BikeReg, and it exports a CSV ready to upload to USA Cycling's results site.
 
@@ -30,24 +30,24 @@ The scoreboard on the second display at 1920 by 1080, after the second sprint of
 
 <table>
 <tr>
-<td valign="top"><a href="docs/images/scoreboard-elimination.png"><img src="docs/images/scoreboard-elimination.png" alt="The scoreboard as a rider is eliminated" width="400"></a><br>The scoreboard during an Elimination, as the fourth rider is eliminated.</td>
-<td valign="top"><a href="docs/images/scoreboard-sprint-result.png"><img src="docs/images/scoreboard-sprint-result.png" alt="The scoreboard's sprint result card" width="400"></a><br>The sprint result card the scoreboard shows briefly after a sprint is recorded.</td>
+<td valign="top"><a href="docs/images/scoreboard-elimination.png"><img src="docs/images/scoreboard-elimination.png" alt="The scoreboard as a rider is eliminated" width="400"></a><br>The scoreboard during an Elimination.</td>
+<td valign="top"><a href="docs/images/scoreboard-sprint-result.png"><img src="docs/images/scoreboard-sprint-result.png" alt="The scoreboard's sprint result card" width="400"></a><br>The scoreboard briefly shows sprint results mid-race.</td>
 </tr>
 <tr>
-<td valign="top"><a href="docs/images/scoreboard-madison-two-teams.png"><img src="docs/images/scoreboard-madison-two-teams.png" alt="The scoreboard showing a two-team Madison's standings" width="400"></a><br>A Madison with two teams, one with a name of its own and one going by its color. The scoreboard's rows scale automatically.</td>
-<td valign="top"><a href="docs/images/scoreboard-points-five-riders.png"><img src="docs/images/scoreboard-points-five-riders.png" alt="The scoreboard showing a five-rider Points Race's standings" width="400"></a><br>A Points Race with five riders. Nine riders fill the page at the base size, and a larger field gets smaller rows.</td>
+<td valign="top"><a href="docs/images/scoreboard-madison-two-teams.png"><img src="docs/images/scoreboard-madison-two-teams.png" alt="The scoreboard showing a two-team Madison's standings" width="400"></a><br>A Madison with two teams; one custom and one by color. Row size scales automatically.</td>
+<td valign="top"><a href="docs/images/scoreboard-points-five-riders.png"><img src="docs/images/scoreboard-points-five-riders.png" alt="The scoreboard showing a five-rider Points Race's standings" width="400"></a><br>A Points Race scoreboard with five riders.</td>
 </tr>
 <tr>
 <td valign="top"><a href="docs/images/edit-riders.png"><img src="docs/images/edit-riders.png" alt="The Edit Riders window" width="400"></a><br>File > Edit Riders..., where the venue's riders are added, imported, and edited.</td>
 <td valign="top"><a href="docs/images/multi-race-standings.png"><img src="docs/images/multi-race-standings.png" alt="The Multi-Race Standings window showing a two-night Team Omnium" width="400"></a><br>File > Multi-Race Standings..., with the demo's two-night Team Omnium partway through.</td>
 </tr>
 <tr>
-<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>The first page of the results PDF for the demo's opening night, every race final.</td>
-<td valign="top"><a href="docs/images/program-pdf.png"><img src="docs/images/program-pdf.png" alt="The first page of a night's program PDF" width="400"></a><br>The first page of the program PDF for the demo's race night, as it's posted for the riders.</td>
+<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>First page of a final result's PDF.</td>
+<td valign="top"><a href="docs/images/program-pdf.png"><img src="docs/images/program-pdf.png" alt="The first page of a night's program PDF" width="400"></a><br>First page of a demo race program PDF.</td>
 </tr>
 </table>
 
-Every screenshot is rendered from MadTracker 1.0.0's demo event by `tools/doc_screenshots.py`, without the operating system's window frame.
+(Screenshots without the operating system's window frame.)
 
 <!-- screenshots:end -->
 
@@ -80,7 +80,7 @@ MadTracker also calculates standings over several races and nights:
 - Omnium by Place
 - Four-Race Omnium
 
-## What it doesn't score
+## Race types it doesn't score
 
 MadTracker doesn't currently score:
 
@@ -99,7 +99,7 @@ To look around before setting MadTracker up for a venue, use **Help** > **Demo D
 
 ## Help and documentation
 
-The scorer's help ships in the program and is also readable here:
+The scorer's help ships in the application and is also readable here:
 
 - [Getting Started](madtracker/help/getting-started.md)
 - [Scoring](madtracker/help/scoring.md)
@@ -107,7 +107,7 @@ The scorer's help ships in the program and is also readable here:
 - [Multi-Race Standings](madtracker/help/multi-race-standings.md)
 - [Backups](madtracker/help/backups.md)
 
-The pages below are for officials or developers who want to check a rule, and for anyone reading the data file or the code. They're detailed, technical, and mostly AI-written (yes, this is all AI-assisted development). The help above is the documentation written by a human, for people.
+The pages below are for officials or developers who want to check a rule, and for machines or individuals wanting to read the data file or work on the code. (Unlike this README and the in-app help, ***these*** are mostly AI written.)
 
 - [Scoring rules](docs/scoring-rules.md): the rule register, with the rulebook articles and the test that pins each rule.
 - [The data file](docs/data-file.md): the SQLite file, table by table, for reading it without the app.
@@ -141,6 +141,8 @@ The setup, test, and lint commands are in [Building](docs/building.md), along wi
 ## Credits
 
 MadTracker is developed by Steve Vigneau ([nuxx.net](https://nuxx.net)), with Claude Code, an AI coding tool.
+
+This would not have been possible without working in partnership with Glenn OConner, the current scoring wizard at Mad Track Arena. An additional thank-you to Kevin Morrison, whose feedback on scoring methodology guided and polished MadTracker getting it ready for release.
 
 It's built on these open-source components:
 
