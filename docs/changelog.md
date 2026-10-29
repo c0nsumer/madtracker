@@ -3,6 +3,10 @@
 What changed in each build, in the scorer's words. Newest first. Each
 entry names the version shown in About.
 
+## 1.1.0 (not yet released)
+
+- The cards stay put. A rider placed, clicked out, or marked keeps their card in the same spot, grayed, with the place in blue or the status (DNF, DNS, DQ, Withdrawn, Mishap) on it, until the result is complete. The other cards no longer shift when one is done, so a rider is where the scorer last saw them. A click on a grayed card records nothing and says why, and its ⋯ menu is the rider's row's.
+
 ## 1.0.0 (2026-Oct-28)
 
 The first public release. MadTracker scores track cycling races, shows the results on a scoreboard for the crowd, and exports PDF results and the USA Cycling results CSV.

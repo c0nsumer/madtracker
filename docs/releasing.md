@@ -53,4 +53,4 @@ Only on my explicit go.
 
 ## After 1.0.0
 
-Versions bump again with every change, as they did before. A later release is the checks above, a changelog entry, a tag, and the tag run; no squash, no private repo, no candidates unless something big changed. The builds stay unsigned until signing is decided (SignPath for Windows is the likely first step), so the SmartScreen and Gatekeeper sections of [Installing](installing.md) stay in.
+Versions bump again with every change, as they did before. A later release is the checks above, a changelog entry, a tag, and the tag run; no squash, no private repo, no candidates unless something big changed. A feature release (1.x.0) is that big change. It is built on a branch as candidates (1.1.0rc1, rc2, and so on, one bump per commit), hand-tested from the branch's builds, and merged to `main` with a merge commit on the maintainer's go. The commit that sets the version carries the changelog entry. The builds stay unsigned until signing is decided (SignPath for Windows is the likely first step), so the SmartScreen and Gatekeeper sections of [Installing](installing.md) stay in.
