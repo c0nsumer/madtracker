@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# Session plans, research scratch and checkout-specific notes stay local.
+.claude/
+CLAUDE.local.md
+# Live scoring databases and their backups are venue data, never source.
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+build/
+dist/
+.DS_Store
+Thumbs.db
+madtracker.egg-info/
+# The installer's pictures, drawn by the build from the app icon.
+packaging/wizard/
+# Everything that belongs to one facility and is not part of the product: its
+# wordmark, house ruleset, scorer's files (real names and licenses), research.
+local/
+.venv-build/

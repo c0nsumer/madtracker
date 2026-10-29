@@ -1,0 +1,57 @@
+# Project metadata and the Python floor. The app runs from a checkout or
+# from the PyInstaller bundle; it is not published to PyPI. Dependencies
+# are listed here so `pip install -e ".[dev]"` sets up a contributor in
+# one step, and pinned in requirements.txt for reproducible bundles.
+[project]
+name = "madtracker"
+version = "1.0.0"
+description = "Scoring software for track cycling racing: manual placing entry, audience scoreboard, USAC results"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "PySide6-Essentials>=6.8",
+    "fpdf2>=2.8.5",
+    "pillow>=10",
+    "uharfbuzz>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "ruff>=0.6",
+]
+# Running from a venv on macOS shows "Python" in the menu bar because the
+# process lives in the Python framework's bundle. PyObjC lets the app
+# rename itself there; a packaged .app will not need it.
+macos = [
+    "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+madtracker = "madtracker.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["madtracker*"]
+
+# Bundled venue logos travel with the package (and into the PyInstaller
+# bundle through the same declaration).
+[tool.setuptools.package-data]
+"madtracker.assets" = ["logos/*.png", "icons/*.png", "icons/*.svg", "icons/mdi/*.svg", "fonts/*.ttf", "fonts/LICENSE-*.txt", "licenses/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Qt tests run headless everywhere (Linux CI, the Windows box, a
+# developer's terminal). The offscreen platform plugin needs no display.
+# The input fuzzer's deep tier takes minutes; the everyday run leaves it
+# out, and `pytest -m fuzz` runs it (a later -m replaces this one).
+markers = ["fuzz: the input fuzzer's deep tier (minutes); run with -m fuzz before a release"]
+addopts = "-m 'not fuzz'"
+# A warning is a failure: a deprecated Qt or library call fails the suite
+# the day it is written, not with the upgrade that removes it. A warning
+# from a dependency that cannot be acted on gets its own ignore line here.
+filterwarnings = ["error"]

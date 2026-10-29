@@ -1,0 +1,24 @@
+# Ruff configuration. Standalone so lint settings stay orthogonal to the
+# packaging metadata in pyproject.toml. Run:
+#   ruff check madtracker/ tests/
+#   ruff format madtracker/ tests/
+
+# Match requires-python so pyupgrade (UP) applies 3.12 idioms.
+target-version = "py312"
+line-length = 100
+
+extend-exclude = [
+    ".venv",
+    ".claude",
+    "build",
+    "dist",
+    "temp_input",
+]
+
+[lint]
+# High-signal, low-noise: pyflakes errors, import sorting, safe
+# modernizations, common bug patterns. No docstring or quote-style nags.
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501", # line too long: long rule citations and f-strings are deliberate
+]

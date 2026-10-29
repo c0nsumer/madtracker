@@ -1,0 +1,299 @@
+# Scoring rules
+
+A night of track cycling produces a lot of small facts (who crossed first, who tied in sprint 3, who gained a lap), and turning them into a correct result is arithmetic that hand-kept club sheets get wrong. MadTracker does that arithmetic the way the USA Cycling Rulebook, version 8•25 (effective 2025-Aug-19), describes it, and cites the matching UCI article wherever the UCI rules say the same thing. To compute a result, each rule is written as an exact calculation with a test that checks it. Where the book leaves a case open, the program has to settle it one way, and [Where the program decides or departs](#where-the-program-decides-or-departs) records each of those readings. Its three club formats are scored the way the venue pages that describe them say, cited as "Club rule". MadTracker is not a USA Cycling product and is not endorsed by USA Cycling, and it claims no authority on the rules. The values were read from that edition and should be checked against the rulebook in force. It does not enforce rules: the officials decide what happened, the scorer records it, and the program computes the result.
+
+This page is the rule register, written for officials and developers. It describes what the scoring code (`madtracker/scoring/`) does, and `tests/test_rule_register.py` keeps it in step with the code. The scorer's explanation of each format is the help's [Scoring](../madtracker/help/scoring.md) page. The USAC articles were checked against the book's PDF; the track chapter's pages carry the 07•25 revision in their footers, because version 8•25 changed only the collegiate and records chapters; the research notes `docs/research/usac-track-formats.md` and `docs/research/uci-track-formats.md` quote the text. The page has three parts. The first states the rules as written, one table per format, so each rule can be checked against the book and against its test. The second says where the program decides something the book leaves open, or departs from it. The third covers how the program uses the rules: what the scorer enters, what a venue may change, and what comes out.
+
+## The rules as written
+
+Each table below has one row per rule:
+
+- Rule: a stable id (eg: R-TIE-1). It never changes meaning, so a test, a commit, or an audit can name it.
+- Articles: the USAC article first, then the matching UCI article as a cross-reference. "Club rule" or "none" names the source when no book has one. "(differs)" after a UCI article means the UCI text says something else (see "If you race under UCI").
+- What the rulebook says: the USAC rule, in one sentence.
+- Pinned by: the tests in `tests/scoring/` that fail if the engines stop following the rule, or "unpinned" if none exists yet.
+
+The register is checked by `tests/test_rule_register.py`. It fails if an id repeats, if a "Pinned by" name isn't a test, or if the scoring code cites an article that isn't in these tables.
+
+In this register "event" means the program's event, one date of racing (design section 3). The rulebook's Glossary uses the word for every race under one permit, which for a weekly series is the whole season.
+
+## Placings and ties
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-TIE-1 | USAC 1M6(a), USAC 1M4(b), USAC 2M2(f)(i) | A group the judges can't separate gets an equal placing. A tie uses as many places as riders: in a finish, 1M4(b) adds the prizes for those places; in a sprint, 2M2(f)(i) says there is no second place after a tie for first. So two riders tied for second are followed by fourth (1, 2, 2, 4). | `test_group_the_judges_cannot_separate_shares_a_rank`, `test_final_sprint_dead_heat_shares_first`, `test_tie_on_points_and_final_place_shares_rank` |
+| R-TIE-2 | USAC 1M4(b) | In a race placed by the order across the line, a dead heat for first is re-ridden, and the re-ride decides the place. | `test_dead_heat_for_first_is_a_shared_first_until_re_ridden`, `test_final_sprint_dead_heat_shares_first` |
+| R-TIE-3 | USAC 2M2(f)(i), USAC 1K1(d), USAC 2B11; UCI 3.2.118 | A dead heat for first in a points sprint, the final sprint included, awards both riders first place's points and there is no second place. The sprint rule is the specific one, so it takes precedence over the re-ride of 1M4(b) (1K1(d); 2B11 says a discipline's rule may preclude a general one): riders level on points after it share first, and no re-ride is entered. | `test_a_final_sprint_dead_heat_for_first_awards_both_first_place_points_and_shares_first` |
+
+## Non-finishers
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-NF-1 | USAC 1M6(b); UCI 3.3.012 | A rider who doesn't take the start line is DNS and gets no place. A rider with a place, a lap, or a bell recorded took the start, so DNS is refused for them; it stays open for a rider with nothing recorded, however far the race has gone. A DNS rider never started, so a later DNF is refused for them (a wrong DNS is undone); only a DQ may follow it. | `test_dns_is_never_ranked`, `test_non_finishers_follow_the_finishers`, `test_dns_is_refused_once_the_rider_has_a_result`, `test_dnf_is_refused_on_a_rider_who_never_started`, `test_dnf_after_dns_is_refused_so_a_no_show_never_takes_a_place`, `test_dns_is_taken_while_the_rider_has_nothing_recorded_and_refused_after`, `test_a_no_show_found_after_riders_are_out_is_dns_and_the_places_close_up`, `test_dns_is_taken_after_a_lap_is_decided_for_a_rider_with_no_lap` |
+| R-NF-2 | USAC 1M6(c), USAC 1M6(d), USAC 2C4, USAC 2M8(a); UCI 3.3.012 (differs) | A rider who withdraws by choice, stops for a mishap, or is pulled by the officials is DNF (1M6) and is "not placed" (2C4, 2M8(a)). | `test_non_finishers_follow_the_finishers`, `test_dnf_keeps_points_and_ranks_after_all_finishers_as_a_group`, `test_dnf_on_fifteen_points_ranks_behind_a_finisher_on_zero`, `test_madison_team_dnf_keeps_its_points_in_the_dnf_group` |
+| R-NF-3 | USAC 1M6(d) | The Chief Referee may instead have pulled riders placed, by their positions when withdrawn. The scorer marks each rider Withdrawn as they are pulled: they rank after every finisher, the latest withdrawn highest, with a numbered place and their points and laps as figures, and nothing entered after the mark places them. In a race placed at the line, naming them at the end of the finish order (Place Last, the earliest pulled first) gives the same places. | `test_withdrawn_riders_follow_the_finishers_by_the_moment_whatever_their_laps`, `test_a_withdrawn_rider_a_lap_down_keeps_the_rank_under_the_uci_lapped_switch`, `test_withdrawn_riders_rank_after_every_finisher_by_the_moment_latest_highest`, `test_madison_team_withdrawn_is_placed_by_the_moment_with_its_points_as_figures`, `test_pulled_riders_named_last_take_the_places_after_the_finishers` |
+| R-NF-4 | USAC glossary (Disqualification), USAC 1K2(a); UCI 3.3.012 A | A disqualified rider (DQ; UCI writes DSQ) is not placed, and the riders behind move up a rank. The sprint points the rider took stay as scored: no sprint place moves up and no points pass to the next rider, unless the officials correct the sprint. | `test_dq_after_the_finish_moves_everyone_up_and_passes_no_points_on`, `test_non_finishers_follow_the_finishers`, `test_statused_lap_winner_vacates_the_place_and_the_rest_move_up` |
+| R-NF-5 | USAC 1N9, USAC 1K2(c), USAC 1P1(a), USAC 1P1(b) | A disqualification can come before, during, or after a race (1N9), after prizes are collected (1K2(c)), and on a results protest up to 30 days after the results are posted (1P1(b)(i)), so the program takes a DQ at any point, and a race marked Final reopens for one. | `test_dq_after_the_finish_moves_everyone_up_and_passes_no_points_on`, `test_lapped_gained_and_dq_after_the_line_under_both_switches` |
+
+## Laps
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-LAP-1 | USAC 2M2(f)(ii), USAC 2M2(f)(iii), USAC 2M5(a); UCI 3.2.118 | In the Points Race, Madison, and Tempo Race, a lap gained is +20 points and a lap lost is -20, a total can go negative, and a lap is points only, never a sort key (so a rider a lap down can win, and a lapped rider still wins sprint points, 2M5(a)). | `test_rulebook_presets_use_twenty_per_lap`, `test_laps_are_points_only_never_a_sort_key`, `test_gain_then_lose_a_lap_nets_zero`, `test_negative_totals_order_below_zero` |
+| R-LAP-2 | USAC 2C4, USAC 2C5 (Finish); UCI 3.2.178 | In a Scratch Race, riders sort by net laps, most first, then by the finish. | `test_laps_gained_sort_ahead_of_finish_order`, `test_lapped_gained_and_dq_after_the_line_under_both_switches` |
+| R-LAP-3 | USAC 2E3(g); UCI 3.2.225 | In an Elimination, laps gained or lost don't count. | `test_lap_gains_do_not_count` |
+| R-LAP-4 | USAC 8D5(b), USAC 8D5(c), USAC 2N3(e) | The officials may rule a lap gained not to count ("loss of ... laps illegally gained"; a wireless Madison relay; a relay without a touch). The program takes back one lap gained and its points, in any format where laps count, as a ruling the scorer enters, and keeps Lost a Lap as the separate event it is. | `test_a_lap_not_counted_takes_back_the_lap_and_its_points`, `test_a_lap_not_counted_with_no_lap_to_cancel_is_refused`, `test_a_lap_not_counted_is_allowed_after_the_finish_order`, `test_a_lap_not_counted_drops_the_lap_from_the_ranking`, `test_rulings_replay_through_the_format_dispatch` |
+
+## Scratch Race
+
+The chase is the Scratch Race ([USAC 2C](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf); UCI 3.2.173 to UCI 3.2.183). The Handicap ([USAC 2D](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf)), the Keirin Final ([USAC 2H](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf)) and the Sprint Final ([USAC 2F](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf)) are placed the same way. So are two club formats: the Chariot, described by [Dick Lane Velodrome](https://dicklanevelodrome.com/types-of-events/) and [Northbrook](https://www.northbrookcyclecommittee.org/race-format-descriptions), and the Unknown Distance, described by [Northbrook](https://www.northbrookcyclecommittee.org/race-format-descriptions), [San Diego Velodrome](https://www.sdvelodrome.com/_files/ugd/3f8e7c_f931699825aa46e89151c421f55fbc87.pdf) and [Dick Lane Velodrome](https://dicklanevelodrome.com/types-of-events/).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-CHASE-1 | USAC 1M6(a) | The judges place as many riders as they can in the order they cross the line, and the riders they don't place share the next place after the placed riders on their lap. | `test_riders_left_out_of_the_finish_order_share_the_next_rank`, `test_night98_group_b_scratch`, `test_night98_group_a_scratch`, `test_placings_engine_matches_the_paper_sheet` |
+| R-CHASE-2 | USAC 2C4; UCI 3.2.177 (differs) | A lapped rider who stays in the race is placed by laps down, then by the finish. | `test_usac_lapped_rider_who_stays_is_placed_by_laps_down`, `test_uci_lapped_rider_ranks_with_the_withdrawn`, `test_lapped_gained_and_dq_after_the_line_under_both_switches` |
+| R-CHASE-3 | USAC 2C5(b); UCI 3.2.182 (differs) | A rider who can't return to the race before the last kilometer starts "will not appear in the final placings". | `test_out_of_finish_is_not_scored_in_a_placings_race` |
+| R-CHASE-4 | USAC 2D5 | A Handicap "shall be run as a scratch race", so it's placed the same way. | `test_handicap_is_placed_as_a_scratch_race` |
+| R-CHASE-5 | none (the line only) | The Chariot, Keirin Final, and Sprint Final are placed by the order across the line, and nobody gains a lap. | `test_chariot_ignores_laps` |
+
+## Elimination
+
+The Elimination is [USAC 2E](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf), with UCI 3.2.218 to UCI 3.2.226 as the cross-reference. USAC 2E5 Miss-and-Out is the same race by its other name, ridden to the last rider or to a set number of survivors, and the format list offers it as "Elimination (USAC 2E)". A venue that calls it the miss-and-out names it so in its ruleset (Shown as).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-ELIM-1 | USAC 2E1, USAC 2E3(d)(ii); UCI 3.2.218 | The last rider across the line in each sprint is eliminated, or another rider the officials name instead (2E3(d)(ii)); the scorer clicks whoever is called. | `test_eliminated_riders_placed_in_reverse_order`, `test_night98_group_b_elimination`, `test_night98_group_a_elimination`, `test_elimination_engine_matches_the_paper_sheet` |
+| R-ELIM-2 | USAC 2E3(e); UCI 3.2.223bis | Riders are placed in reverse order of elimination, so the first rider out is placed last. | `test_eliminated_riders_placed_in_reverse_order`, `test_mid_race_ranks_count_down_from_the_field` |
+| R-ELIM-3 | USAC 2E3(d)(i), USAC 2E3(d)(iii); UCI 3.2.223 | A sprint can eliminate several riders (when the officials put several out together) or none (a green flag), and neither book gives an order between riders out together (older USAC text placed them "equally", USAC20 2E5). | `test_several_out_at_one_sprint_share_a_place`, `test_green_flag_eliminates_nobody` |
+| R-ELIM-4 | USAC 2E3(f); UCI 3.2.224 | The last two riders ride a final sprint, and it places them. | `test_survivors_placed_by_final_sprint`, `test_final_sprint_dead_heat_shares_first`, `test_rulebook_placings_elimination_and_win_and_out` |
+| R-ELIM-5 | USAC 2E5 | A miss-and-out is run under the Elimination rules but may be ridden to the last rider or to a set number of survivors, and in the latter case a sprint judged on front wheels may place them. | `test_miss_and_out_to_three_survivors` |
+| R-ELIM-6 | USAC 2E3(d)(i); UCI 3.2.223 | A rider who abandons between sprints is one of "the riders eliminated in the next sprint": eliminated, and so placed, not left unplaced as a DNF. | `test_dnf_rider_is_out_at_that_moment_and_placed`, `test_two_out_at_one_bell_share_and_a_dnf_after_them_is_the_next_out`, `test_dnf_after_the_last_sprint_ranks_right_behind_the_survivors` |
+| R-ELIM-7 | USAC 2E4(a)(ii), USAC 2E4(d); UCI 3.2.226 | A rider who can't rejoin after a mishap is eliminated at that moment. Once four or fewer riders remain there is no neutralization, and a rider who doesn't finish is eliminated at that moment too. | `test_dnf_with_four_or_fewer_left_is_out_at_that_moment`, `test_dnf_rider_is_out_at_that_moment_and_placed` |
+| R-ELIM-8 | USAC 1M6; UCI 3.2.223 | An eliminated rider who stays on the track may be disqualified, and a DQ is not placed. | `test_status_on_a_rider_already_out_gives_one_row`, `test_a_later_status_takes_the_place_a_dnf_gave_back` |
+
+**Worked example.** Six riders: Avery (bib 3), Blake (7), Casey (12), Dana (21), Emery (30), Finn (44).
+
+1. Bell 1: Finn goes out.
+2. Between bells, Dana crashes and can't continue. The scorer clicks Dana out, and Dana is out at that moment (R-ELIM-7); a crash is a mishap, so bell 2 still eliminates its last rider. A rider who is lapped or quits between bells is instead the rider the next bell eliminates (2E3(d)(i)), and that bell puts nobody else out.
+3. Bell 2: Emery goes out.
+4. Bell 3: Casey goes out.
+5. Final sprint: Blake beats Avery.
+
+Result: 1 Blake, 2 Avery, 3 Casey, 4 Emery, 5 Dana, 6 Finn. The sheet prints Dana's place as 5 with "Did not finish" beside the name. The USAC CSV gives Dana place 5. The scoreboard drops Dana from the elimination page and lists 5th on the result page without the words. The Elimination placed Dana, and the DNF code would leave a hole at 5th.
+
+## Points Race
+
+Riders score in sprints and by gaining laps ([USAC 2M](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf); UCI 3.2.114 to UCI 3.2.133). Laps are R-LAP-1.
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-POINTS-1 | USAC 2M2(f); UCI 3.2.118 | Intermediate sprints award 5, 3, 2, 1, and the last sprint after the full distance scores double points, 10, 6, 4, 2. | `test_the_final_sprint_is_the_one_numbered_sprint_count`, `test_rulebook_presets_use_twenty_per_lap`, `test_one_rider_field_ranks_first`, `test_sprint_points_engine_matches_the_paper_sheet`, `test_night98_group_b_six_mile_points` |
+| R-POINTS-2 | USAC 2M2(f)(i); UCI 3.2.118 | Riders tied in a sprint share the place and its points, and the next place is skipped: two tied for first both score 5 and nobody scores 3. | `test_sprint_tie_shares_place_and_skips_next`, `test_tie_for_second_awards_three_to_both_and_one_to_the_next` |
+| R-POINTS-3 | USAC 2M3(d); UCI 3.2.125 | A lap gained at a sprint scores both the lap and the sprint. | `test_lap_gained_at_a_sprint_adds_both`, `test_lap_gained_in_the_final_sprint_scores_both_then_laps_close` |
+| R-POINTS-4 | USAC 2M2(g), USAC 2M8(b); UCI 3.2.119 | Riders level on points are separated by their places in the final sprint, and the book goes no further. | `test_tie_broken_by_full_final_order_beyond_scoring_places`, `test_last_sprint_result_alone_does_not_complete_the_race`, `test_level_on_points_and_both_missing_from_the_finish_share_the_rank`, `test_tie_on_points_and_final_place_shares_rank` |
+| R-POINTS-5 | USAC 2M7(b), USAC 2M8(a); UCI 3.2.020bis | A rider whose free laps run into the last kilometer can't return, keeps the points and laps earned before the mishap, and is placed on them among the finishers. | `test_neutralized_into_last_kilometer_keeps_points_and_is_ranked`, `test_out_of_finish_ranks_on_points_and_laps_held_before_the_mishap`, `test_out_of_finish_with_a_lap_keeps_the_lap_points`, `test_out_of_finish_rider_may_be_disqualified_but_not_marked_dns_or_dnf` |
+| R-POINTS-6 | USAC 2M7(a), USAC 2M7(b) | Free laps for a mishap run up to about 1250 m, and a rider may not return to the track within the last kilometer. The program takes Out of the finish only once every sprint but the last is recorded, and the finish order then leaves the rider out. | `test_out_of_finish_is_taken_only_during_the_final_sprint`, `test_out_of_finish_leaves_the_rider_out_of_the_field_the_finish_must_name` |
+| R-POINTS-8 | USAC 2M6; UCI 3.2.133 | A Points Race stopped after 80 percent of its distance is not restarted: the results stand on the sprints ridden. No sprint doubles and there is no final-sprint place, so riders level on points share the rank (R-TIE-1). The scorer records it with End Race Now, Result As-Is; a sprint, a lap, or a DNF after it is refused, and a DQ or a penalty still applies. | `test_a_race_ended_after_eighty_percent_stands_on_the_sprints_ridden`, `test_a_race_ended_takes_no_more_scoring_entries_but_rulings_still_apply`, `test_ending_a_race_needs_a_sprint_and_not_a_finish` |
+| R-POINTS-7 | USAC 8D5(b) | The officials may take points away ("loss of points"; the glossary's relegation is "a loss of position, points or time, depending on the type of race"). The program records the number the officials name as a penalty off the total, in the Points Race, Madison, and Tempo Race, at any time before the result is final; a DNS, DQ, or DNP rider has no total to touch. Nothing in the book adds points, so the program offers no award. | `test_a_points_penalty_comes_off_the_total_and_ranks_by_it`, `test_a_penalty_is_taken_after_the_finish_order_and_the_race_stays_complete`, `test_a_tie_on_total_after_a_penalty_still_breaks_by_the_final_sprint`, `test_a_penalty_on_a_dns_or_dq_rider_is_refused_and_on_a_dnf_rider_stands`, `test_points_rulings_and_laps_where_they_do_not_count_are_refused` |
+| R-POINTS-9 | USAC 1G4(b), USAC 2M2(f), USAC 2M2(g) | The Chief Referee may shorten any race. A shortened Points Race rides on to a new, earlier finish, and the last sprint under the new count is the final sprint: it scores double points with the finish order and breaks a tie on points. The scorer records it with Shorten Race; a second shortening lowers the count again. The new count must stay above every sprint recorded and below the count in force, and the call is refused once the finish is in or the race has ended. | `test_a_shortened_race_doubles_its_new_last_sprint_with_the_finish`, `test_a_shortened_race_breaks_a_tie_on_its_new_final_sprint`, `test_a_second_shortening_lowers_the_count_again`, `test_a_shortened_race_takes_its_finish_once_the_sprints_before_the_new_final_are_in`, `test_shortening_is_below_the_count_and_above_every_sprint_ridden`, `test_shortening_is_refused_once_the_finish_is_in_or_the_race_ended`, `test_a_shortened_race_may_still_end_with_its_results_standing` |
+
+**Worked example.** Three sprints, USAC 2025 values, five riders:
+
+| | Sprint 1 | Sprint 2 | Final (doubled) | Laps | Total |
+|---|---|---|---|---|---|
+| Avery (3) | 5 (1st) | 2 (3rd) | 6 (2nd) | | 13 |
+| Blake (7) | 3 (2nd) | | 10 (1st) | | 13 |
+| Casey (12) | 2 (3rd) | 5 (1st, tied) | 2 (4th) | | 9 |
+| Dana (21) | 1 (4th) | 5 (1st, tied) | 0 (5th) | | 6 |
+| Emery (30) | | 1 (4th) | 4 (3rd) | +20 | 25 |
+
+1. In sprint 2, Casey and Dana tie for first and both take 5. Second is skipped, so Avery in third takes 2 (R-POINTS-2).
+2. Emery gains a lap at sprint 2: +20 on top of the sprint point (R-POINTS-3).
+3. Avery and Blake are level on 13. Blake beat Avery in the final sprint, so Blake ranks ahead (R-POINTS-4). (Dana's fifth in the final scores nothing but would count the same way.)
+
+Result: 1 Emery (25), 2 Blake, 3 Avery, 4 Casey, 5 Dana. Emery won with the fewest sprint points in the field, because the lap is worth 20 points and that's all it is.
+
+## Madison
+
+The Madison is a Points Race for teams of two ([USAC 2N1](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf); UCI 3.2.156).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-MAD-1 | USAC 2N1, USAC 2N2(g), USAC 2N2(g)(i); UCI 3.2.156, UCI 3.2.161 | A team of two scores as one rider would in a Points Race: the same sprint tables, the same doubled last sprint, and the same shared places on a sprint tie. | `test_madison_scores_teams_the_same_way`, `test_night98_group_a_eight_mile_madison`, `test_dec_2025_pro_100_lap_madison_stars_and_stripes` |
+| R-MAD-2 | USAC 2N2(g)(iv), USAC 2N2(g)(v); UCI 3.2.162 | A team scores +20 for a lap gained and -20 for a lap lost. | `test_madison_scores_teams_the_same_way`, `test_rulebook_presets_use_twenty_per_lap` |
+| R-MAD-3 | USAC 2N3(h); UCI 3.2.167 | A lap gained at a sprint scores both the lap and the sprint. | `test_madison_lap_gained_at_a_sprint_scores_the_lap_and_the_sprint` |
+| R-MAD-4 | USAC 2N2(h); UCI 3.2.162 | Teams level on points are separated by their places in the final sprint. | `test_madison_teams_level_on_points_split_by_the_final_sprint` |
+| R-MAD-5 | USAC 2N1; UCI 3.2.156 | Both riders of a team share the team's place. | `test_madison_scores_teams_the_same_way`, `test_madison_team_dnf_keeps_its_points_in_the_dnf_group` |
+| R-MAD-7 | USAC 2N5; UCI 3.2.183 | A Madison stopped after 80 percent stands on the sprints ridden, as a Points Race does (R-POINTS-8). | `test_results_stand_is_a_points_race_or_madison_entry_only` |
+| R-MAD-6 | USAC 2N6(c), USAC 2N7(a) | A team taking free laps may not return in the final kilometer, and is placed on the laps and points held at the mishap. | `test_madison_team_out_of_finish_keeps_its_points` |
+| R-MAD-8 | USAC 1G4(b), USAC 2N2(g) | A shortened Madison rides on to its new final sprint, doubled, as a shortened Points Race does (R-POINTS-9). | `test_shorten_race_is_a_sprint_points_entry_only` |
+
+## Tempo Race
+
+The Tempo Race is a Points Race variant ([USAC 2P](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf); UCI 3.2.259 to UCI 3.2.265).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-TEMPO-1 | USAC 2P2(b); UCI 3.2.261 | After the first four laps, every lap is a sprint. | `test_tempo_every_lap_after_the_first_four_is_a_one_point_sprint` |
+| R-TEMPO-2 | USAC 2P2(c); UCI 3.2.262 | Each sprint awards 1 point to the first rider, and the final sprint is 1 point too, with no double points. A dead heat for the sprint awards both riders the 1 point (R-POINTS-2). | `test_tempo_one_point_per_sprint_final_not_doubled`, `test_tempo_scores_one_point_per_sprint_final_not_doubled`, `test_a_tempo_dead_heat_awards_both_riders_the_one_point` |
+| R-TEMPO-3 | USAC 2P2(d), USAC 2P2(e); UCI 3.2.260, UCI 3.2.125 | A lap gained is +20 and a lap lost is -20, and a lap gained at a sprint scores both. | `test_tempo_lap_gained_on_the_last_lap_scores_twenty_one` |
+| R-TEMPO-4 | USAC 2P2(a), USAC 2M2(g); UCI 3.2.260, UCI 3.2.119 | The Points Race rules apply, so riders level on points are separated by the final sprint. | `test_tempo_tie_broken_by_the_last_sprint_order` |
+| R-TEMPO-5 | USAC 2P3 | Outside an omnium, a promoter may announce local variations; inside one, the race follows USAC 2P1 and USAC 2P2 exactly. | `test_tempo_rulebook_points_are_exact_and_an_announced_variation_scores_as_set` |
+| R-TEMPO-7 | USAC 2P5 | A stopped Tempo Race restarts with the points accumulated and the laps remaining adjusted, or is completely rerun when it cannot restart in the same session; there is no results-stand table, so End Race Now, Result As-Is is refused in a Tempo Race. | `test_results_stand_is_a_points_race_or_madison_entry_only` |
+| R-TEMPO-6 | USAC 2P2(a), USAC 2M7(b), USAC 2M8(a) | The Points Race rules apply, so a rider kept out of the finish by a mishap is placed on the sprints won. | `test_tempo_rider_out_of_finish_keeps_the_sprints_won` |
+| R-TEMPO-8 | USAC 1G4(b), USAC 2P2(c) | A shortened Tempo Race rides fewer sprints to its finish, and the last of them is worth 1 point, as every Tempo sprint is. Shorten Race is a Points Race, Madison, and Tempo Race entry only: the other formats carry no sprint count, so a shortened one is entered as it is ridden. | `test_a_shortened_tempo_race_finishes_sooner_and_keeps_its_points`, `test_shorten_race_is_a_sprint_points_entry_only` |
+
+## Win-and-Out
+
+The Win-and-Out has no article in either book. It's a club format, offered because named venues run it: the race programs of [San Diego Velodrome](https://www.sdvelodrome.com/_files/ugd/3f8e7c_f931699825aa46e89151c421f55fbc87.pdf), [Northbrook](https://www.northbrookcyclecommittee.org/race-format-descriptions) and [Dick Lane Velodrome](https://www.dicklanevelodrome.com/wp/wp-content/uploads/2019/08/19VeloCupPRSProgram_4pgs.pdf) describe it, as does [Burnaby](https://cbtl.ca/race-descriptions/) in Canada (notes in `docs/research/usac-track-formats.md`, "Win-and-out family"). "What the rulebook says" here means what those club rules say.
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-WIN-1 | club rule (Win-and-out family) | After the bell, the first rider across the line on each place lap takes a place and leaves the race. | `test_forward_lap_winners_take_places_in_order`, `test_mid_race_shows_decided_places_and_who_is_still_in`, `test_win_and_out_engine_matches_the_paper_sheet` |
+| R-WIN-2 | club rule (Danish) | Forward: each bell decides the next open place from the top, so the winner of lap k takes place k unless an earlier bell was a dead heat. | `test_forward_lap_winners_take_places_in_order`, `test_rulebook_placings_elimination_and_win_and_out` |
+| R-WIN-3 | club rule (Belgian) | Reverse: each bell decides the next open place from the bottom, so the winner of lap k takes place N + 1 - k unless an earlier bell was a dead heat, and the last lap decides first. | `test_reverse_belgian_fills_from_the_bottom_place_up`, `test_win_and_out_provisional_standings_match_the_paper_sheet` |
+| R-WIN-4 | club rule (Win-and-out family) | Riders still in fill the open places in the order they finish, and if the race is shortened the fill starts at the first place no lap decided. | `test_race_shortened_fills_open_places_from_the_line` |
+| R-WIN-5 | USAC 1M6(a) | Riders tied at the line share the place, and the next place is skipped. | `test_tie_in_the_finish_fill_shares_the_place_and_skips_the_next`, `test_tied_fill_pushes_the_dnf_group_past_the_skipped_place` |
+
+**Worked example.** Reverse, three places, six riders. Casey wins lap 1 (3rd), Finn lap 2 (2nd), Avery lap 3 (1st). Dana, Blake, and Emery cross the line in that order and fill 4th to 6th.
+
+## Team Omnium
+
+The `aggregate` engine scores a club team omnium over several Madisons: each team's Madison totals are summed, as one venue's own sheet does across a weekend. The rulebook has no article for it; USAC leaves such schemes to the race announcement (USAC glossary "OMNIUM", USAC 2B19(e)). The program offers four multi-race standings kinds (File > Multi-Race Standings..., design section 8a). Two are over the Madisons of the events the scorer ticks: the Team Omnium by Points sums the Madison totals as above, and the Team Omnium by Place sums points for each team's place in each Madison (R-TEAM-5). Two are for riders (the next section).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-TEAM-1 | club rule (one venue's sheet) | A team's total is the sum of its Madison totals over the races given, and a team missing from a Madison scores 0 there. | `test_team_omnium_sums_madison_totals`, `test_absent_and_non_finisher_points_are_configurable` |
+| R-TEAM-2 | club rule; UCI 3.3.012 A | A team that DNFs a Madison keeps the points it scored there, and they count toward its total. | `test_team_omnium_dnf_keeps_its_madison_points` |
+| R-TEAM-3 | USAC 2B19(e) | A tie on the total goes to most race wins, then most seconds, and so on, then the better place in the last race (or the nearest race where one of them placed). | `test_tie_broken_by_most_firsts_then_last_race`, `test_tie_break_skips_races_where_neither_placed`, `test_team_omnium_tie_level_in_the_last_race_shares_the_rank`, `test_identical_records_share_the_rank` |
+| R-TEAM-4 | club rule (the venue's VIII Anniversary sheet) | A team that rode fewer than every counting Madison of its group is left out of the standings table; a team that started and did not finish rode, and one marked DNS did not. | `test_a_team_that_rode_one_night_of_two_is_left_out`, `test_a_team_that_did_not_start_did_not_ride_and_is_left_out` |
+| R-TEAM-5 | USAC 2B19(e), USAC glossary "OMNIUM" | Omnium scoring gives points for each place in each race toward an overall standing, with the scheme set in the race announcement. The Team Omnium by Place gives each team points for its place in each Madison from a table, 7-5-3-2-1 unless the scorer sets another (the older rulebook's table, USAC16 2O1), and a place past the end of the table scores 0; the points are summed and ties go as R-TEAM-3. | `test_golden_team_omnium_by_place_ties_on_most_firsts_then_the_last_race`, `test_a_stored_place_table_sits_over_the_default` |
+
+## Rider omnium
+
+The rider kinds of multi-race standings sit over the aggregate engine as the team kinds do, over races of the ticked events whose entrants are riders: every such race for the Omnium by Place, its four formats for the Four-Race Omnium. The Omnium by Place is the club scheme the survey in `docs/research/omnium-practices.md` found everywhere (a short place table, summed, everything counts): a place table and the USAC 2B19(e) tie-break. The Four-Race Omnium is USAC 2O3 as the rows R-OMNI-1 to R-OMNI-5 below have it, with the program's checks around it.
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-RIDER-1 | USAC 2B19(e), USAC glossary "OMNIUM"; club practice (the survey's San Diego, T-Town, JBMV, and NSW pages) | The Omnium by Place gives each rider points for their place in each counting race from the Team Omnium by Place's table, 7-5-3-2-1 unless the scorer sets another, summed, with ties as R-TEAM-3. | `test_omnium_by_place_sums_each_riders_place_points_over_the_nights`, `test_the_place_table_is_the_scorers_for_omnium_by_place_and_the_rulebooks_for_four_race` |
+| R-RIDER-2 | USAC glossary "OMNIUM" ("Riders do not have to participate in each event of the omnium unless specified"); USAC 2E3(d)(i), 2E4 | Every rider who rode any counting race is in the table, with nothing for a race not ridden: there is no minimum. A DNF or DQ rode and scores nothing for that race, unless the race placed the rider (an Elimination puts a DNF out at that moment with the next place, R-ELIM-7), in which case that place scores; a DNS did not ride. A running race is a column once it ranks every rider still in it. | `test_a_rider_who_rode_one_night_stays_in_with_nothing_for_the_other`, `test_a_dns_rider_did_not_ride_and_a_dnf_rider_scores_nothing_and_stays`, `test_an_elimination_dnf_scores_the_place_the_race_sheet_prints`, `test_a_place_the_race_gave_a_dnf_rider_scores_from_the_table`, `test_a_running_race_is_no_column_in_a_place_kind_until_it_has_placed_everyone` |
+| R-RIDER-3 | club practice (Dick Lane 2021: "The Madison is not part of the omnium") | A Madison never counts in a rider omnium, and no race but the Madison counts in a team omnium. | `test_a_madison_never_counts_in_a_rider_omnium` |
+| R-RIDER-4 | USAC 2O1, USAC 2O3; UCI 3.2.247 | The Four-Race Omnium is one Scratch Race, one Tempo Race, one Elimination, and one Points Race per event and group, scored in that order with the Points Race last; a ticked set short of a format or with one doubled, or a ticked event with none of the four, is refused, never guessed. | `test_four_race_omnium_scores_the_rulebook_table_and_adds_the_points_race`, `test_four_race_omnium_refuses_a_program_short_of_a_format_or_with_one_doubled`, `test_four_race_refuses_a_ticked_event_with_none_of_its_four`, `test_four_race_omnium_lists_a_rider_out_of_any_race_as_dnf_after_every_finisher`, `test_the_four_race_table_is_the_rulebooks_whatever_the_stored_values` |
+
+## International omnium and place tables
+
+The international omnium is four races on one day (USAC 2O1 to USAC 2O3; UCI 3.2.247 to UCI 3.2.252). USAC also defines omnium scoring in general as points per place over a set of races (USAC 2B19(e)). The program offers it as the Four-Race Omnium kind of multi-race standings (R-RIDER-4).
+
+| Rule | Articles | What the rulebook says | Pinned by |
+|---|---|---|---|
+| R-OMNI-1 | USAC 2O3(a), USAC 2O3(a)(i); UCI 3.2.250 | The first three races award 40, 38, 36 and so on down by 2 for places 1 to 20, then 1 point from 21st down. | `test_uci_omnium_table`, `test_uci_omnium_table_and_points_race_carried_in` |
+| R-OMNI-2 | USAC 2O3(b); UCI 3.2.251 | Riders carry those totals into the Points Race, where sprint points and laps add to or subtract from them. | `test_uci_omnium_table_and_points_race_carried_in` |
+| R-OMNI-3 | USAC 2O3(g); UCI 3.2.252 | A tie on the total goes to the final sprint of the Points Race. | `test_uci_omnium_tie_broken_by_final_sprint_of_points_race` |
+| R-OMNI-4 | USAC 2O2(c), USAC 2O3(d); UCI 3.2.251bis (differs) | A rider who fails to start a race or abandons any race is out of the omnium and placed after every finisher as DNF. A mishap is not an abandon: a rider kept out of a Points Race finish by one is placed on the points held (Out of the finish, R-POINTS-5), and a rider who crashes out of an Elimination is clicked out and placed (R-ELIM-7); both stay in the omnium. Only a DNF, a DNS, or a DQ puts a rider out. | `test_uci_omnium_abandon_is_out_and_listed_dnf_after_every_finisher`, `test_a_rider_out_of_the_points_race_finish_by_a_mishap_stays_in_the_four_race_omnium` |
+| R-OMNI-5 | USAC 2O3(e); UCI 3.2.251bis | In the Scratch Race and Tempo Race, a rider who loses two laps is withdrawn, gets "the next available rank determined by the number of riders remaining on the track at this moment", and loses 40 omnium points; a rider not withdrawn "will be classified as though they had been at the point at which they lost their second lap". The scorer marks the rider Withdrawn at that moment, pulled or not: the rider ranks after every finisher, a later withdrawal above an earlier one, keeps the points as figures, and stays in the omnium with the place points of that rank. The 40 is an Omnium Penalty on the standings; it comes off the total before ranking and no race's result changes. | `test_withdrawn_riders_rank_after_every_finisher_by_the_moment_latest_highest`, `test_a_withdrawn_rider_holds_the_rank_from_the_moment_on_before_the_finish`, `test_a_withdrawn_rider_is_placed_by_the_race_and_stays_in_the_four_race_omnium`, `test_an_omnium_penalty_comes_off_the_total_before_ranking`, `test_two_laps_down_is_an_omnium_penalty_off_the_total_and_the_points_race_stands` |
+| R-OMNI-6 | USAC 2B19(e), USAC glossary "OMNIUM" | Omnium scoring gives points for each place in each race toward an overall standing, with the scheme set in the race announcement. | `test_place_table_scores_each_rank`, `test_multipliers_weight_races`, `test_absent_and_non_finisher_points_are_configurable` |
+| R-OMNI-8 | USAC 2O4 | When the Points Race is run under 80 percent and can't restart, or the track is impracticable after the Elimination and before the Points Race, the standings after the Elimination are the final classification; impracticable before the Elimination is complete, there is no classification. The scorer leaves the Points Race out of the standings (unticked), and the three races stand, final once each is; the other three races can't be left out, and a program with no Points Race at all is still refused. With no final sprint a tie on the total shares the place (1M6(a)). | `test_four_race_omnium_stands_on_three_races_when_the_points_race_is_left_out`, `test_a_three_race_omnium_tie_shares_the_place` |
+| R-OMNI-7 | USAC 7C3(d), USAC 7C3(f), USAC 7C3(g) | The junior omnium awards 1 point for 1st, 2 for 2nd and so on, the lowest total wins, and ties go to most firsts, then most seconds, then the best place in Race IV. | `test_low_points_direction` |
+
+## Where the program decides or departs
+
+The book is silent in a few places, and in a few the program does something else on purpose:
+
+- **R-NF-2, where a DNF ranks.** USAC 1M6(d) enters a non-finisher as DNF, and the format articles say a DNF is "not placed" (2C4, 2M8(a)); neither says where a DNF stands against the others. The program ranks them as one group sharing the rank right after the last finisher, keeping any points they had, which is the UCI 3.3.012 A grouping (group 2). That costs nothing, because the PDF and the CSV print the code instead of the rank whenever a rider has one. After the DNF group come DNP, DQ, and DNS, unranked, in that order.
+- **The announced time.** The sheet's gray line prints the time the result was first announced (1M7 starts the protest clock from it); a correction after that keeps the first time, since the book does not say a corrected result restarts the clock.
+- **R-NF-3, pulled riders placed by position.** The Withdrawn entry records the moment, and the log's order is the riders' relative positions when withdrawn: the engine ranks them after every finisher, the latest entry highest, each with its own rank, before the DNF group. Points, laps, and the final sprint never reorder them, and the UCI lapped-rider switch (R-CHASE-2) leaves a withdrawn rider a lap down with that rank rather than turning them DNF. A withdrawn rider's rank shows from the moment on (with four still racing, the rider is 5th), since the rule fixes it then. A later Disqualify wins, as a status does over Out of the finish; a DNS or DNF is refused, since the rule places the rider. A ruling on points still reaches the row. Where a DNF comes after a withdrawal the rule's literal rank (the count on the track at the moment) and the program's (after the finishers) differ by the DNF's unused place; the program closes the gap, as it ranks the DNF group after the finishers.
+- **R-POINTS-2, ties below first.** Both books' examples only show a tie for first. Applying the same reading further down (two tied for second both score 3, the next rider takes fourth's 1) is the program's reading.
+- **R-POINTS-4 and R-MAD-4, level with no final-sprint place.** Riders level on points with no final-sprint place between them share the rank (R-TIE-1).
+- **R-POINTS-4 and R-MAD-4, one placed and one not.** Of riders level on points, one with a final-sprint place ranks ahead of one without (a rider out of the finish, or one the judges left out).
+- **R-POINTS-9, the final sprint of a shortened race.** USAC 1G4(b) lets the Chief Referee shorten a race, but the book never says what a shortened race's last sprint is worth. Doubling it as the final sprint (USAC 2M2(f), "the last sprint after the full distance") is the program's reading, and the only one that leaves the race with a final sprint to break a tie (R-POINTS-4). A race stopped at a sprint already ridden isn't a shorter race: it's End Race Now, Result As-Is (R-POINTS-8). If the Chief Referee rules the new last sprint an ordinary one, the scorer records that sprint as ridden and then End Race Now, Result As-Is: nothing doubles, and the sheet calls it an ended race.
+- **R-POINTS-8, a tie in an ended race.** The book gives the final sprint's places to break a tie on points (2M2(g)); an ended race has no final sprint, so the program takes the equal placing of 1M6(a). The other reading, that the last sprint ridden breaks the tie, can't be entered: an ended race's rows take only a Points Penalty or a Disqualify.
+- **Standings while a race runs.** A Points Race, Madison, or Tempo Race ranks nobody until a sprint or the finish is recorded; a lap gained alone gives points but no rank. A multi-race standings still carries a summed Madison's points before its first sprint.
+- **A team disqualified in a Madison** scores 0 for that Madison in the Team Omnium by Points.
+- **R-ELIM-3, several out at one bell.** When one entry names several riders, the engine has them share the place, after the older USAC text that placed them "equally" (USAC20 2E5). That's the program's choice.
+- **R-ELIM-4 and R-ELIM-5, one survivor.** With one survivor, the last rider standing wins with no final sprint (`test_last_rider_standing_wins_without_a_final_sprint`).
+- **R-ELIM-6 and R-ELIM-7, one mark for leaving the race.** A rider who crashes or is pulled and can't rejoin is clicked out as at a bell: eliminated at that moment, placed, and still in a Four-Race Omnium (R-ELIM-7, R-OMNI-4). A rider who quits is marked DNF, and the program places a DNF the same way, out at that moment, in a group of their own, below whoever goes out next; the two differ only in the omnium, where a DNF is an abandon. Under the book's words for a rider lapped or abandoning by choice (2E3(d)(i)), that rider is the one eliminated at the next sprint, instead of the last rider across, so the officials wave that bell green: the scorer records what was called, the DNF at its moment and nobody out at that bell, and the places come out the same. A DNF after the last bell ranks right behind the survivors. Because the Elimination placed the rider, the sheet prints the place number with "Did not finish" beside the name, not the DNF code, and the USAC CSV and the scoreboard's result page carry the place alone (USAC 1M6(d) "not placed" is for riders a race didn't place).
+- **R-ELIM-8, a mark on a rider already out.** A DNF on a rider already out changes only the mark; a DQ, DNS, or DNP is never placed. A later mark replaces an earlier one, so a rider marked DNF and then DQ, DNS, or DNP gives back the place the DNF put them in, and the others are placed as if the DNF had never been marked.
+- **Statuses, one per rider.** A later status replaces an earlier one (a DNF then a DQ after a protest reads as DQ, USAC 1P1); the same status twice is refused (`test_a_later_status_replaces_an_earlier_one`).
+- **R-WIN-1, a dead heat on a place lap.** The officials normally name one rider. A dead heat they declare is an equal placing like any other (USAC 1M6(a); 1M4(b) divides "the prizes for those places"): the riders share the place, it uses two places, the next bell is for the next open place, and the race rings one bell fewer. A dead heat for 1st is re-ridden (1M4(b)). No club page describes the case; the research is `docs/research/win-and-out-dead-heat.md` (`test_dead_heat_on_a_place_lap_shares_that_place`, `test_dead_heat_in_reverse_shares_the_lower_of_the_two_places_it_uses`, `test_dnf_group_follows_the_last_used_place`).
+- **R-WIN-1, a lap winner later marked DNF or DQ.** The rider vacates the place, and the later places close up. The DNF group ranks after every rider placed or still in (UCI 3.3.012 A; `test_statused_lap_winner_vacates_the_place_and_the_rest_move_up`, `test_vacated_place_closes_up_before_the_finish_as_it_will_after`, `test_dnf_ranks_after_everyone_placed`, `test_provisional_dnf_ranks_after_everyone_placed_or_racing_in_reverse`, `test_provisional_dnf_never_outranks_a_held_place_in_reverse`).
+- **R-TEMPO-2 and R-TEMPO-5, one number.** A venue can change the Tempo Race points, but only as one number for the first rider, so club variants that award two places a lap can't be expressed yet.
+- **R-CHASE-3, no return in the last kilometer.** Not implemented. There's no setting; the scorer marks the rider as the officials rule. The Points Race entry for this case, Out of the finish (R-POINTS-5), is refused in a Scratch Race, an Elimination, and a Win-and-Out, which have no points to place the rider on. Inside a Four-Race Omnium the rule is 2O3(f) instead: a rider who falls in the last kilometer is ranked, so the scorer gives them the last open place with Place Last, counting from the riders still in, and never a DNF, which would put them out of the omnium (R-OMNI-4).
+- **R-CHASE-1, Unknown Distance.** Unknown Distance has no rulebook article (the research found none). It's a club format (see "Scratch Race" above for who runs it) and is scored as a Scratch Race, as are the Chariot, Keirin Final, and Sprint Final (by the order across the line, R-CHASE-5), and the Handicap (R-CHASE-4).
+- **R-OMNI-5, the two-laps-down deduction.** The withdrawal and the next available rank are the race's own result, recorded with Withdrawn at the moment the officials call it (R-NF-3 says how it ranks); the 40 is an Omnium Penalty on the standings, never a Points Penalty on the Points Race, which would change that race's own result. The program does not count laps lost to find either: the scorer enters the withdrawal as the officials call it, and a rider the officials leave on the track is entered the same way, since the rule classifies them as though withdrawn.
+- **R-RIDER-4, the Four-Race Omnium's races.** The Four-Race Omnium is a multi-race standings kind over an event's four races, not a race format of its own: each race is scored as itself and the standings sum them. A program with a format missing or doubled is refused with no table, and the sheet says which event and group is short.
+- **RULES_VERSION.** Each race records `RULES_VERSION` (`madtracker/scoring/replay.py`, currently "2026.10.1") next to its rules, so a replay with later code can say which rule text it was scored under. It's bumped whenever an engine's answer for an existing log could change.
+
+R-CHASE-3 is not implemented; its test pins the refusal.
+
+## If you race under UCI
+
+Under USAC 1K1(a) and 1K1(b), international events and the National Championships for 17-18, U23, and Elite riders run under the UCI rules, so the differences below apply there. USAC and UCI score every format here the same way, with a few differences. Here's each one and what the program does:
+
+- **ABD (UCI 3.3.012, UCI 3.3.012 A).** UCI splits non-finishers into DNF (recognized mishap, or withdrawn by the commissaires or the race doctor) and ABD (unrecognized mishap, or by choice). ABD riders share the last available position if heats were held, and get no rank if not. USAC has no ABD. The program records an abandon as DNF, so it takes the DNF group's rank. If the officials want ABD treatment, that's the scorer's call.
+- **Heat groups (UCI 3.3.012 A, groups 4, 6, and 7).** Riders who didn't start the final, didn't qualify, or didn't finish a heat have their own groups. The program scores one heat as one race, so it has none of these.
+- **Lapped riders in a Scratch Race (UCI 3.2.177 vs USAC 2C4).** UCI says a lapped rider must leave the track at once. The venue's lapped-rider switch covers this: with it off, a rider on negative laps still recorded at the line is marked DNF ("lapped, must leave the track") and ranks in the DNF group.
+- **No return in the last kilometer (UCI 3.2.182 vs USAC 2C5(b)).** UCI gives the next available rank; USAC says not placed. Neither is implemented; it's the scorer's call.
+- **Omnium non-starters (UCI 3.2.251bis vs USAC 2O2(c)).** UCI records the mark per 3.3.012; USAC places the rider last as DNF. The outcome is the same, with different code wording.
+- **Sprint intervals (UCI 3.2.116 vs USAC 2M2(b)).** On a 166 m track, UCI sprints every 10 laps and USAC every 20. This never reaches the arithmetic.
+
+## What the scorer enters and what comes out
+
+Laps are entered as the officials call them; the program never detects one. The scorer records:
+
+- **Sprint places and the finish order.** Places are an ordered list of groups, and a group of two or more is a tie whose riders share the place. In a race placed by the order across the line, a dead heat for first is re-ridden, and the scorer enters the re-ride's result as the finish. In a Points Race, Madison, or Tempo Race a dead heat in any sprint, the final included, is entered as the tie: both riders take the place's points (R-TIE-3), and no re-ride is entered.
+- **Laps gained and lost**, as the officials call them. In an Elimination a lap entry is refused (R-LAP-3).
+- **Statuses**: DNS, DNF, and DQ, from a rider's ⋯ menu. The program records the code only; the officials keep their own reasons. DNP (did not place) is in no rulebook and is not a scorer action: the export writes it for a rider who was never placed, and the USAC CSV accepts it. Did not start is offered while nothing is recorded for that rider (R-NF-1), whatever the rest of the field has done; once a place, a lap, a bell or a mishap is recorded for them, only DNF, and DQ apply.
+- **Out of the finish (mishap)**, from a rider's ⋯ menu during the final sprint of a Points Race, Madison, or Tempo Race (R-POINTS-5, R-POINTS-6, R-MAD-6, R-TEMPO-6). It isn't a status: the rider is placed, with a number, on the points and laps held, and the finish order is entered without them. The result, the scoreboard, and the sheet say "Out of the finish (mishap)" beside the name, and the USAC CSV gives the numbered place.
+- **Withdrawn**, from a rider's ⋯ menu while a race placed at the line, a Points Race, a Madison, or a Tempo Race runs (R-NF-3, R-OMNI-5). It isn't a status either: the rider is placed, with a number, after every finisher, the latest withdrawn highest, with their points and laps as figures, and nothing entered after it names them. The result, the scoreboard, and the sheet say "Withdrawn" beside the name, and the USAC CSV gives the numbered place. An Elimination clicks the rider out instead (R-ELIM-7), and a Win-and-Out has no rule for it.
+- **End Race Now, Result As-Is**, from the task line's ⋯ in a Points Race or Madison once a sprint is recorded and until the final sprint is in (R-POINTS-8, R-MAD-7). The race is complete on the sprints ridden, with no final sprint; Undo reopens it where it was.
+- **Shorten Race**, from the task line's ⋯ in a Points Race, Madison, or Tempo Race once a sprint is recorded and until the final sprint begins (R-POINTS-9, R-MAD-8, R-TEMPO-8). The scorer gives the new sprint count. The race keeps going, and the last sprint under the new count is the final sprint. Undo takes the latest shortening back.
+- **The one number a race asks for.** A Points Race, Madison, or Tempo Race is set up with its sprint count, and the sprint with that number scores double points. If a race has no sprint count, it takes no entries, since the program can't tell which sprint scores double points. A Win-and-Out asks for its places.
+
+A few entry rules follow from the scoring rules:
+
+- In a Points Race, the finish order is the final sprint, entered as the full order of everyone still in. It's refused while an earlier sprint is unrecorded, so a missed sprint can't silently score zero. The race is complete only once the finish order is in, even if the final sprint was also entered on its own, because the tie-break (R-POINTS-4) needs the full order. So although only four places score, the tie-break reaches all the way down.
+- A rider kept out of the last kilometer by a mishap (R-POINTS-5) is entered as Out of the finish during the final sprint, and the finish order leaves them out. Only a rider who is pulled or stops is DNF.
+- A DNS or DNF can't be entered after the finish order, as it would contradict the finish. A DQ can, because protests come after the line (R-NF-5). A DNS can't be entered for a rider with a result (R-NF-1), and a DNS or DNF can't be entered for a rider out of the finish or withdrawn, who is placed by rule; a DQ can.
+- In an Elimination, the design's scoring surface records one rider per click, so two riders out at one bell are placed in the order clicked.
+- In a Madison, a team is one entrant, and a click on either rider counts for the team. A relay at the line (USAC 2N2(g)(ii), UCI 3.2.161) is the officials' call.
+- In a Tempo Race, the scorer records each sprint's winner.
+- Keirin Finals and Sprint Finals are single heats. Tournaments and brackets are not scored.
+
+What comes out: a rider with a status code never has a rank printed. The PDF and the CSV print the code instead, and a rider never placed is exported as DNP, so nobody vanishes from a sheet. On screen, a status rider shows the rank with the mark (in the Elimination example, Dana shows 5th with the DNF mark; the PDF and CSV print DNF). Both riders of a Madison team share its place, and the CSV writes one row per rider with the team's place, as the venue's accepted uploads did. The PDF and the CSV come from one shared row builder (`madtracker/export/summary.py`), so the two never disagree.
+
+## Rulesets
+
+A ruleset is the point values a race is scored with. One is built in, **USAC 2025 + Club formats**: the rulebook's values, and a club's documented values for the formats the rulebook has no article for (the Win-and-Out). USAC and UCI score every format here the same way (the comparison table in `docs/research/usac-track-formats.md`); they differ in conduct rules and sprint intervals, which never reach the arithmetic. So one built-in ruleset stands for both.
+
+A venue copies the built-in ruleset, changes numbers, and can make its copy the default. The rulebook itself allows an announced variation for the Tempo Race (2P3) and for an omnium's scheme (Glossary, Omnium); anywhere the book fixes a number, a table that departs from it in a USAC-permitted race is an exception that needs prior approval under 1K1(e), and the program does not check for one. What it may vary:
+
+- Points Race sprint points by place, and whether there are double points for the last sprint.
+- The same two for the Madison.
+- Tempo Race points per sprint.
+- Points for a lap gained and for a lap lost, for each of the Points Race, the Madison, and the Tempo Race.
+- Elimination survivors.
+- Win-and-Out places and direction.
+- Whether a lapped Scratch Race rider is placed by laps down (USAC 2C4) or must leave (UCI 3.2.177).
+
+Sprint counts and Win-and-Out places are also set per race.
+
+A ruleset may also give a format the venue's own name ("Devil" for the Elimination) and a one-line description. The name is shown wherever the race appears; the description only under the scorer's header. Neither touches the arithmetic, and a race keeps the words it was made with.
+
+Why those and no others? They're what clubs actually change. One venue's sheets, for example, score a lap at 10 and award Points Races 10, 7, 5, 3, 2, 1 with double points for the last sprint; the golden tests in `tests/scoring/test_golden_night98.py` reproduce real sheets scored that way. Everything else (shared places, the final-sprint tie-break, laps as points, reverse elimination order, where a DNF ranks) is shared by both books, and a setting for it would only be a way to get it wrong.
+
+A race keeps a full copy of the rules it was created with, so editing a ruleset later never changes an existing race.
+
+**Formats.** USAC is the ground rule. The program offers the USAC events a club night scores by placings and points: the Scratch Race (2C), Handicap (2D), Elimination (2E, with the miss-and-out of 2E5), Sprint Final (2F), Keirin Final (2H), Points Race (2M), Madison (2N) and Tempo Race (2P), all in the [USA Cycling Rulebook, version 8•25](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf). A club format is offered only when a named venue's program documents it: the Chariot and the Unknown Distance (scored as a Scratch Race) and the Win-and-Out, with the sources linked in their sections above. The snowball family and point-a-lap were removed, because they have no USAC article and were never offered. Their club write-ups stay in `docs/research/usac-track-formats.md`. A Belgian win-and-out is a Win-and-Out with the direction set to reverse, not a format of its own.
+
+## What is deliberately not enforced
+
+The program records what the officials decide. It doesn't police the race:
+
+- **Warnings and relegations.** Two warnings in a race, three in a competition, or a third relegation mean disqualification (UCI 3.10.003, USAC 2B12(c)); nothing counts them. A relegation is the officials' call; the scorer enters the result it produces by correcting the sprint or finish, since neither book gives a default position (USAC glossary "RELEGATION"), and the app keeps no record of why.
+- **Gear limits, eligibility, and categories** are not checked.
+- **Laps and bunches** are the officials' call (UCI 3.2.017quater, USAC 2M4).
+- **Sprint intervals, free laps, and restarts.** Nothing computes sprint laps (on 166 m, every 20 laps under USAC 2M2(b), every 10 under UCI 3.2.116), the free laps nearest 1250 m (UCI 3.2.020bis), or restart laps-to-go (UCI 3.2.133, 3.2.183, 3.2.265). A stoppage and restart is not recorded: nothing is reset by one, so points and laps simply carry through it (USAC 2M6(b), UCI 3.2.133). A Points Race or Madison stopped after 80 percent and not restarted is recorded with End Race Now, Result As-Is (R-POINTS-8, R-MAD-7).
+- **The omnium two-laps-down deduction** (R-OMNI-5) is not found from laps lost: the scorer records it as an Omnium Penalty.
+- **Timed events** (time trials, pursuits, team sprint, team pursuit) are not scored yet.
+
+When a call is something the program can't express, the scorer enters the result the officials give. Get the arithmetic right every time, and leave the judgment to the people with the flags.

@@ -1,0 +1,25 @@
+# Pinned versions for reproducible builds, kept next to pyproject.toml.
+# pyproject.toml states the ranges the code supports. This file states the
+# exact versions tested, so the Windows release build gets the same
+# packages every time. Install with: pip install -r requirements.txt -e .
+# PySide6_Addons is not pinned because the app imports only QtCore, QtGui
+# and QtWidgets, which PySide6_Essentials ships.
+
+# Runtime
+PySide6_Essentials==6.12.0
+shiboken6==6.12.0
+fpdf2==2.8.9
+uharfbuzz==0.56.3
+defusedxml==0.7.1
+fonttools==4.66.1
+pillow==12.3.0
+
+# Development and packaging
+pytest==9.1.1
+pytest-qt==4.5.0
+ruff==0.16.10
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pyinstaller==6.22.3
