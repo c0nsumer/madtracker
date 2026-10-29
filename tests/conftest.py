@@ -43,3 +43,18 @@ def _deferred_deletes(qapp):
     from PySide6.QtCore import QCoreApplication, QEvent
 
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def _no_slow_disk_box(monkeypatch):
+    """No test measures the disk, so no test sees the Slow Disk box uninvited.
+
+    The app warns once a session when a commit takes longer than its
+    threshold. A hosted CI runner stalls for seconds at times, and a
+    test that clicks a card then gets a message box it never asked for
+    and fails as though the click had misbehaved. A test of the warning
+    itself lowers the threshold back.
+    """
+    from madtracker import app
+
+    monkeypatch.setattr(app, "SLOW_COMMIT_MS", float("inf"))

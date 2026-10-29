@@ -86,6 +86,24 @@ def test_an_unexpected_error_in_a_click_is_the_red_line_and_the_log(
     assert "RuntimeError: a bug" in _log(c)
 
 
+def test_a_slow_commit_is_one_box_a_session_and_a_line_in_the_log(
+    make_app, tmp_path, monkeypatch, quiet
+):
+    from madtracker import app
+
+    # Every commit counts as slow, so the first click is the one that warns.
+    monkeypatch.setattr(app, "SLOW_COMMIT_MS", -1.0)
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    riders = c.live.roster.ids
+    assert c.click(riders[0])
+    assert c.click(riders[1])
+    boxes = [s for s in quiet if s.startswith("warn:")]
+    assert len(boxes) == 1 and "disk is slow" in boxes[0]
+    assert "Slow commit:" in _log(c)
+    # The clicks were recorded all the same: scoring goes on, the box is a note.
+    assert len(c.live.screen().rows) == 2
+
+
 def test_a_bug_after_the_entry_was_written_says_it_was_recorded(make_app, tmp_path, monkeypatch):
     c = make_app(demo=True, data_dir=tmp_path / "data")
     *first, last = list(c.live.roster.ids)
