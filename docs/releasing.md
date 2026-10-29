@@ -1,6 +1,6 @@
 # Releasing
 
-This page is for whoever cuts a release, which so far is me. It covers the road to 1.0.0 first, since that release is special (the history gets squashed and the repo goes public), and then the shorter routine for every version after it. The scan and the squash are done and the squashed history is in the private repo; the CI-built candidates are next, and I'll fix this page where it turns out wrong.
+This page is for whoever cuts a release, which so far is me. It covers the road to 1.0.0 first, since that release is special (the history gets squashed and the repo goes public), and then the shorter routine for every version after it. 1.0.0 is out, so the parts below marked 1.0.0 only are the record of how that went, and the routine at the end is what applies now.
 
 The one rule that matters most: nothing tags v1.0.0, makes the repo public, or calls a build final until I say go. Until then the candidates are numbered 1.0.0rc1, 1.0.0rc2, and so on (PEP 440 spelling, so pip and the build scripts read them; Windows shows it as 1.0.0.1 in the file's Properties). Every commit that changes the program bumps the number (1.0.0rc2, 1.0.0rc3, and so on), the same rule as the 0.2.x patch bumps, so a build on the Mac or in CI says which commit it is from.
 
