@@ -1760,7 +1760,7 @@ def test_a_double_click_on_a_card_places_one_rider(make_app, tmp_path):
     assert _placed(c) == 1
     under = grid.body.childAt(grid.body.mapFrom(c.main, spot))
     assert under is grid.card_for(placed) and under.card.done, (
-        "the placed rider's done card holds the spot, so the second press is refused"
+        "the placed rider's done card holds the spot, so the second press does nothing"
     )
 
 
@@ -2593,9 +2593,10 @@ def test_every_card_keeps_its_widget_and_its_slot_until_the_result_completes(
     assert not any(w.card.done for w in grid.cards)
 
 
-def test_a_click_on_a_done_card_says_why_on_the_red_line_and_changes_nothing(make_app, tmp_path):
-    """The mouse on a done card: the controller's sentence, nothing recorded,
-    and the card neither lights nor shows the hand."""
+def test_a_click_on_a_done_card_changes_nothing(make_app, tmp_path):
+    """The mouse on a done card: no signal reaches the controller, the red
+    line stays empty, nothing is recorded or staged, and the card neither
+    lights nor shows the hand."""
     c = make_app(demo=True, data_dir=tmp_path / "data")
     c.main.resize(1600, 900)
     c.main.show()
@@ -2610,11 +2611,18 @@ def test_a_click_on_a_done_card_says_why_on_the_red_line_and_changes_nothing(mak
     assert card is live and card.card.done and card.badge_text() == "1"
     assert card.cursor().shape() == Qt.CursorShape.ArrowCursor
     log = [r.action_id for r in c.live.rows()]
+    staged = c.live.staged()
+    heard: list[int] = []
+    card.pressed_entrant.connect(heard.append)
+    grid.pressed_entrant.connect(heard.append)
     QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=QPoint(style.MD, card.height() // 2))
     QApplication.processEvents()
-    assert c.main.surface.problem.text() == "#7 Maya Petrakis is already placed (1st)."
+    assert heard == []
+    assert c.main.surface.problem.text() == ""
     assert [r.action_id for r in c.live.rows()] == log
-    assert not card.property("lit")
+    assert c.live.staged() == staged
+    assert grid.card_for(eid) is card and card.card.done and card.badge_text() == "1"
+    assert not card.property("lit") and not card.isDown()
     assert c.undo()
     assert not card.card.done and card.toolTip() == ""
     assert card.cursor().shape() == Qt.CursorShape.PointingHandCursor

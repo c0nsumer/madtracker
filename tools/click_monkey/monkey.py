@@ -197,7 +197,8 @@ class Monkey:
         self._idle = 0
         self.trail_file: Path | None = None
         # A done card's press: the entrant, the controller's refusal, the
-        # log's length and the staged row before it; None between presses.
+        # log's length, the staged row, and the red line before it; None
+        # between presses.
         self._done = None
 
     # ----- the fakes -------------------------------------------------------
@@ -630,8 +631,6 @@ class Monkey:
         surface_names = ("card", "button", "row dots", "header", "task dots")
         listed = controls(c)
         for name, press in listed:
-            if name.startswith("card done "):
-                continue  # pressed below, with the facts the check needs
             on_surface = name.startswith(surface_names)
             if on_surface and showing != "surface":
                 continue
@@ -659,8 +658,10 @@ class Monkey:
         if showing == "surface" and c.live is not None:
             for card in s.cards.cards:
                 if card.card.done:
+                    # Silent by design, so not a silence press: the check
+                    # below asks that it changed nothing at all.
                     name = f"card done {card.card.entry.names[0]}"
-                    out.append((self._weight(name), name, ("silence", self._done_press(card))))
+                    out.append((self._weight(name), name, self._done_press(card)))
         # Each kind of control shares one weight, so sixteen cards do not
         # crowd out the one Record Sprint.
         kinds: dict[str, int] = {}
@@ -788,6 +789,7 @@ class Monkey:
                 said,
                 len(live.store.actions(live.race_id)),
                 self.c.store.get_setting(live._key),
+                self.c.main.surface.problem.text(),
             )
             card.click()
 
@@ -1020,11 +1022,11 @@ class Monkey:
                 self.fail(step, name, "dots opened no menu", str(self.opened[:3]))
 
     def _check_done_press(self, step: int, name: str) -> None:
-        """A done card's press wrote nothing and the red line said the controller's sentence."""
+        """A done card's press did nothing: no log row, the staged row and the red line as they were."""
         probe, self._done = self._done, None
         if probe is None:
             return
-        eid, said, rows, staged = probe
+        eid, said, rows, staged, line = probe
         c = self.c
         live = c.live
         if said.ok:
@@ -1037,10 +1039,8 @@ class Monkey:
         if c.store.get_setting(live._key) != staged:
             self.fail(step, name, "done card press changed the staged row", f"#{eid}")
         shown = c.main.surface.problem.text()
-        if shown != said.message:
-            self.fail(
-                step, name, "done card press answered otherwise", f"{shown!r} vs {said.message!r}"
-            )
+        if shown != line:
+            self.fail(step, name, "done card press changed the red line", f"{line!r} to {shown!r}")
 
     def _check_race(self, step: int, name: str, showing: str) -> None:
         from madtracker.scoring import compute_for_format

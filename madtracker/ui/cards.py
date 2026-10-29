@@ -90,6 +90,9 @@ DONE_PLATE = QColor(style.DISABLED_INK)
 # A done team card's swatch, washed with the gray ground: the color still
 # names the team, without the weight of a team still in play.
 DONE_SWATCH_ALPHA = 110
+# A done card's place badge, the accent washed over the gray ground: the
+# full blue reads as a live sprint's badge, the dimmed one as a place taken.
+DONE_BADGE_ALPHA = 140
 # The lap actions are buttons on the card, never items in its menu. The
 # label's minus is the minus sign, as wide as the plus, so the two
 # buttons read as a pair.
@@ -314,7 +317,7 @@ class RiderCard(OneClickButton):
         self.setMinimumWidth(CARD_MIN_W)
         self._height = self.card_height()
         self.setFixedHeight(self._height)
-        self.clicked.connect(lambda: self.pressed_entrant.emit(self.card.entrant_id))
+        self.clicked.connect(self._task_click)
         self.laps = card_laps(card)
         self.menu_actions = menu_items(card)
         self._set_done(card)
@@ -327,6 +330,12 @@ class RiderCard(OneClickButton):
         self.dots = actions_strip(self)
         self.dots.setVisible(bool(self.menu_actions))
         self.dots.clicked.connect(lambda: self.open_actions())
+
+    def _task_click(self) -> None:
+        # A done card's result is taken, so its click does nothing at all:
+        # no task, and no red line answering a click the card never invites.
+        if not self.card.done:
+            self.pressed_entrant.emit(self.card.entrant_id)
 
     def set_card(self, card: Card) -> None:
         """The same entrant after a click: badge, laps, names and actions as the card now says.
@@ -636,9 +645,13 @@ class RiderCard(OneClickButton):
         elif badge is not None:
             p.setPen(Qt.PenStyle.NoPen)
             # Gray past the places the sprint awards: clicked, but no points.
-            # A done card's place is the same full accent with white digits,
-            # so a blue number means a place on every card of every format.
-            p.setBrush(QColor(PAST_PLACES_BADGE if self.card.past_awarded else style.ACCENT))
+            # A done card's place is the accent dimmed, with white digits, so a
+            # blue number means a place on every card of every format and the
+            # full blue stays the live sprint's.
+            fill = QColor(PAST_PLACES_BADGE if self.card.past_awarded else style.ACCENT)
+            if done and not self.card.past_awarded:
+                fill.setAlpha(DONE_BADGE_ALPHA)
+            p.setBrush(fill)
             radius = badge.height() / 2
             p.drawRoundedRect(QRectF(badge), radius, radius)
             p.setPen(QColor("#ffffff"))

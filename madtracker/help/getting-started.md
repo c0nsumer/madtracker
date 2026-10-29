@@ -137,7 +137,7 @@ To score a race, select it in the Program on the left. A race being scored is ta
 
 The line under the race's name gives a hint as to how to enter the results, eg: "Click riders in the order they finish." Click the rider cards as the officials call them.
 
-A rider you've placed, clicked out, or marked keeps their card where it was, grayed, with the place in blue or the status ("DNF", "DNS", "DQ", "Withdrawn", or "Mishap") on it, so the other cards never move. A click on a grayed card records nothing, and the line under the race's name says why. Its **⋯** holds the same items as the rider's row in the result.
+A rider you've placed, clicked out, or marked keeps their card where it was, grayed, with the place in blue or the status ("DNF", "DNS", "DQ", "Withdrawn", or "Mishap") on it, so the other cards never move. A click on a grayed card does nothing. Its **⋯** holds the same items as the rider's row in the result.
 
 Each card has **−1** and **+1** for a lap lost or gained, where laps count, and a **⋯** menu with **Did Not Start**, **Did Not Finish**, **Disqualify**, and, where the officials pull a rider, **Withdrawn** (see [Rules shared by every format](scoring.md#rules-shared-by-every-format)). In a race placed by its finish order the menu starts with **Place Last** to allow marking results from the tail of the race.
 

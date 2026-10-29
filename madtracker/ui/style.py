@@ -244,8 +244,8 @@ QPushButton#rider:pressed {{ background: {ACCENT_TINT_STRONG}; }}
 /* The card whose ⋯ menu is open stays lit until it closes, so the menu
    says whose it is; the row's ⋯ does the same. */
 QPushButton#rider[lit="true"] {{ background: {ACCENT_TINT_STRONG}; }}
-/* A done card answers a click only with the red line, so it neither
-   tints under the pointer nor when pressed; its menu still lights it. */
+/* A done card takes no click, so it neither tints under the pointer
+   nor when pressed; its menu still lights it. */
 QPushButton#rider[done="true"], QPushButton#rider[done="true"]:hover,
 QPushButton#rider[done="true"]:pressed {{
     background: {DONE_GROUND}; border: 1px solid {DONE_EDGE}; border-bottom: 2px solid {DONE_SHADE};

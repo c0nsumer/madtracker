@@ -6,7 +6,8 @@ the task line, the buttons that exist, the cards, the menus on a card
 and on a result row, the board page, the Undo label). The walk asserts
 exactly that. The sweep then clicks every visible control in every
 state and fails on anything silent (principle 3): a click must change
-what the scorer sees, open a menu or a dialog, or say why not.
+what the scorer sees, open a menu or a dialog, or say why not. A done
+card is the one control silent by design, and the sweep checks it is.
 """
 
 import itertools
@@ -1748,22 +1749,21 @@ def restore(c, before: tuple) -> bool:
     return snapshot(c) == before
 
 
-def done_click(c, card) -> None:
-    """A click on a done card: the controller's sentence on the red line, and nothing recorded."""
+def done_click(c, card, quiet) -> None:
+    """A click on a done card does nothing: no red line, nothing recorded or staged, the card as it was."""
     eid = card.card.entrant_id
-    live = c.live
-    log = [r.action_id for r in live.rows()]
-
-    def staged():
-        return [tuple(map(tuple, live._staged.groups)), tuple(map(tuple, live._staged.tail))]
-
-    before = staged()
-    # The refusal records nothing, so asking the controller first is safe.
-    refusal = live.click(eid)
+    # The controller still refuses a done entrant; asking it records nothing.
+    refusal = c.live.click(eid)
     assert not refusal.ok and refusal.message, eid
+    before = snapshot(c)
+    shown = (card.badge_text(), card.card.done_status, card.toolTip())
+    quiet.clear()
     card.click()
-    assert c.main.surface.problem.text() == refusal.message, eid
-    assert [r.action_id for r in live.rows()] == log and staged() == before, eid
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert snapshot(c) == before and not quiet, eid
+    assert c.main.surface.problem.text() == "" and not c.main.surface.flashing(), eid
+    assert c.main.surface.cards.card_for(eid) is card and card.card.done, eid
+    assert (card.badge_text(), card.card.done_status, card.toolTip()) == shown, eid
     assert not card.property("lit"), eid
 
 
@@ -1774,9 +1774,9 @@ def controls(c) -> list[tuple[str, Callable]]:
     out: list[tuple[str, Callable]] = []
     for card in s.cards.cards:
         name = card.card.entry.names[0]
-        if card.card.done:
-            out.append((f"card done {name}", lambda card=card: done_click(c, card)))
-        else:
+        # A done card is silent by design, as a disabled button is: the
+        # sweep presses it apart, through done_click.
+        if not card.card.done:
             out.append((f"card {name}", card.click))
         if card.dots.isVisibleTo(s):
             out.append((f"card dots {card.card.entry.names[0]}", card.dots.click))
@@ -1855,6 +1855,8 @@ def test_every_visible_control_does_something_in_every_state(make_app, quiet, fm
         if c is not None:
             make_app.dispose(c)
         c = reach(i)
+        for card in [w for w in c.main.surface.cards.cards if w.card.done]:
+            done_click(c, card, quiet)
         k = 0
         while k < len(controls(c)):
             # Listed afresh each round: a rebuilt app has new widgets.

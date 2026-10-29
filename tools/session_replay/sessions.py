@@ -802,8 +802,19 @@ class ClickHappy:
         twin.click(eid)
 
         def press():
-            _tap(_widget(self.c, miss))
-            _tap(_widget(self.c, eid))
+            c = self.c
+            start = _log_len(c.store, c.live.race_id)
+            line = c.main.surface.problem.text()
+            _tap(_widget(c, miss))
+            _pump()
+            # A done card's click does nothing: no entry, and no red line.
+            shown = c.main.surface.problem.text()
+            if _log_len(c.store, c.live.race_id) != start or shown != line:
+                REC.add(
+                    "a click on a done card did something",
+                    f"{self.p.name(miss)}: red line {line!r} to {shown!r}",
+                )
+            _tap(_widget(c, eid))
 
         return self._pressed(f"done {self.p.name(miss)}, then {self.p.name(eid)}", press, twin)
 
@@ -1285,6 +1296,7 @@ class FatFinger:
         at: QPoint = where.mapTo(grid.body, local)
         before = _outcome(c.live)
         start = _log_len(c.store, c.live.race_id)
+        line = c.main.surface.problem.text()
         hit = []
         s.step(
             f"meant a card, hit {what}",
@@ -1294,6 +1306,19 @@ class FatFinger:
         )
         _pump()
         REC.coverage[f"fat finger: {what}"] += 1
+        if what == "a done card's badge":
+            # A done card's click does nothing: no entry, and no red line.
+            shown = c.main.surface.problem.text()
+            if (
+                _log_len(c.store, c.live.race_id) != start
+                or _outcome(c.live) != before
+                or shown != line
+            ):
+                REC.add(
+                    "a miss on a done card's badge did something",
+                    f"red line {line!r} to {shown!r}\n" + _differs(_outcome(c.live), before),
+                )
+            return True
         if _log_len(c.store, c.live.race_id) == start and _outcome(c.live) == before:
             return True
         s.step("Undo the miss", c.undo, undo_check=False)

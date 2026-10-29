@@ -1011,15 +1011,20 @@ class EliminationPage(Page):
                 y += lh
             return
         # The chips are small by role, not by type: their digits stay at
-        # the board's minimum size.
+        # the board's minimum size. They wrap onto as many rows as the
+        # column holds, so a long Elimination shows more than its last few.
         ph = 72 * u
+        gap = 16 * u
         x = side.x()
         for e in reversed(d.eliminated):
             pw = t.plate_width(ph)
-            if x + pw > side.right():
+            if x + pw > side.right() and x > side.x():
+                x = side.x()
+                y += ph + gap
+            if y + ph > side.bottom() or x + pw > side.right():
                 break
             t.plate(p, QRectF(x, y, pw, ph), e.bibs[0] if e.bibs else "", out=True)
-            x += pw + 16 * u
+            x += pw + gap
 
 
 def sprint_title(res: SprintResult) -> str:

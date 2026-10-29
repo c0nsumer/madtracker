@@ -57,7 +57,7 @@ After the event loop runs, these must all hold:
 - The main window still shows. If it shows the empty screen, no race is live.
 - The surface's `Screen` equals a fresh `race_screen.screen` of the live log.
 - While cards show, they're the race's field in bib order.
-- A press on a done card leaves the log's length and the staged setting row as they were, and the red line says the controller's refusal for that card.
+- A press on a done card does nothing: the log's length, the staged setting row, and the red line stay as they were.
 - No entrant is listed twice.
 - Each recorded row's total (in a points race) or place (in a placings race) matches `compute_for_format` on `live.actions()`.
 - The staged setting row equals the race's staged order.
