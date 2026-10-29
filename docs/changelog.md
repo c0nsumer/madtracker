@@ -5,7 +5,7 @@ entry names the version shown in About.
 
 ## 1.1.0 (not yet released)
 
-- Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry. A click on a grayed card records nothing, and its ⋯ menu offers the same items as the rider's row in the result.
+- Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry.
 
 ## 1.0.0 (2026-Oct-28)
 
