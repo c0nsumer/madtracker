@@ -12,6 +12,7 @@ the exports need wherever it is opened.
 """
 
 import base64
+import os
 from pathlib import Path
 
 from madtracker.assets import bundled_logo_path
@@ -132,7 +133,7 @@ def export_dir(store: Store) -> Path:
     back rather than failing: the scorer can still pick a place by hand.
     """
     chosen = chosen_export_dir(store)
-    return chosen if chosen is not None and chosen.is_dir() else documents_dir()
+    return chosen if chosen is not None and os.path.isdir(chosen) else documents_dir()
 
 
 def rider_label(store: Store) -> str:

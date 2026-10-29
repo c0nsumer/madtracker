@@ -581,3 +581,17 @@ def test_elsewhere_the_board_is_frameless_on_the_tv_in_the_same_window(board, mo
     on_tv = _native(board)
     board.show_on(screen)
     assert _native(board) == on_tv
+
+
+def test_settings_save_refuses_a_folder_too_long_to_look_up(store, qtbot, tmp_path):
+    """A pasted path past the system's name limit is no folder: refused on the red
+    line, never an error from the check itself."""
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(store, tmp_path)
+    qtbot.addWidget(d)
+    d.backup.setText("x" * 5000)
+    assert not d.save() and d.error.text() == "The backup folder does not exist."
+    d.backup.setText(str(tmp_path))
+    d.exports.setText(str(tmp_path / ("y" * 5000)))
+    assert not d.save() and d.error.text() == "The exports folder does not exist."

@@ -71,7 +71,7 @@ def backups_in(folder: Path) -> list[Path]:
     A backup is a file that carries the mark, whatever its name: a data
     file saved into this folder, or a restored copy, is never rotated away.
     """
-    if not folder.is_dir():
+    if not os.path.isdir(folder):
         return []
     files = [p for p in folder.glob("*.sqlite") if p.is_file() and read_backup_mark(p) is not None]
     return sorted(files, key=lambda p: (p.stat().st_mtime, p.name))
@@ -160,7 +160,7 @@ def take_backup(
                 stale.unlink()
             except OSError:
                 pass
-    elif not folder.is_dir():
+    elif not os.path.isdir(folder):
         raise OSError(f"backup folder {folder} is not available")
     # A result and a close can land in the same second; a numbered name
     # keeps the earlier copy instead of overwriting it.

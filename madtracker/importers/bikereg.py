@@ -407,7 +407,7 @@ def _read_text(text_or_path: str | os.PathLike[str]) -> str:
     # path. Checking for the line break first means a one-line string that
     # happens to name a file is never mistaken for data, and vice versa.
     if isinstance(text_or_path, os.PathLike) or (
-        isinstance(text_or_path, str) and "\n" not in text_or_path and Path(text_or_path).is_file()
+        isinstance(text_or_path, str) and "\n" not in text_or_path and os.path.isfile(text_or_path)
     ):
         path = Path(text_or_path)
         if path.stat().st_size > MAX_BYTES:

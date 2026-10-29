@@ -36,7 +36,7 @@ def documents_dir() -> Path:
     out of synced folders (store.paths).
     """
     found = _qt_documents()
-    if found and Path(found).is_dir():
+    if found and os.path.isdir(found):
         return Path(found)
     if os.name == "nt":
         profile = os.environ.get("USERPROFILE")

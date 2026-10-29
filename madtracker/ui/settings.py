@@ -12,6 +12,7 @@ because venue wordmarks ship white on transparent and would vanish
 on the window's light gray.
 """
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QDir, QEvent, QIODevice, QSize, Qt
@@ -351,10 +352,12 @@ class SettingsDialog(QDialog):
     def save(self) -> bool:
         # A folder is typed as well as chosen, and a typo would only be
         # found at the first backup or export; Choose... can only pick a
-        # folder that exists, so a typed one is held to the same.
+        # folder that exists, so a typed one is held to the same. A path too
+        # long for the system to look up is no folder either: os.path.isdir
+        # says so, where Path.is_dir raises for it on Python 3.12.
         for text, what in ((self.backup.text(), "backup"), (self.exports.text(), "exports")):
             folder = text.strip()
-            if folder and not Path(folder).is_dir():
+            if folder and not os.path.isdir(folder):
                 show_message(self.error, f"The {what} folder does not exist.")
                 return False
         try:

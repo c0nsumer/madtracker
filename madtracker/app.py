@@ -2135,7 +2135,7 @@ class AppController:
         from madtracker.control.exports import documents_dir
 
         chosen = venue.chosen_backup_dir(self.store)
-        folder = chosen if chosen is not None and chosen.is_dir() else documents_dir()
+        folder = chosen if chosen is not None and os.path.isdir(chosen) else documents_dir()
         name = backup_name()
         path, _ = QFileDialog.getSaveFileName(
             self.main, "Backup Now", str(folder / name), DATA_FILE_FILTER
