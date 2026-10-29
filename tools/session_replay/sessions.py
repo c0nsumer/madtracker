@@ -630,9 +630,17 @@ def _field_of(s: Session, race, size: int, team: bool) -> tuple[list[int], list 
     spare = [r for r in pool if r not in inside]
     taken = {t[0] for t in shapes} | {t[1] for t in shapes}
     colors = [k for k in TEAM_COLORS if k not in taken]
+    hexes = list(TEAM_COLORS.values())
     while len(shapes) < size:
-        color = colors.pop(0)
-        shapes.append((color, color, TEAM_COLORS[color], [spare.pop(0), spare.pop(0)]))
+        if colors:
+            color = colors.pop(0)
+            shape = (color, color, TEAM_COLORS[color], [spare.pop(0), spare.pop(0)])
+        else:
+            # A field of more teams than the palette has names: a numbered
+            # team with a palette hex, as the dialog lets a venue name one.
+            n = len(shapes) + 1
+            shape = (f"Team {n}", "", hexes[n % len(hexes)], [spare.pop(0), spare.pop(0)])
+        shapes.append(shape)
     return [m for t in shapes for m in t[3]], shapes
 
 
