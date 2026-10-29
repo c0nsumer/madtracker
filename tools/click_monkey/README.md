@@ -32,8 +32,9 @@ The development laptop is short on memory, so run it under the cgroup cap (one s
 A step is one of these, picked at random with weights:
 
 - A visible control from the design walk's `controls()`: a card, its ⋯ or laps, a surface button, a row's ⋯, a sprint header, Undo, the preview, the Edit | Score switch, a program row, or any enabled File, Scoreboard, or Help menu item except Quit.
+- A press on a done card (a rider placed, out, or marked, grayed in its slot), named `card done` and its rider.
 - A right-click on a card, a result row, the task line, or the bare surface.
-- A double click on a card, a row, Undo, or Record Sprint.
+- A double click on a card, a row, Undo, or Record Sprint. On a card, Undo, or Record Sprint it's sent as a person's double-click is (press, release, the double-click event, release), since QTest's own sends no release and a button under it never clicks.
 - A key: the Undo and Close standard keys, F1, Escape, Return, Space, Tab, or letters into whatever has focus.
 - A window size: 1366 x 740, 1600 x 900, or 1920 x 1080.
 - A poke at the Edit Event screen, the help window, or the welcome screen.
@@ -55,6 +56,8 @@ After the event loop runs, these must all hold:
 - No modal dialog, message box, menu, or popup is left open.
 - The main window still shows. If it shows the empty screen, no race is live.
 - The surface's `Screen` equals a fresh `race_screen.screen` of the live log.
+- While cards show, they're the race's field in bib order.
+- A press on a done card leaves the log's length and the staged setting row as they were, and the red line says the controller's refusal for that card.
 - No entrant is listed twice.
 - Each recorded row's total (in a points race) or place (in a placings race) matches `compute_for_format` on `live.actions()`.
 - The staged setting row equals the race's staged order.

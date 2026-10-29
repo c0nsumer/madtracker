@@ -415,6 +415,14 @@ class Session:
                     "Undo button enabled differs",
                     f"{c.main.undo.isEnabled()} vs {screen.undo_enabled} ({screen.undo_text!r})",
                 )
+            # The widgets are the cards the screen says, in its order: a
+            # card left behind or out of its slot is one the scorer can hit.
+            drawn = [w.card for w in c.main.surface.cards.cards]
+            if drawn != list(screen.cards):
+                REC.add(
+                    "card widgets differ from the screen's cards",
+                    f"{[k.entrant_id for k in drawn]} vs {[k.entrant_id for k in screen.cards]}",
+                )
         # The file read afresh is the same race: nothing lives only in memory.
         fresh = LiveRace(c.store, live.race_id, settle=False)
         again = fresh.screen()
