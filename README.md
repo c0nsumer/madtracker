@@ -8,7 +8,7 @@ MadTracker is software for scoring [track cycling](https://en.wikipedia.org/wiki
 
 MadTracker started as a way to make scoring easier at Detroit's [Mad Track Arena](https://madtrackarena.com/), replacing a set of spreadsheets that calculated the results and displayed them on a scoreboard. The spreadsheets worked well, but there was room for improvement, particularly around ease of use and handing the job off to a new scorer.
 
-As the officials call each sprint, elimination, lap gained or lost, and and each race's finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
+As the officials call each sprint, elimination, lap gained or lost, or finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
 
 MadTracker follows a clear order. A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar. Each race also keeps the rules it was scored under, and each event keeps its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
 
