@@ -73,6 +73,20 @@ UNDO_WORDS: dict[str, str] = {
     "dq": "marked Disqualified",
     "out": "marked Eliminated",
 }
+# A done card's mark for a rider out of the field, keyed by the status
+# code or the way out: the short word the chip shows, then the long name
+# its tooltip and the click's refusal say, in Undo's spelling. The short
+# word keeps a rider's name whole on the narrowest card.
+DONE_MARKS: dict[str, tuple[str, str]] = {
+    code: (word, UNDO_WORDS[key].removeprefix("marked "))
+    for code, word, key in (
+        ("DNF", "DNF", "dnf"),
+        ("DNS", "DNS", "dns"),
+        ("DQ", "DQ", "dq"),
+        ("out_of_finish", "Mishap", "out_of_finish"),
+        ("withdrawn", "Withdrawn", "withdrawn"),
+    )
+}
 # A dead heat in a sprint being built: on the card of the rider placed
 # after another, because in a points race the card is the only place the
 # staged order shows. The label names the noun ("team" in a madison).

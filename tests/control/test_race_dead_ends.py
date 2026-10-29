@@ -12,6 +12,7 @@ from madtracker.control import race as rc
 from madtracker.control.program import is_scored
 from madtracker.control.race import LiveRace
 from madtracker.scoring import rules as R
+from madtracker.scoring.actions import Status
 
 TEAMS = [("Blue", 3, 24), ("Red", 5, 36), ("Orange", 8, 12)]
 
@@ -242,7 +243,8 @@ def test_win_and_out_fill_after_a_vacated_place_logs_the_closed_up_places(store,
     s = LiveRace(store, make_race("win_and_out", [7, 12, 33, 9, 19], R.win_and_out_rules(3)))
     ok(s.click(ids[7]))
     ok(s.click(ids[12]))
-    ok(s.act(ids[12], "dnf"))
+    # The lap winner's row offers no DNF, so the mark goes in as an entry.
+    ok(s._record([Status(entrant_id=ids[12], status="DNF")]))
     ok(s.click(ids[33]))
     ok(s.click(ids[9]))
     out = ok(s.click(ids[19]))
@@ -338,5 +340,4 @@ def test_a_sprint_corrected_after_a_dq_does_not_block_a_later_correction(
     # A DQ rider the sprint never placed still cannot be added to it.
     ok(s.act(ids[5], "dq"))
     ok(s.reopen_sprint(1))
-    refused = s.click(ids[5])
-    assert not refused.ok and "DQ" in refused.message
+    assert s.click(ids[5]) == rc.Outcome(False, "#5 Priya Okafor is marked Disqualified.")

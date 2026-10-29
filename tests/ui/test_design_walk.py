@@ -1442,7 +1442,8 @@ def check(c, expect: Expect, where: str) -> None:
     assert s.visible_buttons() == expect.buttons, where
     if expect.record_enabled is not None:
         assert s.record_button.isEnabled() == expect.record_enabled, where
-    cards = s.cards.cards
+    # The cards that take a click: a done card holds its slot in the grid.
+    cards = [w for w in s.cards.cards if not w.card.done]
     assert len(cards) == expect.cards, where
     if expect.card_menu is not None and cards:
         card = cards[0]

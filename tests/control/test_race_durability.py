@@ -275,7 +275,7 @@ def test_a_reopened_sprint_refuses_a_rider_out_before_it_was_ridden(store, make_
     ok(s.record_sprint())
     _finish_points(s, ids, sprint2=(12,), final=(12, 7))
     ok(s.reopen_sprint(1))
-    assert s.click(ids[9]).message == "Ben Szymanski is DNF. Undo takes it back."
+    assert s.click(ids[9]).message == "#9 Ben Szymanski is marked Did Not Finish."
     assert not s.click(ids[33]).ok
 
 
@@ -326,8 +326,8 @@ def test_undo_after_the_completing_click_takes_back_one_click(store, make_race, 
     assert p.task().kind == "final_sprint"
 
 
-def test_undo_reverses_a_staged_tie_and_an_unplace_exactly(store, make_race, ids):
-    s = LiveRace(store, chase(make_race))
+def test_undo_reverses_a_staged_tie_and_an_unplace_exactly(store, make_race, ids, house):
+    s = LiveRace(store, make_race("points", [7, 12, 33], house.points(3)))
     for bib in (7, 12, 33):
         ok(s.click(ids[bib]))
     ok(s.tie_above(ids[33]))

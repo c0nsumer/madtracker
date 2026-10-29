@@ -713,8 +713,8 @@ class LiveRace:
 
         A rider a mishap kept out of the finish is placed on points
         (USAC 2M8(a)), and a withdrawn rider by the moment of it (USAC
-        2O3(e), 1M6(d)): no card, no place in the finish order, and the
-        finish can complete without them.
+        2O3(e), 1M6(d)): a done card, no place in the finish order, and
+        the finish can complete without them.
         """
         return [
             r.entrant_id
@@ -1036,43 +1036,20 @@ class LiveRace:
             return Outcome(False, task.text)
         if task.kind in ("review", "none"):
             return Outcome(False, "The result is recorded. Use the row's menu to change it.")
-        row = st.by_entrant(entrant_id)
-        # A reopened sprint keeps the riders it scored, a status since or
-        # not, and may place a rider whose DNF came after it was ridden.
-        if (
-            row.status is not None
-            and entrant_id not in self.edit_field()
-            and not self._racing_at_edit(entrant_id, row.status)
-        ):
-            return Outcome(False, f"{self.name(entrant_id)} is {row.status}. Undo takes it back.")
-        # The same for a withdrawal: a sprint ridden before it may place
-        # the rider, and nothing after it may (USAC 2O3(e)).
-        if (
-            row.withdrawn
-            and row.status is None
-            and entrant_id not in self.edit_field()
-            and not self._racing_at_edit(entrant_id, Withdrawn.kind)
-        ):
-            return Outcome(False, f"{self.name(entrant_id)} is withdrawn. Undo takes it back.")
-        # A rider out of the finish rode every sprint before it, so a
-        # correction of one of those may still place them.
-        if row.out_of_finish and (self._staged.sprint is None or self.correcting_finish_order()):
-            return Outcome(
-                False,
-                f"{self.name(entrant_id)} is out of the finish (mishap). Undo takes it back.",
-            )
+        # Placed, out, or marked: the card holds its slot and takes no click.
+        # A reopened sprint's live cards include a rider who left after it
+        # was ridden, so the correction may still place them.
+        refusal = self._done_refusal(entrant_id, st, task)
+        if refusal is not None:
+            return Outcome(False, refusal)
         if task.kind == "out":
             return self._record(
                 [Eliminated(sprint_no=st.next_sprint_no, entrant_ids=(entrant_id,))]
             )
         if task.kind == "winner":
             others = [e for e in st.remaining_entrants if e != entrant_id]
-            if entrant_id not in st.remaining_entrants:
-                return Outcome(False, f"{self.name(entrant_id)} is already out.")
             return self._record([FinishOrder(places=[[entrant_id], others])])
         if task.kind == "lap":
-            if entrant_id not in st.remaining_entrants:
-                return Outcome(False, f"{self.name(entrant_id)} already has a place.")
             actions: list[Action] = [
                 SprintResult(sprint_no=st.next_sprint_no, places=[[entrant_id]])
             ]
@@ -1082,6 +1059,26 @@ class LiveRace:
                 actions.append(FinishOrder(places=[]))
             return self._record(actions, text=f"{UNDO}{self._short(actions[0])}")
         return self._stage_click(entrant_id, st, task)
+
+    def _done_refusal(self, entrant_id: int, st: Standings, task: Task) -> str | None:
+        """The red line for a click on a done card, or None when the card is live.
+
+        Fires exactly when the screen shows the entrant's card done, so the
+        card and the click agree on who takes a click.
+        """
+        if entrant_id not in race_screen.done_ids(self, st, task):
+            return None
+        row = race_screen.done_rows(self, st, task).get(entrant_id)
+        _, status, name = race_screen.done_mark(st.by_entrant(entrant_id), row)
+        who = self.label(entrant_id)
+        if status:
+            return f"{who} is marked {name}."
+        # An elimination's out took its place at the bell; a staged row is
+        # its final sprint, placed at the line.
+        verb = "out" if self.kind == "elimination" and not (row and row.staged) else "placed"
+        if row is None or not row.place_text.isdigit():
+            return f"{who} is already {verb}."
+        return f"{who} is already {verb} ({ordinal(int(row.place_text))})."
 
     def _edit_row(self) -> Row | None:
         """The live row of the sprint being corrected."""
@@ -1183,15 +1180,11 @@ class LiveRace:
     def _stage_click(self, entrant_id: int, st: Standings, task: Task) -> Outcome:
         groups = self.staged(st)
         tail = self.staged_tail(st)
-        if task.kind == "order" and entrant_id not in self._field_left(st):
-            return Outcome(False, f"{self.name(entrant_id)} already has a place.")
-        place = self._staged_place(entrant_id, groups)
-        if place is not None or any(entrant_id in g for g in tail):
-            # A second click takes the badge off; in a sprint that is the
-            # correction the design names, and in a finish order it is
-            # how a card that moved into the result comes back.
+        if self._staged_place(entrant_id, groups) is not None:
+            # A second click takes a sprint's badge off, the correction the
+            # design names. A finish order's placed riders are done cards
+            # and never reach here: Undo or the row's moves fix them.
             groups = [[e for e in g if e != entrant_id] for g in groups]
-            tail = [[e for e in g if e != entrant_id] for g in tail]
             text = f"{UNDO}{self.label(entrant_id)} unplaced"
             self._stage(groups, text, tail=tail)
             return Outcome(True, f"{self.name(entrant_id)} unplaced.")
@@ -1397,10 +1390,9 @@ class LiveRace:
         """The card's ties: with the rider above when the rider leads a staged place below
         the first, with the rider below when the rider ends a place with one after it.
 
-        Points and madison only: a finish order's placed cards leave the
-        grid while it is built, and their staged rows carry the tie
-        instead. The rest of a tied place is tied with the row above
-        already.
+        Points and madison only: a finish order's placed cards are done
+        while it is built, and carry their staged rows' tie instead. The
+        rest of a tied place is tied with the row above already.
         """
         if self.kind not in ("points", "madison"):
             return []
@@ -1583,6 +1575,7 @@ class LiveRace:
         actions: Sequence[Action] | None = None,
         task: Task | None = None,
         results: set[int] | None = None,
+        known_live: bool = False,
     ) -> list[tuple[str, str]]:
         """(key, label) for the rider's menu now. Only what applies is listed.
 
@@ -1591,6 +1584,9 @@ class LiveRace:
         one replay), and ``results`` is ``with_results(actions)``;
         otherwise they are read here. A caller with the log in hand
         read the race with it, so it is not read again per entrant.
+        ``known_live`` is a caller that already knows the card is live
+        (the surface, building every card), so the done check is not
+        made again per card.
         """
         st = st or self.standings()
         if actions is None:
@@ -1603,10 +1599,14 @@ class LiveRace:
             row = st.by_entrant(entrant_id)
         except KeyError:
             return []
+        task = self.task(st) if task is None else task
+        if not known_live and entrant_id in race_screen.done_ids(self, st, task):
+            # A done card offers its result row's menu: two doors, one menu.
+            result = race_screen.done_rows(self, st, task).get(entrant_id)
+            return list(race_screen.done_actions(self, entrant_id, result, st, actions, task))
         if row.status is not None:
             # Out of the race, one thing is left: a DQ after a protest,
-            # which replaces the mark (the card is gone, the row offers
-            # it). Not while a correction is open.
+            # which replaces the mark. Not while a correction is open.
             if row.status != "DQ" and not self._staged.editing:
                 return [("dq", RIDER_ACTIONS["dq"])]
             return []
@@ -1869,6 +1869,16 @@ class LiveRace:
         """Apply a rider action by key, with the same gates as the menu."""
         st = self.standings()
         allowed = [k for k, _ in self.rider_actions(entrant_id, st)]
+        moves = key in TIES or key in MOVES or key.startswith(MOVE_TO)
+        if moves and entrant_id in race_screen.done_ids(self, st, self.task(st)):
+            # A done card's moves are its result row's: a staged row moves
+            # in the staged order, any other row (an Elimination's out) in
+            # the result, as the row's own menu does.
+            if key not in allowed:
+                return Outcome(False, self._move_refusal(entrant_id, st))
+            if entrant_id in self._placed_ids(st):
+                return self.move_staged(entrant_id, key)
+            return self.review(entrant_id, key)
         if key in TIES:
             if key not in allowed:
                 side = "above" if key == TIE_ABOVE else "below"

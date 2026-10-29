@@ -1753,13 +1753,14 @@ def test_a_double_click_on_a_card_places_one_rider(make_app, tmp_path):
     # new grid out as soon as the first click lands.
     grid.pressed_entrant.connect(lambda _: (QApplication.sendPostedEvents(), grid.grid.activate()))
     first = grid.cards[0]
-    second = grid.cards[1].card.entrant_id
+    placed = first.card.entrant_id
     spot = first.mapTo(c.main, QPoint(style.MD, first.height() // 2))
     QTest.mouseDClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, spot)
     QApplication.processEvents()
     assert _placed(c) == 1
-    assert grid.card_for(second) is grid.body.childAt(grid.body.mapFrom(c.main, spot)), (
-        "the next rider's card took the spot, so its silence is the fix and not a miss"
+    under = grid.body.childAt(grid.body.mapFrom(c.main, spot))
+    assert under is grid.card_for(placed) and under.card.done, (
+        "the placed rider's done card holds the spot, so the second press is refused"
     )
 
 
@@ -3303,7 +3304,7 @@ def test_a_row_offers_the_riders_actions_while_the_race_runs_and_a_right_click_o
     c.main.show()
     QApplication.processEvents()
     quiet.clear()
-    w = c.main.surface.cards.cards[0]
+    w = next(w for w in c.main.surface.cards.cards if not w.card.done)
     QApplication.sendEvent(w, QContextMenuEvent(QContextMenuEvent.Reason.Mouse, w.rect().center(), w.mapToGlobal(w.rect().center())))  # fmt: skip
     assert quiet == ["menu"]
     quiet.clear()
@@ -3455,7 +3456,7 @@ def test_a_menu_action_that_removes_its_card_or_rebuilds_its_row_raises_nothing(
     monkeypatch.setattr(widgets, "run_menu", pick("Did Not Finish"))
     card.open_actions()
     assert not isValid(card) or not card.property("lit")
-    assert gone not in [k.card.entrant_id for k in surface.cards.cards]
+    assert next(k for k in surface.cards.cards if k.card.entrant_id == gone).card.done
     assert c.live.standings().by_entrant(gone).status == "DNF"
 
     table = surface.table
