@@ -166,3 +166,7 @@ MIT. See `LICENSE`.
 
 The license texts of the third-party components above are bundled under `madtracker/assets/licenses/` (Inter's is beside the font files, in `madtracker/assets/fonts/`).
 The installed program shows them under **Licenses...** in **Help** > **About MadTracker**.
+
+## Name collision
+
+There's another MadTracker: a music tracker for Windows, at madtracker.org. Because our two programs aren't related, and I'm very fond of this name (an homage to Mad Track Arena and Madison races) I've accepted the name collision.
