@@ -291,13 +291,15 @@ def card_laps(card: Card) -> bool:
 
 
 def menu_items(card: Card) -> list[tuple[str, str]]:
-    """The card's ⋯ items as the menu words them: no laps, and Break Tie on a shared badge.
+    """The card's ⋯ items as the menu words them: laps only without the buttons, and Break Tie on a shared badge.
 
-    The lap actions are the card's own buttons. Moving up a rider who
-    shares a place takes them out of the tie and passes nobody, so it
-    reads Break Tie, as the result row's does (review.row_menu).
+    The lap actions are a live card's own buttons; a done card has none,
+    so its ⋯ keeps them and is the same menu as its result row's. Moving
+    up a rider who shares a place takes them out of the tie and passes
+    nobody, so it reads Break Tie, as the result row's does
+    (review.row_menu).
     """
-    items = [(k, label) for k, label in card.actions if k not in LAP_KEYS]
+    items = [(k, label) for k, label in card.actions if not (card_laps(card) and k in LAP_KEYS)]
     if card.tied:
         items = [(k, BREAK_TIE if k == "move_up" else label) for k, label in items]
     return items

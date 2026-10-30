@@ -3,6 +3,11 @@
 What changed in each build, in the scorer's words. Newest first. Each
 entry names the version shown in About.
 
+## 1.1.3 (2026-Oct-30)
+
+- Fixed the ⋯ menu on a placed rider's card in races where laps matter, such as a Scratch Race or Handicap. Since 1.1.0 card-hiding changes it was missing Gained a Lap and Lost a Lap, so a lap for a rider already placed could only be entered from the result row. The card's menu now has the same items as the row's menu.
+- Fixed a tie in Multi-Race Standings for a Four-Race Omnium over two events when the second event's Points Race is left out (USAC 2O4). Riders with equal points totals were split by the last Elimination's final (wrong) instead of the Points Race's final sprint (2O3(g)) (correct). The first event's Points Race now decides the tie.
+
 ## 1.1.0 (2026-Oct-29)
 
 - Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry.

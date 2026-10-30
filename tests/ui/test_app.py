@@ -2685,6 +2685,41 @@ def test_a_done_cards_menu_is_its_rows_and_each_pick_goes_where_the_rows_does(
     assert card.toolTip() == "Disqualified"
 
 
+def test_a_done_cards_menu_keeps_the_laps_where_they_count(make_app, tmp_path, quiet, monkeypatch):
+    """A live card has +1 and −1 buttons, so its ⋯ leaves the laps out; a done
+    card has no buttons, so its ⋯ is the whole row menu, laps included, and a
+    lap picked there lands in the result as the row's does."""
+    from PySide6.QtCore import QEvent
+
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.main.resize(1600, 900)
+    c.main.show()
+    c.select_race(c.races[0].race_id)
+    first, second = c.live.roster.ids[:2]
+    live_card = c.main.surface.cards.card_for(first)
+    assert live_card.lap_up.isVisible()
+    assert "Gained a Lap" not in [label for _, label in live_card.menu_actions]
+    assert c.click(first) and c.click(second)
+    QApplication.processEvents()
+    grid = c.main.surface.cards
+    table = c.main.surface.table
+    card = grid.card_for(first)
+    assert card.card.done and not card.lap_up.isVisible()
+    labels = [label for _, label in card.menu_actions]
+    assert labels == [label for _, label in table.screen.rows[table.row_of(first)].actions]
+    assert "Gained a Lap" in labels and "Lost a Lap" in labels
+
+    def pick(menu, where):
+        action = next(a for a in menu.actions() if a.menu() is None and a.text() == "Lost a Lap")
+        action.trigger()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QApplication.processEvents()
+
+    monkeypatch.setattr(widgets, "run_menu", pick)
+    card.dots.click()
+    assert c.live.standings().by_entrant(first).laps_lost == 1
+
+
 # Invented riders for the large fields, a few as long as the cards' sample name.
 BIG_FIELD = (
     "Wren Talbot,Iker Solano,Mina Varga,Otto Brennan,Zara Quell,Teo Marchetti,"

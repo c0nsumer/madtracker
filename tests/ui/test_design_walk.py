@@ -1779,7 +1779,13 @@ def controls(c) -> list[tuple[str, Callable]]:
         if not card.card.done:
             out.append((f"card {name}", card.click))
         if card.dots.isVisibleTo(s):
-            out.append((f"card dots {card.card.entry.names[0]}", card.dots.click))
+            # A done card has no lap buttons, so where laps count its ⋯
+            # carries them; a live card's ⋯ leaves them to its buttons.
+            laps = any(k in cards.LAP_KEYS for k, _ in card.card.actions)
+            kind = "done card dots" if card.card.done else "card dots"
+            out.append(
+                (f"{kind}{' (laps)' if laps and card.card.done else ''} {name}", card.dots.click)
+            )
         for lap in (card.lap_up, card.lap_down):
             if lap.isVisibleTo(s):
                 out.append((f"card lap {lap.text()} {card.card.entry.names[0]}", lap.click))
@@ -1878,7 +1884,9 @@ def test_every_visible_control_does_something_in_every_state(make_app, quiet, fm
                     i,
                     name,
                 )
-            if name.startswith("card dots"):
+            if name.startswith("done card dots (laps)"):
+                assert GAIN in quiet[0] and LOSE in quiet[0], (fmt, i, name)
+            elif name.startswith("card dots") or name.startswith("done card dots"):
                 assert GAIN not in quiet[0] and LOSE not in quiet[0], (fmt, i, name)
             if name.startswith("card lap"):
                 # Routine: recorded at once, nothing asked.
