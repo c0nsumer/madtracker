@@ -9,6 +9,11 @@ entry names the version shown in About.
 - Fixed a tie in Multi-Race Standings for a Four-Race Omnium over two events when the second event's Points Race is left out (USAC 2O4). Riders with equal points totals were split by the last Elimination's final (wrong) instead of the Points Race's final sprint (2O3(g)) (correct). The first event's Points Race now decides the tie.
 - Fixed the Four-Race Omnium's standings leaving off a rider who was on a field but never started any of its races. USAC 2O2(c) places such a rider last as DNF, so the standings now list them after every finisher, as they already did for a rider who started one race and missed another.
 
+1.1.4 replaces 1.1.0, which is withdrawn for the first two bugs above. So since 1.0.0 it also has what 1.1.0 brought:
+
+- Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry.
+- Also added more "Out Earlier" results to the Elimination scoreboard.
+
 ## 1.1.0 (2026-Oct-29)
 
 - Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry.
