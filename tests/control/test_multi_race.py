@@ -1140,3 +1140,44 @@ def test_the_demo_has_a_rider_omnium_and_a_four_race_omnium_with_a_penalty(store
     # then 32 in the Tempo Race, 36 in the Miss-and-Out, 0 in the Points
     # Race, less the 40: 24 + 32 + 36 + 0 - 40 = 52.
     assert penalized.per_race == [24, 32, 36, 0] and penalized.total == 52
+
+
+def test_a_two_night_omnium_without_the_last_points_race_breaks_a_tie_on_the_first_nights(
+    store, riders
+):
+    """USAC 2O3(g): a tie on the total goes to the Points Race's final sprint.
+    With the second night's Points Race left out (USAC 2O4) that is the first
+    night's, not the last column ridden, so the second night's Elimination
+    final breaks nothing."""
+    ada, bram, cleo = riders[0:3]
+    friday = night(store, riders, "Friday", "2026-10-16")
+    scratch(store, friday, [ada, bram, cleo], name="Scratch")
+    tempo(store, friday, [[ada], [ada], [ada, bram, cleo]], [ada, bram, cleo], name="Tempo")
+    elimination(store, friday, [cleo, ada], bram, name="Elimination")
+    points_race(
+        store, friday, [[bram, ada, cleo], [ada, bram, cleo]], [ada, bram, cleo], name="Points"
+    )
+    saturday = night(store, riders, "Saturday", "2026-10-17")
+    scratch(store, saturday, [bram, cleo, ada], name="Scratch")
+    tempo(store, saturday, [[ada], [ada], [ada, bram, cleo]], [ada, bram, cleo], name="Tempo")
+    elimination(store, saturday, [cleo, ada], bram, name="Elimination")
+    left_out = store.add_race(saturday, "Points", "points", group_label="Cat 3").race_id
+    sid = rider_standings(store, [friday, saturday], kind=multi_race.FOUR_RACE, excluded=[left_out])
+    got = multi_race.compute(store, sid)
+    assert got.refusal is None and got.state == "final"
+    assert [c.race_name for c in got.groups[0].columns] == [
+        "Scratch",
+        "Tempo",
+        "Elimination",
+        "Points",
+        "Scratch",
+        "Tempo",
+        "Elimination",
+    ]
+    # Ada and Bram level on 245. Ada won the Points Race's final sprint
+    # and Bram Saturday's Elimination final; the Points Race decides.
+    assert [(r.rank, r.bib, r.per_race, r.total) for r in got.groups[0].rows] == [
+        (1, 1, [40, 40, 38, 13, 36, 40, 38], 245),
+        (2, 2, [38, 38, 40, 11, 40, 38, 40], 245),
+        (3, 3, [36, 36, 36, 6, 38, 36, 36], 224),
+    ]

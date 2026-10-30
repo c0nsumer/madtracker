@@ -216,6 +216,8 @@ class AggregateRules(_Rules):
 
     ``tie_break``: "most_firsts_then_last_race" (USAC 2B19(e)),
     "last_race_final_sprint" (UCI 3.2.252) or "none".
+    ``final_sprint_race`` is the race index whose final sprint
+    "last_race_final_sprint" reads; None reads the last race given.
     """
 
     engine: ClassVar[str] = "aggregate"
@@ -231,6 +233,7 @@ class AggregateRules(_Rules):
     must_finish_all: bool = False
     direction: str = "high"
     tie_break: str = "most_firsts_then_last_race"
+    final_sprint_race: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "points_by_place", _tuple_or_none(self.points_by_place))

@@ -88,7 +88,11 @@ def compute(
             # 2O3(d): placed after the last rider as DNF).
             dq = any(row is not None and row.status == "DQ" for row in per_race[eid])
             mark = "DQ" if dq else "DNF"
-        last = per_race[eid][-1] if per_race[eid] else None
+        # The final sprint that breaks a tie is the Points Race's, which
+        # is the last race of an omnium ridden whole but not of one whose
+        # last Points Race was left out (USAC 2O4).
+        decider = -1 if rules.final_sprint_race is None else rules.final_sprint_race
+        last = per_race[eid][decider] if per_race[eid] else None
         penalty = int(penalties.get(eid, 0))
         rows[eid] = Standing(
             entrant_id=eid,
@@ -172,6 +176,11 @@ def validate(
     for index in rules.sum_total_races:
         if index >= len(races):
             problems.append(f"sum_total_races names race {index} but only {len(races)} were given")
+    if rules.final_sprint_race is not None and rules.final_sprint_race >= len(races):
+        problems.append(
+            f"final_sprint_race names race {rules.final_sprint_race} "
+            f"but only {len(races)} were given"
+        )
     known = set(entrants)
     for i, standings in enumerate(races, start=1):
         for row in standings.rows:

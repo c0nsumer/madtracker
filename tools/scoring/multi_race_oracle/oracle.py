@@ -312,7 +312,11 @@ def _rider_table(store, kind, table, label, cols, lives, penalties) -> OGroup:
         totals[rid] = sum(v for v in cells if v is not None) - pen
         places[rid] = pl
         out[rid] = mark
-        last = rec["cells"].get(cols[-1]["race_id"], (None, False))[0] if cols else None
+        # R-OMNI-3: the final sprint that decides is the last Points Race's
+        # in the standings, which is the last column only when no later
+        # Points Race was left out (R-OMNI-8).
+        deciders = [c for c in cols if c["format"] == "points"] if kind == FOUR_RACE else cols
+        last = rec["cells"].get(deciders[-1]["race_id"], (None, False))[0] if deciders else None
         finals[rid] = last.final_sprint_place if last is not None else None
     ranked_ids = [rid for rid in kept if out[rid] is None]
     if kind == FOUR_RACE and any(c["format"] == "points" for c in cols):

@@ -393,14 +393,18 @@ def _rider_table(
     rode_any = [rid for rid in riders if any(rid in rode for rode in present)]
     if kind == FOUR_RACE:
         # The Points Race's points are summed raw, whichever column it is
-        # in; the preset names the fourth of four. Without one (left out
-        # under USAC 2O4) there is no final sprint to break a tie on, so
+        # in; the preset names the fourth of four. A tie on the total goes
+        # to the final sprint of the last Points Race in the standings
+        # (USAC 2O3(g)), which over two events is not the last column when
+        # the second night's Points Race was left out under USAC 2O4.
+        # Without any there is no final sprint to break a tie on, so
         # riders level on points share the place (USAC 1M6(a)).
         points_columns = tuple(i for i, c in enumerate(columns) if c.format == "points")
         rules = replace(
             rules,
             sum_total_races=points_columns,
             tie_break=rules.tie_break if points_columns else "none",
+            final_sprint_race=points_columns[-1] if points_columns else None,
         )
     result = compute_aggregate(rules, rode_any, per_race, penalties)
     rows = []
