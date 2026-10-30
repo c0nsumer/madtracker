@@ -284,7 +284,12 @@ def _rider_table(store, kind, table, label, cols, lives, penalties) -> OGroup:
                 row = None
             rec["cells"][c["race_id"]] = (row, row is not None and rode(live, rid))
     # R-RIDER-2: everyone who rode any counting race is in, no minimum.
-    kept = {rid: rec for rid, rec in riders.items() if any(v[1] for v in rec["cells"].values())}
+    # R-OMNI-4: the Four-Race Omnium keeps everyone on any field, so a
+    # rider who started none of its races is listed DNF (USAC 2O2(c)).
+    if kind == FOUR_RACE:
+        kept = dict(riders)
+    else:
+        kept = {rid: rec for rid, rec in riders.items() if any(v[1] for v in rec["cells"].values())}
     per_race, totals, places, finals, out = {}, {}, {}, {}, {}
     for rid, rec in kept.items():
         cells, pl = [], []

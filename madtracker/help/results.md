@@ -17,7 +17,7 @@ The sheet has the event's name and date, the venue's name or logo from Settings,
 
 A sprint in which a rider scored nothing is blank. The last sprint's figures include the doubling where the race doubles them, so the sprint columns, the laps at the lap value on the gray line, and any penalty add up to the total. A race with more sprints than fit across the page has one Sprints column with the sum instead.
 
-On the results sheet, a finish-order race with eight or more placed riders prints in two columns, so read down the left column and then the right.
+On the results sheet, a finish-order race with eight or more placed riders is in two columns, so read down the left column and then the right.
 
 The results and standings sheets are landscape; the program sheet is portrait.
 

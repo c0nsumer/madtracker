@@ -1216,3 +1216,29 @@ def test_a_two_night_omnium_with_both_points_races_ridden_ties_on_the_second_nig
         (2, 1, [40, 40, 38, 13, 36, 40, 38, 16], 261),
         (3, 3, [36, 36, 36, 6, 38, 36, 36, 8], 232),
     ]
+
+
+def test_a_four_race_no_show_is_listed_dnf_after_every_finisher(store, riders):
+    """USAC 2O2(c) and 8D6(a): a rider failing to start one of the omnium's
+    races has abandoned it and is placed last as DNF. That includes a rider
+    marked DNS in every race, and one on the first field only who never
+    started, so the sheet lists every entrant the omnium lost."""
+    ada, bram, cleo, dov, esme = riders[0:5]
+    friday = night(store, riders, "Friday", "2026-10-16")
+    scratch(store, friday, [ada, bram, cleo], dns=[dov, esme], name="Scratch")
+    tempo(store, friday, [[ada, bram, cleo]], [ada, bram, cleo], name="Tempo")
+    elimination(store, friday, [cleo, bram], ada, name="Elimination")
+    rules = R.points_race_rules(sprint_count=1)
+    live = entered(store, friday, "points", rules, [ada, bram, cleo, dov], name="Points")
+    assert live.act(dov, "dns").ok
+    finish(live, [ada, bram, cleo])
+    sid = rider_standings(store, [friday], kind=multi_race.FOUR_RACE)
+    got = multi_race.compute(store, sid)
+    assert got.refusal is None and got.state == "final"
+    assert [(r.rank, r.bib, r.total, r.status) for r in got.groups[0].rows] == [
+        (1, 1, 130, ""),
+        (2, 2, 120, ""),
+        (3, 3, 112, ""),
+        (None, 4, 0, "DNF"),
+        (None, 5, 0, "DNF"),
+    ]

@@ -387,11 +387,14 @@ def _rider_table(
             known.bib = entrant.bibs[0] if entrant.bibs else None
         per_race.append(session.standings())
     # Everyone who rode any counting race is in the table, with nothing
-    # for a race not ridden: there is no minimum. The Four-Race Omnium's
-    # own rule then lists a rider who missed one of its races as DNF.
+    # for a race not ridden: there is no minimum. The Four-Race Omnium
+    # keeps everyone on any of its fields instead: a rider who fails to
+    # start one of its races has abandoned the omnium and is listed DNF
+    # (USAC 2O2(c), 8D6(a)), a no-show in every race included.
     present = _rode(per_race)
     rode_any = [rid for rid in riders if any(rid in rode for rode in present)]
     if kind == FOUR_RACE:
+        rode_any = list(riders)
         # The Points Race's points are summed raw, whichever column it is
         # in; the preset names the fourth of four. A tie on the total goes
         # to the final sprint of the last Points Race in the standings
