@@ -60,7 +60,7 @@ Linux needs 64-bit Linux, Python 3.12 or newer, and Git. Clone the repository, o
 
 ## Release builds
 
-Pushing a tag that starts with `v` runs the same builds on GitHub and attaches the files to a release. The checks that come before a tag, and the road to 1.0.0, are in [Releasing](releasing.md).
+Pushing a tag that starts with `v` runs the same builds on GitHub and attaches the files to a release. The checks that come before a tag are in [Releasing](releasing.md).
 
 ## README screenshots
 
