@@ -1,4 +1,4 @@
-"""The cards: one per rider or team still in play, a click does the task.
+"""The cards: one per rider or team in the field, a click does the task.
 
 A card is large and plain (design section 7): the bib on a plate and
 the name beside it at the same size, because a call over the radio
@@ -20,6 +20,13 @@ chip beside the name, because before the finish the rider has no row in
 the result to show them. The rest of the card opens no menu on a left
 click, because that click is the entry.
 
+A rider placed, out, or marked keeps a done card in the same slot until
+the result completes, so no card moves under the scorer's finger: the
+pale gray ground, the plate and the name dimmed, no lap buttons, and the
+place in the badge's full blue or the status's short word in a chip of
+the lap chip's shape. A click on it records nothing and the red line
+says why; its ⋯ is the rider's result row's menu.
+
 Every size comes from the font's line height, so the card is the same
 shape on Windows, macOS and Linux. The grid picks its column count from
 the width a card needs to show a name whole, because the scorer takes
@@ -29,7 +36,7 @@ calls by name and a cut name costs a look at the bib.
 from collections.abc import Sequence
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QMenu, QScrollArea, QToolButton, QWidget
 from shiboken6 import isValid
 
@@ -72,11 +79,20 @@ WHITE = QColor("#ffffff")
 # bib stands out of a white card as much as the name beside it.
 PLATE = QColor(style.INK)
 # A place badge past the places a sprint awards, in the window's disabled gray.
-PAST_PLACES_BADGE = "#9aa1ad"
+PAST_PLACES_BADGE = style.DISABLED_INK
 PAST_PLACES_TIP = "Past the places this sprint awards: no points. Click to take it off."
 PLATE_DIGITS = WHITE
 # A rider with no bib yet: an empty plate with a dashed edge.
 PLATE_EDGE = QColor("#b8bec7")
+# A done card's plate, in the window's disabled gray: the number stays
+# readable in white, and the plate no longer stands out as a live one's.
+DONE_PLATE = QColor(style.DISABLED_INK)
+# A done team card's swatch, washed with the gray ground: the color still
+# names the team, without the weight of a team still in play.
+DONE_SWATCH_ALPHA = 110
+# A done card's place badge, the accent washed over the gray ground: the
+# full blue reads as a live sprint's badge, the dimmed one as a place taken.
+DONE_BADGE_ALPHA = 140
 # The lap actions are buttons on the card, never items in its menu. The
 # label's minus is the minus sign, as wide as the plus, so the two
 # buttons read as a pair.
@@ -214,6 +230,30 @@ def lap_pt(half: int) -> float:
     return pt
 
 
+def chip_font() -> QFont:
+    """The chip's type: the lap chip's and the status chip's, so the two read as one mark."""
+    return style.ui_font(member_pt(), bold=True)
+
+
+def chip_size(text: str) -> QSize:
+    """A chip around ``text``: SM each side, XS taller than the line."""
+    metrics = QFontMetrics(chip_font())
+    return QSize(metrics.horizontalAdvance(text) + 2 * style.SM, metrics.height() + style.XS)
+
+
+def draw_chip(p: QPainter, rect: QRect, text: str, ink: QColor) -> None:
+    """A chip: ``text`` on white in a rounded outline, both in ``ink``, so it reads as a tag.
+
+    The lap chip on a live card and the status chip on a done one; the
+    ink is what tells them apart.
+    """
+    p.setPen(QPen(ink, 1))
+    p.setBrush(WHITE)
+    p.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
+    p.setFont(chip_font())
+    p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), text)
+
+
 def lap_button(parent: QWidget, key: str) -> QToolButton:
     """+1 or −1 beside the strip; style.py draws its divider and hover."""
     b = OneClickToolButton(parent)
@@ -240,6 +280,16 @@ def actions_strip(parent: QWidget) -> QToolButton:
     return b
 
 
+def card_laps(card: Card) -> bool:
+    """Whether the card shows +1 and −1: where laps count, and never on a done card.
+
+    A done rider's laps are in their result row; the buttons on a card
+    that takes no click would be the one live thing on it.
+    """
+    keys = {k for k, _ in card.actions}
+    return not card.done and all(k in keys for k in LAP_KEYS)
+
+
 def menu_items(card: Card) -> list[tuple[str, str]]:
     """The card's ⋯ items as the menu words them: no laps, and Break Tie on a shared badge.
 
@@ -263,16 +313,14 @@ class RiderCard(OneClickButton):
         super().__init__(parent)
         self.card = card
         self.setObjectName("rider")
-        self.setToolTip(PAST_PLACES_TIP if card.past_awarded else "")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumWidth(CARD_MIN_W)
         self._height = self.card_height()
         self.setFixedHeight(self._height)
-        self.clicked.connect(lambda: self.pressed_entrant.emit(self.card.entrant_id))
-        keys = {k for k, _ in card.actions}
-        self.laps = all(k in keys for k in LAP_KEYS)
+        self.clicked.connect(self._task_click)
+        self.laps = card_laps(card)
         self.menu_actions = menu_items(card)
+        self._set_done(card)
         self.lap_up = lap_button(self, "lap_gained")
         self.lap_down = lap_button(self, "lap_lost")
         # -1 then +1, left to right, as a stepper reads.
@@ -283,6 +331,12 @@ class RiderCard(OneClickButton):
         self.dots.setVisible(bool(self.menu_actions))
         self.dots.clicked.connect(lambda: self.open_actions())
 
+    def _task_click(self) -> None:
+        # A done card's result is taken, so its click does nothing at all:
+        # no task, and no red line answering a click the card never invites.
+        if not self.card.done:
+            self.pressed_entrant.emit(self.card.entrant_id)
+
     def set_card(self, card: Card) -> None:
         """The same entrant after a click: badge, laps, names and actions as the card now says.
 
@@ -290,17 +344,39 @@ class RiderCard(OneClickButton):
         set here, so the card reads exactly as a new one built from it.
         """
         self.card = card
-        keys = {k for k, _ in card.actions}
-        laps = all(k in keys for k in LAP_KEYS)
+        laps = card_laps(card)
         self.menu_actions = menu_items(card)
+        self._set_done(card)
         if laps != self.laps:
             self.laps = laps
             self.lap_up.setVisible(laps)
             self.lap_down.setVisible(laps)
             self._place_buttons()
         self.dots.setVisible(bool(self.menu_actions))
-        self.setToolTip(PAST_PLACES_TIP if card.past_awarded else "")
         self.update()
+
+    def _set_done(self, card: Card) -> None:
+        """The done look, cursor and tooltip, or the live ones, as ``card`` says.
+
+        The style sheet's [done] rule is read again only on a fresh
+        polish of this card, as set_lit does for [lit]. A done card takes
+        no task click, so the pointer is the arrow over it; its tooltip
+        is the status's long name, as the chip shows the short word.
+        """
+        if card.done:
+            tip = card.done_tip
+        else:
+            tip = PAST_PLACES_TIP if card.past_awarded else ""
+        if self.toolTip() != tip:
+            self.setToolTip(tip)
+        hand = Qt.CursorShape.ArrowCursor if card.done else Qt.CursorShape.PointingHandCursor
+        if self.cursor().shape() != hand:
+            self.setCursor(hand)
+        if bool(self.property("done")) == card.done:
+            return
+        self.setProperty("done", card.done)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_height(self, height: int) -> None:
         """A height the grid chose for this card, kept through the style sheet's polish."""
@@ -345,8 +421,9 @@ class RiderCard(OneClickButton):
             widgets.run_menu(menu, where)
         finally:
             # The chosen action can rebuild the grid and delete this card
-            # before the menu's loop returns (a rider marked out leaves
-            # it), so the look comes back only on a card still alive.
+            # before the menu's loop returns (the pick that completes the
+            # result takes the cards away), so the look comes back only on
+            # a card still alive.
             if isValid(self):
                 self.set_lit(False)
 
@@ -403,9 +480,12 @@ class RiderCard(OneClickButton):
         """The place, the same number on both cards of a dead heat.
 
         The table, the sheet, the board, and the CSV all repeat the number
-        for a shared place (1, 1, 3), so the badge does too; the tint and
-        the Break Tie item are what say the place is shared.
+        for a shared place (1, 1, 3), so the badge does too; the Break Tie
+        item is what says the place is shared. A done card
+        shows its place or its status word here.
         """
+        if self.card.done:
+            return self.card.done_text
         if not self.card.badge:
             return ""
         return str(self.card.badge)
@@ -414,9 +494,17 @@ class RiderCard(OneClickButton):
         """The place badge, left of the card's buttons so they never overlap.
 
         A circle; a pill as tall when the text needs more width ("10").
+        A done card's status sits here as a chip, right-aligned where the
+        badge would end, centered on the card.
         """
-        if not self.card.badge:
+        text = self.badge_text()
+        if not text:
             return None
+        if self.card.done and self.card.done_status:
+            size = chip_size(text)
+            right = self._dots_left(width) - style.SM
+            top = (self.height() - size.height()) // 2
+            return QRect(right - size.width(), top, size.width(), size.height())
         r = badge_side()
         metrics = QFontMetrics(style.ui_font(NAME_PT - 2, bold=True))
         w = max(r, metrics.horizontalAdvance(self.badge_text()) + style.SM * 2)
@@ -425,7 +513,9 @@ class RiderCard(OneClickButton):
         return QRect(bx, by, w, r)
 
     def chip_text(self) -> str:
-        """The rider's net laps in words, empty when even."""
+        """The rider's net laps in words, empty when even or done (the result row has them)."""
+        if self.card.done:
+            return ""
         return lap_words(self.card.laps)
 
     def chip_rect(self, width: int | None = None) -> QRect | None:
@@ -433,9 +523,8 @@ class RiderCard(OneClickButton):
         text = self.chip_text()
         if not text:
             return None
-        metrics = QFontMetrics(style.ui_font(member_pt(), bold=True))
-        w = metrics.horizontalAdvance(text) + 2 * style.SM
-        h = metrics.height() + style.XS
+        size = chip_size(text)
+        w, h = size.width(), size.height()
         badge = self.badge_rect(width)
         right = (badge.left() if badge is not None else self._dots_left(width)) - style.SM
         line_top = (self.height() - _line(NAME_PT)) // 2
@@ -495,6 +584,8 @@ class RiderCard(OneClickButton):
         lh = _line(NAME_PT)
         x = style.MD
         badge = self.badge_rect()
+        done = self.card.done
+        ink = DIM if done else INK
         left_mid = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         if e.color:
             # One line, centered as a rider card's plate and name are; the
@@ -505,9 +596,12 @@ class RiderCard(OneClickButton):
             # way everywhere (a bar down the card's edge would read as decoration).
             swatch = lh
             p.setPen(QPen(QColor(0, 0, 0, 90), 1))
-            p.setBrush(QColor(e.color))
+            color = QColor(e.color)
+            if done:
+                color.setAlpha(DONE_SWATCH_ALPHA)
+            p.setBrush(color)
             p.drawRoundedRect(QRectF(x, top, swatch, swatch), 5, 5)
-            p.setPen(INK)
+            p.setPen(ink)
             p.setFont(name_font)
             team_right = self._name_right()
             team_rect = QRectF(x + swatch + style.SM, top, team_right - x - swatch - style.SM, lh)
@@ -526,7 +620,7 @@ class RiderCard(OneClickButton):
             plate = QRectF(x, top, plate_w, plate_h)
             if bib:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(PLATE)
+                p.setBrush(DONE_PLATE if done else PLATE)
             else:
                 p.setPen(QPen(PLATE_EDGE, 1, Qt.PenStyle.DashLine))
                 p.setBrush(WHITE)
@@ -534,7 +628,7 @@ class RiderCard(OneClickButton):
             p.setFont(name_font)
             p.setPen(PLATE_DIGITS)
             p.drawText(plate, int(Qt.AlignmentFlag.AlignCenter), bib)
-            p.setPen(INK)
+            p.setPen(ink)
             text_x = self._name_left()
             name_w = self._name_right() - text_x
             p.drawText(QRectF(text_x, top, name_w, plate_h), left_mid, self.shown_name())
@@ -542,16 +636,22 @@ class RiderCard(OneClickButton):
         if chip is not None:
             # Green for a lap gained, red for a lap lost: the window's own
             # OK and danger colors, on white so the chip reads as a tag.
-            ink = QColor(style.OK_GREEN if self.card.laps > 0 else style.DANGER)
-            p.setPen(QPen(ink, 1))
-            p.setBrush(WHITE)
-            p.drawRoundedRect(QRectF(chip).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
-            p.setFont(style.ui_font(member_pt(), bold=True))
-            p.drawText(chip, int(Qt.AlignmentFlag.AlignCenter), self.chip_text())
-        if badge is not None:
+            lap_ink = QColor(style.OK_GREEN if self.card.laps > 0 else style.DANGER)
+            draw_chip(p, chip, self.chip_text(), lap_ink)
+        if badge is not None and done and self.card.done_status:
+            # A status is a note, not a place: the lap chip's shape, in the
+            # dim ink of a card that takes no click.
+            draw_chip(p, badge, self.badge_text(), DIM)
+        elif badge is not None:
             p.setPen(Qt.PenStyle.NoPen)
             # Gray past the places the sprint awards: clicked, but no points.
-            p.setBrush(QColor(PAST_PLACES_BADGE if self.card.past_awarded else style.ACCENT))
+            # A done card's place is the accent dimmed, with white digits, so a
+            # blue number means a place on every card of every format and the
+            # full blue stays the live sprint's.
+            fill = QColor(PAST_PLACES_BADGE if self.card.past_awarded else style.ACCENT)
+            if done and not self.card.past_awarded:
+                fill.setAlpha(DONE_BADGE_ALPHA)
+            p.setBrush(fill)
             radius = badge.height() / 2
             p.drawRoundedRect(QRectF(badge), radius, radius)
             p.setPen(QColor("#ffffff"))
@@ -595,8 +695,8 @@ class CardGrid(QScrollArea):
     def set_cards(self, cards: list[Card]) -> None:
         """Show these cards: an entrant's card already shown takes its new state in place.
 
-        A click changes a card's badge or laps, or takes one card away (a
-        rider placed or eliminated); making a new card per entrant on
+        A click changes a card's badge or laps, or turns a card done in its
+        slot (a rider placed or eliminated); making a new card per entrant on
         every click would style 40 to 50 new widgets against the style sheet
         each time, the work Windows is slowest at. A card is kept only for
         the same entrant and the same kind (rider or team), and

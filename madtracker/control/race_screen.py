@@ -14,10 +14,16 @@ from typing import TYPE_CHECKING
 from madtracker.board import payloads as P
 from madtracker.control import rulesets
 from madtracker.control.describe import row_note
-from madtracker.control.race_words import NOTHING_TO_UNDO_LABEL, REVIEW_ACTIONS, RIDER_ACTIONS, UNDO
+from madtracker.control.race_words import (
+    DONE_MARKS,
+    NOTHING_TO_UNDO_LABEL,
+    REVIEW_ACTIONS,
+    RIDER_ACTIONS,
+    UNDO,
+)
 from madtracker.scoring._common import with_results
 from madtracker.scoring.actions import Action, Withdrawn
-from madtracker.scoring.result import Standings
+from madtracker.scoring.result import Standing, Standings
 from madtracker.store import Action as Row
 
 if TYPE_CHECKING:
@@ -37,6 +43,17 @@ class Card:
     tied: bool = False
     # The badge's place is past the places this sprint awards: it scores nothing.
     past_awarded: bool = False
+    # The entrant takes no click now (placed, out, or marked), and the card
+    # holds its slot so no other card moves.
+    done: bool = False
+    # What sits where the badge sits on a done card: the bare place, as the
+    # result row numbers it, or the status's short word.
+    done_text: str = ""
+    # The done text is a status word, drawn as a chip; otherwise it is a
+    # place, drawn as the place badge.
+    done_status: bool = False
+    # The status's long name, for the chip's tooltip; "" on a placed card.
+    done_tip: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,14 +140,12 @@ def screen(race: LiveRace) -> Screen:
     label = race.state_label(st)
     final = race.race.state == "final"
     review = st.is_complete and not task.editing
-    cards = (
-        () if review or task.kind in ("final", "none") else _cards(race, st, task, live, results)
-    )
     points = race.kind in ("points", "madison")
-    rows = (
-        _points_rows(race, st, task, live, results, recorded)
-        if points
-        else _place_rows(race, st, task, review, live, results)
+    rows = result_rows(race, st, task, live, results, recorded)
+    cards = (
+        _cards(race, st, task, live, results, {r.entrant_id: r for r in rows})
+        if cards_shown(st, task)
+        else ()
     )
     opening = points and not final and not task.editing
     open_sprints = tuple(sorted(recorded)) if opening else ()
@@ -201,15 +216,44 @@ def _current_sprint(race: LiveRace, recorded: dict[int, Row]) -> int | None:
     return max(recorded, default=None)
 
 
-def _cards(
-    race: LiveRace, st: Standings, task: Task, live: Sequence[Action], results: set[int]
-) -> list[Card]:
-    groups = race.staged(st)
+def cards_shown(st: Standings, task: Task) -> bool:
+    """Whether the surface shows cards: from the start list until the result completes.
+
+    A reopened sprint shows them again, for the correction.
+    """
+    review = st.is_complete and not task.editing
+    return not review and task.kind not in ("final", "none")
+
+
+def result_rows(
+    race: LiveRace,
+    st: Standings,
+    task: Task,
+    live: Sequence[Action],
+    results: set[int],
+    recorded: dict[int, Row],
+) -> list[ResultRow]:
+    """The result table: sprint points by rider, or the places decided so far."""
+    if race.kind in ("points", "madison"):
+        return _points_rows(race, st, task, live, results, recorded)
+    review = st.is_complete and not task.editing
+    return _place_rows(race, st, task, review, live, results)
+
+
+def live_ids(race: LiveRace, st: Standings, task: Task) -> list[int]:
+    """The entrants a click does the task on now; every other card is done.
+
+    Unsorted: the cards sort by bib.
+    """
+    if task.kind == "blocked":
+        # Nothing scores until the field is fixed, so nobody is done yet.
+        return list(race.roster.ids)
     if task.editing:
         # Exactly what the sprint scored, plus anyone it could place
         # now. A rider out of the finish rode every earlier sprint, so
         # a correction of one may place them; the finish itself may not.
-        # A withdrawn rider rode only the sprints before the withdrawal.
+        # A rider who did not finish, or withdrew, rode only the sprints
+        # before it.
         field = race.edit_field()
         if race.correcting_finish_order():
             racing = set(race._active(st))
@@ -217,17 +261,95 @@ def _cards(
             racing = {
                 r.entrant_id
                 for r in st.rows
-                if r.status is None
-                and (not r.withdrawn or race._racing_at_edit(r.entrant_id, Withdrawn.kind))
+                if (
+                    r.status is None
+                    and (not r.withdrawn or race._racing_at_edit(r.entrant_id, Withdrawn.kind))
+                )
+                or (r.status == "DNF" and race._racing_at_edit(r.entrant_id, "DNF"))
             }
-        ids = [r.entrant_id for r in st.rows if r.entrant_id in racing or r.entrant_id in field]
-    elif task.kind in ("sprint", "final_sprint"):
-        ids = race._active(st)
-    elif task.kind == "order":
+        return [r.entrant_id for r in st.rows if r.entrant_id in racing or r.entrant_id in field]
+    if task.kind in ("sprint", "final_sprint"):
+        return race._active(st)
+    if task.kind == "order":
         placed = race._placed_ids(st)
-        ids = [e for e in race._field_left(st) if e not in placed]
+        return [e for e in race._field_left(st) if e not in placed]
+    return list(st.remaining_entrants)
+
+
+def done_ids(race: LiveRace, st: Standings, task: Task) -> set[int]:
+    """The entrants whose card is done now; none while no cards show."""
+    if not cards_shown(st, task):
+        return set()
+    return set(race.roster.ids) - set(live_ids(race, st, task))
+
+
+def done_rows(race: LiveRace, st: Standings, task: Task) -> dict[int, ResultRow | None]:
+    """Each done entrant and their result row (None when they have no row), read afresh.
+
+    For a single entrant's menu or refusal; the screen builds its cards
+    from the rows it already has.
+    """
+    done = done_ids(race, st, task)
+    if not done:
+        return {}
+    log = race.rows()
+    live = race.actions(log)
+    rows = result_rows(race, st, task, live, with_results(live), race.recorded_sprints(log))
+    by_id = {r.entrant_id: r for r in rows}
+    return {e: by_id.get(e) for e in done}
+
+
+def done_mark(standing: Standing, row: ResultRow | None) -> tuple[str, bool, str]:
+    """A done card's (text, is a status, tooltip).
+
+    A status first, then a mishap, then a withdrawal, since each takes
+    the rider out of the field whatever place they hold; otherwise the
+    place as the result row numbers it, so the card and the table agree
+    as the scorer moves rows.
+    """
+    if standing.status:
+        code = standing.status
+    elif standing.out_of_finish:
+        code = "out_of_finish"
+    elif standing.withdrawn:
+        code = "withdrawn"
     else:
-        ids = list(st.remaining_entrants)
+        return (row.place_text if row is not None else "", False, "")
+    word, name = DONE_MARKS[code]
+    return word, True, name
+
+
+def done_actions(
+    race: LiveRace,
+    entrant_id: int,
+    row: ResultRow | None,
+    st: Standings,
+    live: Sequence[Action] | None = None,
+    task: Task | None = None,
+    results: set[int] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """A done card's menu: its result row's, so the card and the row are two doors to one menu."""
+    if row is not None:
+        return row.actions
+    return tuple(race.review_actions(entrant_id, st, actions=live, task=task, results=results))
+
+
+def _cards(
+    race: LiveRace,
+    st: Standings,
+    task: Task,
+    live: Sequence[Action],
+    results: set[int],
+    rows: dict[int | None, ResultRow],
+) -> list[Card]:
+    """One card per entrant in the field, in bib order, live or done.
+
+    The grid never reflows while the race runs: a click that places or
+    puts out a rider turns the card done in its slot, and Undo turns it
+    live again in the same slot.
+    """
+    groups = race.staged(st)
+    live_set = set(live_ids(race, st, task))
     cards = []
     # In an ordinary sprint, the places the ruleset awards.
     awarded = None
@@ -235,14 +357,37 @@ def _cards(
         count = race.sprint_count
         if count is None or task.sprint_no < count:
             awarded = race.scoring_places(task.sprint_no)
-    for eid in ids:
+    for eid in sorted(race.roster.ids, key=race._sort_key):
+        standing = st.by_entrant(eid)
+        laps = standing.net_laps
+        if eid not in live_set:
+            row = rows.get(eid)
+            text, status, tip = done_mark(standing, row)
+            actions = done_actions(race, eid, row, st, live, task, results)
+            # A shared place shows on the badge; a status chip is no place.
+            tied = row is not None and row.tied and not status
+            cards.append(
+                Card(
+                    eid,
+                    race.entry(eid),
+                    None,
+                    actions,
+                    laps,
+                    tied,
+                    done=True,
+                    done_text=text,
+                    done_status=status,
+                    done_tip=tip,
+                )
+            )
+            continue
         badge = race._staged_place(eid, groups) if task.stages else None
-        actions = tuple(race.rider_actions(eid, st, actions=live, task=task, results=results))
+        actions = tuple(
+            race.rider_actions(eid, st, actions=live, task=task, results=results, known_live=True)
+        )
         tied = badge is not None and any(eid in g and len(g) > 1 for g in groups)
-        laps = st.by_entrant(eid).net_laps
         past_awarded = badge is not None and awarded is not None and badge > awarded
         cards.append(Card(eid, race.entry(eid), badge, actions, laps, tied, past_awarded))
-    cards.sort(key=lambda c: race._sort_key(c.entrant_id))
     return cards
 
 
@@ -377,8 +522,9 @@ def _staged_row_own(
 ) -> list[tuple[str, str]]:
     """A staged row's own actions after its moves: a lap, a ruling, Disqualify.
 
-    The rider's card left when the click placed them, so the row is
-    the one place to act on them before the order is recorded.
+    The click that placed the rider turned their card done, and the done
+    card offers this row's menu, so the two act on the rider alike before
+    the order is recorded.
     """
     if race._staged.editing:
         return []

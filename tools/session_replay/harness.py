@@ -415,6 +415,14 @@ class Session:
                     "Undo button enabled differs",
                     f"{c.main.undo.isEnabled()} vs {screen.undo_enabled} ({screen.undo_text!r})",
                 )
+            # The widgets are the cards the screen says, in its order: a
+            # card left behind or out of its slot is one the scorer can hit.
+            drawn = [w.card for w in c.main.surface.cards.cards]
+            if drawn != list(screen.cards):
+                REC.add(
+                    "card widgets differ from the screen's cards",
+                    f"{[k.entrant_id for k in drawn]} vs {[k.entrant_id for k in screen.cards]}",
+                )
         # The file read afresh is the same race: nothing lives only in memory.
         fresh = LiveRace(c.store, live.race_id, settle=False)
         again = fresh.screen()
@@ -436,6 +444,55 @@ class Session:
                 "staged setting differs from the controller", f"{value!r:.800} vs {mine!r:.800}"
             )
         self._check_rows(live, screen)
+        self._check_cards(live, screen)
+
+    def _check_cards(self, live, screen) -> None:
+        """The fixed grid: every entrant's card in bib order, each done card
+        matching its row, and a click on one refused with nothing written."""
+        from madtracker.control.race import STAGED_KEY
+        from madtracker.control.race_words import DONE_MARKS
+
+        if not screen.cards:
+            return
+        shown = [cd.entrant_id for cd in screen.cards]
+        want = sorted(live.roster.ids, key=live._sort_key)
+        if shown != want:
+            REC.add("cards are not the field in bib order", f"{shown} vs {want}")
+        rows = {r.entrant_id: r for r in screen.rows if r.entrant_id is not None}
+        st = live.standings()
+        key = STAGED_KEY.format(race_id=live.race_id)
+        for card in screen.cards:
+            if not card.done:
+                continue
+            eid = card.entrant_id
+            row = rows.get(eid)
+            standing = st.by_entrant(eid)
+            if card.done_status:
+                code = standing.status
+                if code is None and standing.out_of_finish:
+                    code = "out_of_finish"
+                elif code is None and standing.withdrawn:
+                    code = "withdrawn"
+                if code is None or (card.done_text, card.done_tip) != DONE_MARKS[code]:
+                    REC.add(
+                        "done card's status differs from the rider's",
+                        f"{live.name(eid)}: {card.done_text!r} vs {code!r}",
+                    )
+            elif row is None or (card.done_text, card.tied) != (row.place_text, row.tied):
+                REC.add(
+                    "done card's place differs from its row",
+                    f"{live.name(eid)}: {(card.done_text, card.tied)!r} vs "
+                    f"{(row.place_text, row.tied) if row else None!r}",
+                )
+            # A probe: harmless when the click is refused, a finding when not.
+            before = (len(live.rows()), live.store.get_setting(key))
+            out = live.click(eid)
+            after = (len(live.rows()), live.store.get_setting(key))
+            if out.ok or after != before:
+                REC.add(
+                    "a click on a done card was not refused",
+                    f"{live.name(eid)}: {out!r}, log and staged row {before!r} -> {after!r}",
+                )
 
     def _check_rows(self, live, screen) -> None:
         """Every row the table shows against a replay of the live log."""

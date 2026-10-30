@@ -6,7 +6,8 @@ the task line, the buttons that exist, the cards, the menus on a card
 and on a result row, the board page, the Undo label). The walk asserts
 exactly that. The sweep then clicks every visible control in every
 state and fails on anything silent (principle 3): a click must change
-what the scorer sees, open a menu or a dialog, or say why not.
+what the scorer sees, open a menu or a dialog, or say why not. A done
+card is the one control silent by design, and the sweep checks it is.
 """
 
 import itertools
@@ -41,7 +42,7 @@ TIE_BELOW = "Tie with the Rider Below"
 # While the race runs a row's ⋯ offers what the rider's card offers, less
 # the staged moves and ties (section 7): a points race's
 # rows take the format's lists below; a rider already placed in a chase (whose card
-# left with the click) gets the laps and Disqualify after the row's moves,
+# goes done with the click) gets the laps and Disqualify after the row's moves,
 # and an elimination's out or a win-and-out's lap winner Disqualify alone.
 PLACED = [GAIN, LOSE, DQ]
 
@@ -101,6 +102,10 @@ class Expect:
     status: str = ""
     headers_open: bool = False
     record_enabled: bool | None = None
+    # The done cards' marks in bib order (a place, or a status's short
+    # word), beside the ``cards`` that take a click; None leaves them
+    # unchecked.
+    done: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,7 +184,7 @@ def mishap(token):
 
 
 def withdraw(token, place):
-    """The card's "Withdrawn" (USAC 2O3(e), 1M6(d)): the card leaves and the
+    """The card's "Withdrawn" (USAC 2O3(e), 1M6(d)): the card goes done and the
     row keeps a numbered place after every rider still racing, with the
     note beside the name.
 
@@ -193,6 +198,18 @@ def withdraw(token, place):
         c.refresh()
         row = next(r for r in c.main.surface.table.screen.rows if r.entrant_id == eid)
         assert (row.place_text, row.note) == (place, "Withdrawn"), token
+
+    return run
+
+
+def status(token, key):
+    """A status from the card's ⋯ (Did Not Finish and the rest), through the
+    controller: the quiet fixture answers the app's question No."""
+
+    def run(c):
+        eid = c.live.roster.resolve(token)
+        assert c.live.act(eid, key).ok, c.main.surface.problem.text()
+        c.refresh()
 
     return run
 
@@ -332,6 +349,7 @@ CHASE_BACK_MARKED = Expect(
     True,
     CHASE_ACTIONS,
     {0: [DOWN, TIE_BELOW, *PLACED], 1: [UP, TIE, *PLACED], 2: PLACED},
+    done=("1", "2", "10"),
 )
 # Two placed from the back as well: each moves within the back, where up
 # is the better place, and Undo takes one move back.
@@ -345,6 +363,7 @@ CHASE_TWO_BACK = Expect(
     True,
     CHASE_ACTIONS,
     {0: [DOWN, TIE_BELOW, *PLACED], 1: [UP, TIE, *PLACED], 2: [DOWN, *PLACED], 3: [UP, *PLACED]},
+    done=("1", "2", "9", "10"),
 )
 FINAL_SPRINT_ALL = [DNS, DNF, MISHAP, WITHDRAWN, GAIN, LOSE, DQ]
 FINAL_SPRINT_ACTIONS = [DNF, MISHAP, WITHDRAWN, GAIN, LOSE, DQ]
@@ -420,6 +439,27 @@ POINTS_TIED = Expect(
     {0: POINTS_ALL},
     record_enabled=True,
 )
+# Sprint 1 recorded, Sprint 2 not yet clicked.
+POINTS_SPRINT_2 = Expect(
+    "Racing",
+    "Sprint 2: click the first 6 riders in order, then Record Sprint.",
+    ["Record Sprint"],
+    10,
+    "sprint_points",
+    "Undo: Sprint 1 recorded",
+    True,
+    POINTS_ALL,
+    {0: POINTS_RUNNING},
+    record_enabled=False,
+    headers_open=True,
+    done=(),
+)
+POINTS_SPRINT_2_DNF = replace(
+    POINTS_SPRINT_2,
+    cards=9,
+    undo="Undo: #38 Rosa Navarro marked Did Not Finish",
+    done=("DNF",),
+)
 
 WALK: dict[str, tuple[int, list[Step]]] = {
     "chase": (
@@ -464,10 +504,12 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                     True,
                     CHASE_ACTIONS,
                     {0: [DOWN, TIE_BELOW, *PLACED], 1: [UP, TIE, *PLACED]},
+                    # Each placed card holds its slot, its place in the badge.
+                    done=("1", "2"),
                 ),  # fmt: skip
             ),
             # The last place is known early: it goes in from the back,
-            # numbered from the field left, and its card leaves.
+            # numbered from the field left, and its card goes done.
             Step(place_last("51"), CHASE_BACK_MARKED),
             Step(place_last("45"), CHASE_TWO_BACK),
             # A move at the back swaps 9th and 10th.
@@ -595,10 +637,27 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                     True,
                     NO_LAP_ALL,
                     {0: [DQ]},
+                    done=("12",),
                 ),  # fmt: skip
             ),
             Step(
-                click("17", "31", "8", "36", "27", "21", "14", "11", "5"),
+                # The third bell: each out keeps a done card in bib order,
+                # numbered with the place the out took.
+                click("17", "31"),
+                Expect(
+                    "Racing",
+                    "Click the rider who is out.",
+                    [],
+                    9,
+                    "elimination",
+                    "Undo: #31 Ray Duchene marked Eliminated",
+                    True,
+                    NO_LAP_ALL,
+                    done=("11", "10", "12"),
+                ),  # fmt: skip
+            ),
+            Step(
+                click("8", "36", "27", "21", "14", "11", "5"),
                 Expect(
                     "Final sprint",
                     "Click the winner.",
@@ -611,6 +670,7 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                     # The outs move while the race runs: the last out (3rd)
                     # down, the first out (12th) up or into the bell above.
                     {0: [DOWN, *moves(4, 12), TIE_BELOW, DQ], 9: [UP, *moves(3, 11), TIE, DQ]},
+                    done=("3", "9", "4", "5", "11", "6", "7", "10", "8", "12"),
                 ),  # fmt: skip
             ),
             Step(
@@ -708,22 +768,14 @@ WALK: dict[str, tuple[int, list[Step]]] = {
             ),
             Step(undo, POINTS_TIED_THEN_ONE),
             Step(undo, POINTS_TIED),
+            Step(record, POINTS_SPRINT_2),
             Step(
-                record,
-                Expect(
-                    "Racing",
-                    "Sprint 2: click the first 6 riders in order, then Record Sprint.",
-                    ["Record Sprint"],
-                    10,
-                    "sprint_points",
-                    "Undo: Sprint 1 recorded",
-                    True,
-                    POINTS_ALL,
-                    {0: POINTS_RUNNING},
-                    record_enabled=False,
-                    headers_open=True,
-                ),  # fmt: skip
+                # A rider out mid-race keeps a done card with the status's
+                # short word; Undo turns it live in the same slot.
+                status("38", "dnf"),
+                POINTS_SPRINT_2_DNF,
             ),
+            Step(undo, POINTS_SPRINT_2),
             Step(
                 # A lap gained (the card's +1): the lap is a result, so Did not
                 # start goes, and Lap Not Counted comes while the lap stands.
@@ -774,7 +826,7 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                 ),  # fmt: skip
             ),
             Step(
-                # A mishap in the last kilometer (USAC 2M7(b)): the card leaves
+                # A mishap in the last kilometer (USAC 2M7(b)): the card goes done
                 # and the finish completes without the rider.
                 mishap("7"),
                 Expect(
@@ -788,6 +840,7 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                     LAPPED_BADGED,
                     {0: []},
                     headers_open=True,
+                    done=("Mishap",),
                 ),  # fmt: skip
             ),
             Step(
@@ -1064,6 +1117,7 @@ WALK: dict[str, tuple[int, list[Step]]] = {
                     True,
                     NO_LAP_ALL,
                     {0: [DQ]},
+                    done=("1",),
                 ),  # fmt: skip
             ),
             Step(
@@ -1142,6 +1196,65 @@ WALK["handicap"] = (HANDICAP, WALK["chase"][1])
 # An unknown distance is a scratch race whose length the riders learn at
 # the bell; the scorer clicks the same finish order.
 WALK["unknown_distance"] = (UNKNOWN_DISTANCE, WALK["chase"][1])
+
+
+def survivors(n):
+    """The race's own rules ride to ``n`` survivors (USAC 2E5), so the final sprint is a finish order."""
+
+    def run(c):
+        race = c.store.race(c.live.race_id)
+        c.store.update_race(race.race_id, rules={**race.rules, "survivors": n})
+        c.live.reload()
+        c.refresh()
+
+    return run
+
+
+ELIMINATION_THREE_LEFT = Expect(
+    "Final sprint",
+    "Final sprint: click riders in the order they finish.",
+    [],
+    3,
+    "elimination",
+    "Undo: #11 Jenna Whitfield marked Eliminated",
+    True,
+    NO_LAP_ALL,
+    done=("9", "4", "5", "11", "6", "7", "10", "8", "12"),
+)
+# Ridden to three survivors, the final sprint places them one click at a
+# time: a placed survivor's card goes done beside the outs' while the
+# other two still take a click.
+WALK["elimination final sprint"] = (
+    ELIMINATION,
+    [
+        Step(
+            survivors(3),
+            Expect(
+                "Start list",
+                "Click the rider who is out.",
+                [],
+                12,
+                "pre_race",
+                rc.NOTHING_TO_UNDO_LABEL,
+                False,
+                NO_LAP_ALL,
+                done=(),
+            ),  # fmt: skip
+        ),
+        Step(click("42", "17", "31", "8", "36", "27", "21", "14", "11"), ELIMINATION_THREE_LEFT),
+        Step(
+            click("24"),
+            replace(
+                ELIMINATION_THREE_LEFT,
+                cards=2,
+                undo="Undo: #24 Kenji Mori placed 1st",
+                row_menus={0: [DQ]},
+                done=("9", "4", "5", "11", "6", "1", "7", "10", "8", "12"),
+            ),
+        ),
+        Step(undo, ELIMINATION_THREE_LEFT),
+    ],
+)
 
 # A withdrawn rider leaves the cards and ranks after every rider still
 # racing, the later withdrawn higher (USAC 2O3(e)): the row has no menu
@@ -1442,8 +1555,19 @@ def check(c, expect: Expect, where: str) -> None:
     assert s.visible_buttons() == expect.buttons, where
     if expect.record_enabled is not None:
         assert s.record_button.isEnabled() == expect.record_enabled, where
-    cards = s.cards.cards
+    # The cards that take a click: a done card holds its slot in the grid.
+    cards = [w for w in s.cards.cards if not w.card.done]
     assert len(cards) == expect.cards, where
+    done = [w for w in s.cards.cards if w.card.done]
+    if expect.done is not None:
+        assert tuple(w.badge_text() for w in done) == expect.done, where
+    for w in done:
+        # Gray, no laps, the arrow, and a ⋯ only where its row has a menu.
+        assert w.property("done") is True and w.chip_rect() is None, where
+        assert not w.lap_up.isVisibleTo(s) and not w.lap_down.isVisibleTo(s), where
+        assert w.cursor().shape() == Qt.CursorShape.ArrowCursor, where
+        assert w.dots.isVisibleTo(s) == bool(w.menu_actions), where
+        assert w.toolTip() == w.card.done_tip, where
     if expect.card_menu is not None and cards:
         card = cards[0]
         assert [label for _, label in card.card.actions] == expect.card_menu, where
@@ -1625,13 +1749,35 @@ def restore(c, before: tuple) -> bool:
     return snapshot(c) == before
 
 
+def done_click(c, card, quiet) -> None:
+    """A click on a done card does nothing: no red line, nothing recorded or staged, the card as it was."""
+    eid = card.card.entrant_id
+    # The controller still refuses a done entrant; asking it records nothing.
+    refusal = c.live.click(eid)
+    assert not refusal.ok and refusal.message, eid
+    before = snapshot(c)
+    shown = (card.badge_text(), card.card.done_status, card.toolTip())
+    quiet.clear()
+    card.click()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert snapshot(c) == before and not quiet, eid
+    assert c.main.surface.problem.text() == "" and not c.main.surface.flashing(), eid
+    assert c.main.surface.cards.card_for(eid) is card and card.card.done, eid
+    assert (card.badge_text(), card.card.done_status, card.toolTip()) == shown, eid
+    assert not card.property("lit"), eid
+
+
 def controls(c) -> list[tuple[str, Callable]]:
     """Every visible control in the window now, each as (name, press)."""
     win = c.main
     s = win.surface
     out: list[tuple[str, Callable]] = []
     for card in s.cards.cards:
-        out.append((f"card {card.card.entry.names[0]}", card.click))
+        name = card.card.entry.names[0]
+        # A done card is silent by design, as a disabled button is: the
+        # sweep presses it apart, through done_click.
+        if not card.card.done:
+            out.append((f"card {name}", card.click))
         if card.dots.isVisibleTo(s):
             out.append((f"card dots {card.card.entry.names[0]}", card.dots.click))
         for lap in (card.lap_up, card.lap_down):
@@ -1709,6 +1855,8 @@ def test_every_visible_control_does_something_in_every_state(make_app, quiet, fm
         if c is not None:
             make_app.dispose(c)
         c = reach(i)
+        for card in [w for w in c.main.surface.cards.cards if w.card.done]:
+            done_click(c, card, quiet)
         k = 0
         while k < len(controls(c)):
             # Listed afresh each round: a rebuilt app has new widgets.
@@ -3264,14 +3412,25 @@ def test_every_touch_target_is_a_fingers_size_at_1366_and_1920(app, monkeypatch)
     win.show()
     select(c, POINTS)
     click(*B_RIDERS[:2])(c)
+    # A done card beside the live ones: its ⋯ takes a finger as theirs does.
+    status(B_RIDERS[2], "dnf")(c)
     for size in ((1366, 768), (1920, 1080)):
         win.resize(*size)
         for _ in range(4):
             QApplication.processEvents()
+        done = [card for card in win.surface.cards.cards if card.card.done]
+        assert len(done) == 1 and done[0].dots.isVisible(), size
         for card in win.surface.cards.cards:
-            for button in (card.lap_down, card.lap_up):
-                assert button.width() >= style.TOUCH_LAP and button.height() >= style.TOUCH, size
+            if not card.card.done:
+                for button in (card.lap_down, card.lap_up):
+                    assert button.width() >= style.TOUCH_LAP, size
+                    assert button.height() >= style.TOUCH, size
             assert card.dots.width() >= style.TOUCH and card.dots.height() >= style.TOUCH, size
+            # The strip is where the live card's is: the full height inside
+            # the border (1 px above, 2 px below), at the card's right edge.
+            assert card.dots.width() == cards.strip_width(), size
+            assert card.dots.geometry().bottom() == card.height() - 3, size
+            assert card.dots.geometry().right() == card.width() - 2, size
         assert win.surface.cards.height() >= win.surface.cards.needed_height(), (
             size,
             "every card in view",

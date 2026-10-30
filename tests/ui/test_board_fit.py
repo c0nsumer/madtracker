@@ -362,6 +362,38 @@ def test_the_last_riders_plates_stay_inside_their_cards(qtbot, monkeypatch, size
             assert b.x() - a.right() >= 24 * u + 48 * u - 0.5
 
 
+def test_the_out_earlier_plates_wrap_onto_rows_inside_the_side_column(qtbot, monkeypatch):
+    """Twelve out before the last one: the plates run onto more than one row,
+    newest first, and none passes the side column's right or bottom edge."""
+    from madtracker.board import pages, theme
+
+    plates: list = []
+    plate = theme.plate
+
+    def record(p, rect, bib, out=False):
+        plates.append((rect, bib, out))
+        return plate(p, rect, bib, out)
+
+    sides: list = []
+    remaining = pages.EliminationPage._remaining
+
+    def side_of(self, p, side, y, n):
+        sides.append(QRectF(side))
+        return remaining(self, p, side, y, n)
+
+    monkeypatch.setattr(theme, "plate", record)
+    monkeypatch.setattr(pages.EliminationPage, "_remaining", side_of)
+    es = [P.Entry(bibs=[str(i + 1)], names=[_name(i)]) for i in range(16)]
+    data = P.Elimination(header=HEADER, remaining=es[:3], last_eliminated=es[3], eliminated=es[4:])
+    render(qtbot, "elimination", data)
+    side = sides[-1]
+    out = [(r, bib) for r, bib, was_out in plates if was_out]
+    assert [bib for _r, bib in out][:2] == ["16", "15"], "newest first"
+    assert len({round(r.y()) for r, _bib in out}) > 1
+    for r, bib in out:
+        assert r.right() <= side.right() + 0.5 and r.bottom() <= side.bottom() + 0.5, bib
+
+
 def test_a_big_elimination_opens_as_rows_with_names_at_the_floor(qtbot, drawn):
     """Thirteen to sixteen riders open as two columns of start-list rows,
     since four rows of cards would put names at 27 px and long ones at 19."""

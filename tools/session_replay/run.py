@@ -2,6 +2,7 @@
 
     python tools/session_replay/run.py --nights 3 --seed 1
     python tools/session_replay/run.py --fast
+    python tools/session_replay/run.py --only personas --nights 1 --seed 1
 
 Exit code is the number of breaks (capped at 255).
 """
@@ -59,6 +60,18 @@ def _sabotage_staged() -> None:
 
 
 SABOTAGE = {"total": _sabotage_total, "state": _sabotage_state, "staged": _sabotage_staged}
+# The scorer personas, as sessions.PERSONAS names them; listed here so
+# the choices are known before Qt and the app are imported.
+PERSONA_NAMES = (
+    "careful",
+    "click-happy",
+    "careless",
+    "panicked",
+    "fast-finish",
+    "fat-finger",
+    "late-change",
+    "corrector",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,7 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--nights", type=int, default=3, help="rounds of clean, messy, switch")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--fast", action="store_true", help="one round, fewer Undo checks")
-    parser.add_argument("--only", choices=("clean", "messy", "switch", "storm"), action="append")
+    parser.add_argument(
+        "--only",
+        choices=("clean", "messy", "switch", "storm", "personas", *PERSONA_NAMES),
+        action="append",
+        help="the nights to play (repeatable); personas is every persona",
+    )
     parser.add_argument("--out", type=Path, help="keep the files here (default: a temp folder)")
     parser.add_argument("--night", type=int, help="run only this round (1-based), to repro one")
     parser.add_argument("--trace", action="store_true", help="print every step as it is taken")
@@ -102,12 +120,15 @@ def main(argv: list[str] | None = None) -> int:
     undo_rate = 0.25 if args.fast else 0.6
     work = args.out or Path(tempfile.mkdtemp(prefix="madtracker-replay-"))
     work.mkdir(parents=True, exist_ok=True)
-    kinds = args.only or ["clean", "messy", "switch"]
+    kinds = []
+    for kind in args.only or ["clean", "messy", "switch"]:
+        kinds += list(PERSONA_NAMES) if kind == "personas" else [kind]
     plays = {
         "clean": sessions.clean_night,
         "messy": sessions.messy_night,
         "switch": sessions.switch_night,
         "storm": sessions.storm_night,
+        **sessions.PERSONAS,
     }
     started = time.monotonic()
     template = harness.seed_template(work)
@@ -116,7 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     rounds = [args.night - 1] if args.night else range(nights)
     for night in rounds:
         for k, kind in enumerate(kinds):
-            seed = args.seed * 1000 + night * 10 + k
+            # A round's seeds step by ten, or by the kinds when there are more, so no two share one.
+            seed = args.seed * 1000 + night * max(10, len(kinds)) + k
             name = f"{kind}-{night + 1}-seed{seed}"
             rng = random.Random(seed)
             t0 = time.monotonic()

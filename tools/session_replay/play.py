@@ -51,7 +51,7 @@ class Player:
         return ok
 
     def _order(self, cards) -> list:
-        """The unbadged cards in the order the bunch crosses the line."""
+        """The unbadged live cards in the order the bunch crosses the line."""
 
         def key(card):
             e = card.entrant_id
@@ -80,7 +80,7 @@ class Player:
                 return self.s.step("Mark Final", c.mark_final)
             REC.add("race stuck", f"task {task.kind}: {task.text}")
             return False
-        free = [cd for cd in sc.cards if cd.badge is None]
+        free = [cd for cd in sc.cards if cd.badge is None and not cd.done]
         if not any(cd.badge is not None for cd in sc.cards):
             self.jostle = {}
         if task.kind == "sprint":
@@ -132,7 +132,7 @@ class Player:
         out: list[tuple[float, str, object]] = []
         for card in sc.cards:
             eid = card.entrant_id
-            if card.badge is None:
+            if card.badge is None and not card.done:
                 out.append((1.0, f"click {self.name(eid)}", lambda e=eid: c.click(e)))
             for key, label in card.actions:
                 out.append(
@@ -294,7 +294,7 @@ class Mishaps:
                 return p.do("dnf")
             return False
         if self.kind == "placings":
-            free = [cd for cd in sc.cards if cd.badge is None]
+            free = [cd for cd in sc.cards if cd.badge is None and not cd.done]
             nothing_staged = not (c.live.staged() or c.live.staged_tail())
             if task.kind == "order" and len(free) >= 4 and self.once("place last"):
                 return p.do("Place Last")
@@ -317,7 +317,7 @@ class Mishaps:
 
     def _sprints(self, sc, task, recorded, nothing_staged) -> bool:
         p, c = self.p, self.c
-        free = [cd for cd in sc.cards if cd.badge is None]
+        free = [cd for cd in sc.cards if cd.badge is None and not cd.done]
         if task.editing:
             # The correction: move a badge, tie two, then Record (advance does).
             if self.once("edit move"):

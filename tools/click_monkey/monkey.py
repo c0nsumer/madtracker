@@ -35,8 +35,14 @@ for sub in ("tests/ui", "tests", ""):
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QSettings, Qt  # noqa: E402
-from PySide6.QtGui import QContextMenuEvent, QDesktopServices, QImage, QKeySequence  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
+from PySide6.QtGui import (  # noqa: E402
+    QContextMenuEvent,
+    QDesktopServices,
+    QImage,
+    QKeySequence,
+    QMouseEvent,
+)
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QAbstractButton,
@@ -104,6 +110,35 @@ def rss() -> int:
         return 0
 
 
+def double_click(w: QWidget, at: QPoint | None = None) -> None:
+    """A person's double-click: press, release, the second press as the double-click event, release.
+
+    QTest.mouseDClick sends a press and the double-click event with no
+    release, so a button under it never clicks at all; a person's
+    double-click clicks a one-click button (a card, Undo, Record Sprint)
+    once.
+    """
+    if at is None:
+        at = w.rect().center()
+    left, none = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
+    for kind in (
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.MouseButtonRelease,
+    ):
+        held = none if kind == QEvent.Type.MouseButtonRelease else left
+        event = QMouseEvent(
+            kind,
+            QPointF(at),
+            QPointF(w.mapToGlobal(at)),
+            left,
+            held,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(w, event)
+
+
 class FakeScreen:
     """A second display the offscreen platform does not have, for unplugging."""
 
@@ -161,6 +196,10 @@ class Monkey:
         self._count = 0
         self._idle = 0
         self.trail_file: Path | None = None
+        # A done card's press: the entrant, the controller's refusal, the
+        # log's length, the staged row, and the red line before it; None
+        # between presses.
+        self._done = None
 
     # ----- the fakes -------------------------------------------------------
 
@@ -616,6 +655,13 @@ class Monkey:
                 continue  # no event: the switch is off, and a person cannot press it
             else:
                 out.append((self._weight(name), name, ("silence", press)))
+        if showing == "surface" and c.live is not None:
+            for card in s.cards.cards:
+                if card.card.done:
+                    # Silent by design, so not a silence press: the check
+                    # below asks that it changed nothing at all.
+                    name = f"card done {card.card.entry.names[0]}"
+                    out.append((self._weight(name), name, self._done_press(card)))
         # Each kind of control shares one weight, so sixteen cards do not
         # crowd out the one Record Sprint.
         kinds: dict[str, int] = {}
@@ -648,7 +694,7 @@ class Monkey:
                     (
                         0.6,
                         f"double-click card {label}",
-                        lambda w=card: QTest.mouseDClick(w, Qt.MouseButton.LeftButton),
+                        lambda w=card: double_click(w),
                     )
                 )  # noqa: E501
                 out.append(
@@ -677,18 +723,14 @@ class Monkey:
                 (
                     0.4,
                     "double-click undo",
-                    lambda: QTest.mouseDClick(win.undo, Qt.MouseButton.LeftButton),
+                    lambda: double_click(win.undo),
                 )
             )  # noqa: E501
             out.append(
                 (
                     0.4,
                     "double-click record",
-                    lambda: (
-                        QTest.mouseDClick(s.record_button, Qt.MouseButton.LeftButton)
-                        if s.record_button.isVisible()
-                        else None
-                    ),
+                    lambda: double_click(s.record_button) if s.record_button.isVisible() else None,
                 )
             )  # noqa: E501
         if showing == "setup":
@@ -734,7 +776,27 @@ class Monkey:
             self._idle = 0
         return out
 
+    def _done_press(self, card):
+        """A press on a done card, with what it must leave as it was."""
+
+        def press():
+            live = self.c.live
+            eid = card.card.entrant_id
+            # The refusal records nothing, so asking the controller first is safe.
+            said = live.click(eid)
+            self._done = (
+                eid,
+                said,
+                len(live.store.actions(live.race_id)),
+                self.c.store.get_setting(live._key),
+                self.c.main.surface.problem.text(),
+            )
+            card.click()
+
+        return press
+
     KIND_WEIGHTS = {
+        "card done": 2.0,
         "card": 5.0,
         "card dots": 3.0,
         "card lap": 2.0,
@@ -753,6 +815,7 @@ class Monkey:
     @staticmethod
     def _kind(name: str) -> str:
         for kind in (
+            "card done",
             "card dots",
             "card lap",
             "card",
@@ -920,6 +983,7 @@ class Monkey:
             self.fail(
                 step, name, "empty with a live race", f"race {c.live.race_id} live, screen empty"
             )  # noqa: E501
+        self._check_done_press(step, name)
         if c.store is not None and c.live is not None:
             if c.live.store is not c.store:
                 self.fail(step, name, "live race on another store", repr(c.live.store))
@@ -957,6 +1021,27 @@ class Monkey:
             ):  # noqa: E501
                 self.fail(step, name, "dots opened no menu", str(self.opened[:3]))
 
+    def _check_done_press(self, step: int, name: str) -> None:
+        """A done card's press did nothing: no log row, the staged row and the red line as they were."""
+        probe, self._done = self._done, None
+        if probe is None:
+            return
+        eid, said, rows, staged, line = probe
+        c = self.c
+        live = c.live
+        if said.ok:
+            self.fail(step, name, "done card took a click", f"#{eid}: {said!r}")
+            return
+        if live is None or c.store is None:
+            return
+        if len(live.store.actions(live.race_id)) != rows:
+            self.fail(step, name, "done card press wrote to the log", f"#{eid}")
+        if c.store.get_setting(live._key) != staged:
+            self.fail(step, name, "done card press changed the staged row", f"#{eid}")
+        shown = c.main.surface.problem.text()
+        if shown != line:
+            self.fail(step, name, "done card press changed the red line", f"{line!r} to {shown!r}")
+
     def _check_race(self, step: int, name: str, showing: str) -> None:
         from madtracker.scoring import compute_for_format
 
@@ -967,6 +1052,12 @@ class Monkey:
         except Exception:  # the check reports, the app's own path decides
             self.fail(step, name, "screen raised", traceback.format_exc()[-1500:])
             return
+        if fresh.cards:
+            # The fixed grid: every entrant's card, in bib order, until review.
+            ids = [k.entrant_id for k in fresh.cards]
+            want = sorted(live.roster.ids, key=live._sort_key)
+            if ids != want:
+                self.fail(step, name, "cards are not the field in bib order", f"{ids} vs {want}")
         shown = c.main.surface.screen
         if showing == "surface" and shown is not None and shown != fresh:
             diff = [f for f in fresh.__dataclass_fields__ if getattr(fresh, f) != getattr(shown, f)]

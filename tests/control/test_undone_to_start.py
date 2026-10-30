@@ -421,7 +421,7 @@ def test_a_race_undone_to_its_start_has_nothing_announced_until_ridden_again(sto
     assert store.race(race_id).state == "provisional" and first is not None
     ok(live.undo())
     assert store.race(race_id).state == "running"
-    play(live, [("click", "12"), ("click", "33")])
+    play(live, [("click", "33")])
     assert store.race(race_id).announced_utc == first
     undo_to_start(live)
     assert store.race(race_id).announced_utc is None

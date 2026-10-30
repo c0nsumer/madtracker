@@ -1753,13 +1753,14 @@ def test_a_double_click_on_a_card_places_one_rider(make_app, tmp_path):
     # new grid out as soon as the first click lands.
     grid.pressed_entrant.connect(lambda _: (QApplication.sendPostedEvents(), grid.grid.activate()))
     first = grid.cards[0]
-    second = grid.cards[1].card.entrant_id
+    placed = first.card.entrant_id
     spot = first.mapTo(c.main, QPoint(style.MD, first.height() // 2))
     QTest.mouseDClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, spot)
     QApplication.processEvents()
     assert _placed(c) == 1
-    assert grid.card_for(second) is grid.body.childAt(grid.body.mapFrom(c.main, spot)), (
-        "the next rider's card took the spot, so its silence is the fix and not a miss"
+    under = grid.body.childAt(grid.body.mapFrom(c.main, spot))
+    assert under is grid.card_for(placed) and under.card.done, (
+        "the placed rider's done card holds the spot, so the second press does nothing"
     )
 
 
@@ -2521,6 +2522,237 @@ def test_a_small_field_shows_every_card_without_a_scroll_bar(make_app, tmp_path)
     assert len(grid.cards) == 5
     assert grid.height() >= grid.needed_height()
     assert not grid.verticalScrollBar().isVisible()
+
+
+def _slots(grid) -> dict[int, tuple[int, tuple]]:
+    """Each entrant's card widget and its cell in the grid."""
+    return {
+        w.card.entrant_id: (id(w), grid.grid.getItemPosition(grid.grid.indexOf(w)))
+        for w in grid.cards
+    }
+
+
+@pytest.mark.parametrize(
+    ("row", "steps"),
+    [
+        # A chase: two from the front, one from the back, a status, and Undo of each.
+        (0, [("click", "7"), ("click", "12"), ("act", "51", "place_last"), ("act", "9", "dnf")]),
+        # An elimination: three out, a status, then the moves of an out.
+        (1, [("click", "42"), ("click", "17"), ("act", "8", "dnf"), ("act", "42", "move_up")]),
+        # A points race: a sprint, a withdrawal, a lap, a badge in the next sprint.
+        (
+            2,
+            [
+                ("click", "12"),
+                ("click", "7"),
+                ("record",),
+                ("act", "38", "withdrawn"),
+                ("act", "4", "lap_gained"),
+                ("click", "4"),
+            ],
+        ),
+    ],
+)
+def test_every_card_keeps_its_widget_and_its_slot_until_the_result_completes(
+    make_app, tmp_path, row, steps
+):
+    """A click, a status, or an Undo turns a card done or live where it stands:
+    no widget moves to another cell and none is made again, so no card
+    slides under the scorer's finger."""
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.main.resize(1366, 740)
+    c.main.show()
+    c.select_race(c.races[row].race_id)
+    QApplication.processEvents()
+    grid = c.main.surface.cards
+    at_start = _slots(grid)
+    assert len(at_start) == len(c.live.roster.ids)
+
+    def same(where):
+        QApplication.sendPostedEvents()
+        QApplication.processEvents()
+        assert _slots(grid) == at_start, where
+
+    for step in steps:
+        if step[0] == "click":
+            assert c.click(c.live.roster.resolve(step[1])), c.main.surface.problem.text()
+        elif step[0] == "act":
+            assert c.rider_action(c.live.roster.resolve(step[1]), step[2]), (
+                c.main.surface.problem.text()
+            )
+        else:
+            assert c.record_sprint(), c.main.surface.problem.text()
+        same(step)
+        # A click on each done card is refused and moves nothing either.
+        for w in [w for w in grid.cards if w.card.done]:
+            assert not c.click(w.card.entrant_id)
+            same(("done click", step))
+    while c.main.undo.isEnabled():
+        assert c.undo()
+        same("undo")
+    assert not any(w.card.done for w in grid.cards)
+
+
+def test_a_click_on_a_done_card_changes_nothing(make_app, tmp_path):
+    """The mouse on a done card: no signal reaches the controller, the red
+    line stays empty, nothing is recorded or staged, and the card neither
+    lights nor shows the hand."""
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.main.resize(1600, 900)
+    c.main.show()
+    c.select_race(c.races[0].race_id)
+    eid = c.live.roster.resolve("7")
+    grid = c.main.surface.cards
+    live = grid.card_for(eid)
+    assert live.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    assert c.click(eid)
+    QApplication.processEvents()
+    card = grid.card_for(eid)
+    assert card is live and card.card.done and card.badge_text() == "1"
+    assert card.cursor().shape() == Qt.CursorShape.ArrowCursor
+    log = [r.action_id for r in c.live.rows()]
+    staged = c.live.staged()
+    heard: list[int] = []
+    card.pressed_entrant.connect(heard.append)
+    grid.pressed_entrant.connect(heard.append)
+    QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=QPoint(style.MD, card.height() // 2))
+    QApplication.processEvents()
+    assert heard == []
+    assert c.main.surface.problem.text() == ""
+    assert [r.action_id for r in c.live.rows()] == log
+    assert c.live.staged() == staged
+    assert grid.card_for(eid) is card and card.card.done and card.badge_text() == "1"
+    assert not card.property("lit") and not card.isDown()
+    assert c.undo()
+    assert not card.card.done and card.toolTip() == ""
+    assert card.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+
+def test_a_done_cards_menu_is_its_rows_and_each_pick_goes_where_the_rows_does(
+    make_app, tmp_path, quiet, monkeypatch
+):
+    """The ⋯ on a done card and on its result row are two doors to one menu:
+    a move lands in the result as the row's does, and Disqualify asks the
+    same question first."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QContextMenuEvent
+
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.main.resize(1600, 900)
+    c.main.show()
+    c.select_race(c.races[1].race_id)
+    first, second = (c.live.roster.resolve(b) for b in ("42", "17"))
+    assert c.click(first) and c.click(second)
+    QApplication.processEvents()
+    grid = c.main.surface.cards
+    table = c.main.surface.table
+
+    def row_menu(eid):
+        return [label for _, label in table.screen.rows[table.row_of(eid)].actions]
+
+    card = grid.card_for(first)
+    assert card.card.done and card.badge_text() == "12"
+    assert [label for _, label in card.menu_actions] == row_menu(first)
+    assert card.dots.isVisible() and not card.lap_up.isVisible()
+
+    def pick(label):
+        def run(menu, where):
+            items = [a for a in menu.actions() if a.menu() is None]
+            action = next(a for a in items if a.text() == label)
+            action.trigger()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            QApplication.processEvents()
+
+        return run
+
+    # The strip, and a right-click (as a long press on the touchscreen is).
+    monkeypatch.setattr(widgets, "run_menu", pick("Move Up"))
+    card.dots.click()
+    assert c.live.standings().by_entrant(first).rank == 11
+    assert (card.badge_text(), grid.card_for(second).badge_text()) == ("11", "12")
+    monkeypatch.setattr(widgets, "run_menu", pick("Move Down"))
+    centre = card.rect().center()
+    QApplication.sendEvent(
+        card, QContextMenuEvent(QContextMenuEvent.Reason.Mouse, centre, card.mapToGlobal(centre))
+    )
+    assert (card.badge_text(), grid.card_for(second).badge_text()) == ("12", "11")
+    quiet.clear()
+    monkeypatch.setattr(widgets, "run_menu", pick("Disqualify"))
+    card.open_actions()
+    assert quiet == ["ask:Disqualify"]
+    assert c.live.standings().by_entrant(first).status == "DQ"
+    assert grid.card_for(first) is card and card.badge_text() == "DQ"
+    assert card.toolTip() == "Disqualified"
+
+
+# Invented riders for the large fields, a few as long as the cards' sample name.
+BIG_FIELD = (
+    "Wren Talbot,Iker Solano,Mina Varga,Otto Brennan,Zara Quell,Teo Marchetti,"
+    "Callum Ashworth,Ingrid Halvorsen,Mateo Villanueva,Priscilla Oduya,Dorian Kettleby,"
+    "Freya Lindgren,Hollis Abernant,Juniper Castell,Kasimir Novotny,Leocadia Brandt,"
+    "Marisol Quintero,Nikolai Ferrante,Odessa Whitlock,Quentin Oyelaran,Rafaela Montiel,"
+    "Soren Blackwood,Tamsin Okonkwo,Ulrich Pemberton,Valentina Rusev,Wilhelmina Ochoa,"
+    "Xavier Delacroix,Yusuf Harrowgate,Briony Castellan,Anselm Whitcombe"
+).split(",")
+
+
+@pytest.mark.parametrize(("size", "wide"), [((1366, 740), False), ((1920, 1080), True)])
+def test_a_field_of_8_to_30_keeps_every_name_whole_and_scrolls_only_past_its_room(
+    make_app, tmp_path, size, wide
+):
+    """An elimination with half out and a chase with four placed, at the laptop
+    stacked and at 1920 side by side: no name is cut on a live or a done
+    card, the result keeps its rows, and the grid scrolls only when its rows
+    are taller than the room it has."""
+    from madtracker.control import rulesets
+    from madtracker.ui.surface import RIDER_RESULT_ROWS
+
+    c = make_app(data_dir=tmp_path / "data")
+    s = c.store
+    event_id = s.add_event("Friday Night 1", "2026-10-16").event_id
+    ids = []
+    for bib, name in enumerate(BIG_FIELD, 1):
+        rider = s.add_rider(*name.split(" ", 1))
+        s.add_entry(event_id, rider.rider_id, bib)
+        ids.append(rider.rider_id)
+    races = []
+    for n in (8, 14, 20, 30):
+        for fmt, clicks in (("elimination", n // 2), ("placings", 4)):
+            # A status too where the field has a 16-character name to mark:
+            # the widest chip beside the longest name.
+            rules = rulesets.rules_for(s, rulesets.default_ruleset_name(s), fmt)
+            race = s.add_race(event_id, f"{fmt} {n}", fmt, rules=rules.to_dict())
+            for rider_id in ids[:n]:
+                s.add_race_entry(race.race_id, rider_id)
+            status = None if n < 14 else ("dnf" if fmt == "elimination" else "withdrawn")
+            races.append((race.race_id, n, clicks, status))
+    c.open_event(event_id)
+    c.main.resize(*size)
+    c.main.show()
+    surface = c.main.surface
+    grid = surface.cards
+    for race_id, n, clicks, status in races:
+        c.select_race(race_id)
+        # Every other rider, so done cards sit among the live ones.
+        for rider_id in ids[1:n:2][:clicks]:
+            assert c.click(rider_id), surface.problem.text()
+        if status is not None:
+            assert c.live.entry(ids[8]).names == ["Mateo Villanueva"]
+            assert c.rider_action(ids[8], status), surface.problem.text()
+            clicks += 1
+        for _ in range(3):
+            QApplication.processEvents()
+        where = (size, c.live.race.name)
+        assert surface.wide == wide, where
+        assert len(grid.cards) == n and sum(w.card.done for w in grid.cards) == clicks, where
+        for w in grid.cards:
+            assert w.shown_name() == w.card.entry.names[0], (where, w.card.entry.names[0])
+        table = surface.table
+        assert table.isVisible(), where
+        if not wide:
+            assert table.height() >= surface._table_need(RIDER_RESULT_ROWS), where
+        scrolls = grid.verticalScrollBar().isVisible()
+        assert scrolls == (grid.needed_height() > grid.viewport().height()), where
 
 
 def test_open_event_deletes_an_unraced_event_and_leaves_it_if_it_was_open(
@@ -3303,7 +3535,7 @@ def test_a_row_offers_the_riders_actions_while_the_race_runs_and_a_right_click_o
     c.main.show()
     QApplication.processEvents()
     quiet.clear()
-    w = c.main.surface.cards.cards[0]
+    w = next(w for w in c.main.surface.cards.cards if not w.card.done)
     QApplication.sendEvent(w, QContextMenuEvent(QContextMenuEvent.Reason.Mouse, w.rect().center(), w.mapToGlobal(w.rect().center())))  # fmt: skip
     assert quiet == ["menu"]
     quiet.clear()
@@ -3455,7 +3687,7 @@ def test_a_menu_action_that_removes_its_card_or_rebuilds_its_row_raises_nothing(
     monkeypatch.setattr(widgets, "run_menu", pick("Did Not Finish"))
     card.open_actions()
     assert not isValid(card) or not card.property("lit")
-    assert gone not in [k.card.entrant_id for k in surface.cards.cards]
+    assert next(k for k in surface.cards.cards if k.card.entrant_id == gone).card.done
     assert c.live.standings().by_entrant(gone).status == "DNF"
 
     table = surface.table

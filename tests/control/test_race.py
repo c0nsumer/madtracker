@@ -14,7 +14,7 @@ from madtracker.control import race as rc
 from madtracker.control.program import is_scored
 from madtracker.control.race import LiveRace
 from madtracker.scoring import rules as R
-from madtracker.scoring.actions import Eliminated, FinishOrder, SprintResult
+from madtracker.scoring.actions import Eliminated, FinishOrder, SprintResult, Status
 from madtracker.store import VOID_KIND
 
 TEAMS = [("Blue", 3, 24), ("Red", 5, 36), ("Orange", 8, 12)]
@@ -36,6 +36,15 @@ def chase(store, make_race, bibs=(7, 12, 33, 9)):
 
 def ranks(live):
     return {live.name(r.entrant_id): r.rank for r in live.standings().rows}
+
+
+def live_cards(live):
+    """The entrants whose card takes a click now; the done cards hold their slots."""
+    return [c.entrant_id for c in live.screen().cards if not c.done]
+
+
+def live_names(live, team=False):
+    return [c.entry.team if team else c.entry.names[0] for c in live.screen().cards if not c.done]
 
 
 # ----- chase ---------------------------------------------------------------
@@ -61,7 +70,8 @@ def test_chase_clicks_build_the_finish_order_and_the_last_click_completes(store,
     assert s.undo_text() == "Undo: #33 Jack Moreau placed 1st"
     screen = s.screen()
     assert screen.rows[0].entry.names == ["Jack Moreau"] and screen.rows[0].staged
-    assert "Jack Moreau" not in [c.entry.names[0] for c in screen.cards]
+    done = next(c for c in screen.cards if c.entry.names[0] == "Jack Moreau")
+    assert done.done and done.done_text == "1" and done.badge is None
     # The staged order survives a reload: it is on disk.
     again = LiveRace(store, s.race_id)
     assert again.screen().rows[0].entry.names == ["Jack Moreau"]
@@ -98,7 +108,7 @@ def test_chase_clicks_build_the_finish_order_and_the_last_click_completes(store,
     assert [r.place_text for r in screen.rows] == ["1", "2", "2", "4"]
 
 
-def test_chase_second_click_on_a_placed_rider_unplaces_and_undo_takes_a_click_back(
+def test_chase_second_click_on_a_placed_rider_is_refused_and_undo_takes_a_click_back(
     store, make_race, ids
 ):
     s = chase(store, make_race)
@@ -107,9 +117,8 @@ def test_chase_second_click_on_a_placed_rider_unplaces_and_undo_takes_a_click_ba
     ok(s.undo())
     assert [r.entrant_id for r in s.screen().rows if r.staged] == [ids[7]]
     ok(s.click(ids[12]))
-    out = ok(s.click(ids[7]))
-    assert "unplaced" in out.message
-    assert [r.entrant_id for r in s.screen().rows if r.staged] == [ids[12]]
+    assert s.click(ids[7]) == rc.Outcome(False, "#7 Maya Petrakis is already placed (1st).")
+    assert [r.entrant_id for r in s.screen().rows if r.staged] == [ids[7], ids[12]]
 
 
 def test_a_dnf_during_a_chase_shrinks_the_field_and_can_complete_it(store, make_race, ids):
@@ -125,10 +134,12 @@ def test_a_dnf_during_a_chase_shrinks_the_field_and_can_complete_it(store, make_
     ]
     ok(s.act(ids[33], "dns"))
     assert s.state == "setup", "a DNS is a pre-race call"
-    assert s.rider_actions(ids[33]) == [("dq", "Disqualify")]
+    # The done card offers its row's menu, empty until the result is in.
+    assert s.rider_actions(ids[33]) == []
     ok(s.click(ids[7]))
-    # 7 is placed, so 7 started; 12 has nothing recorded and may still be a no-show.
-    assert [k for k, _ in s.rider_actions(ids[7])] == ["dnf", "lap_gained", "lap_lost", "dq"]
+    # 7 is placed, so 7 started, and the done card offers the staged row's
+    # menu; 12 has nothing recorded and may still be a no-show.
+    assert [k for k, _ in s.rider_actions(ids[7])] == ["lap_gained", "lap_lost", "dq"]
     assert [k for k, _ in s.rider_actions(ids[12])] == [
         "place_last",
         "dns",
@@ -164,7 +175,7 @@ def test_place_last_marks_from_the_back_and_numbers_from_the_field_left(store, m
     assert staged_rows(s) == [("Ben Szymanski", "4")]
     assert s.undo_text() == "Undo: #9 Ben Szymanski placed 4th"
     screen = s.screen()
-    assert "Ben Szymanski" not in [c.entry.names[0] for c in screen.cards]
+    assert "Ben Szymanski" not in live_names(s)
     assert screen.rest_together
     # A second Place Last is not offered; Undo is the way back.
     assert rc.PLACE_LAST not in [k for k, _ in s.rider_actions(ids[9])]
@@ -179,7 +190,7 @@ def test_place_last_marks_from_the_back_and_numbers_from_the_field_left(store, m
     ok(s.click(ids[7]))
     assert staged_rows(s) == [("Maya Petrakis", "1"), ("Jack Moreau", "3"), ("Ben Szymanski", "4")]
     assert s.undo_text() == "Undo: #7 Maya Petrakis placed 1st"
-    assert [c.entry.names[0] for c in s.screen().cards] == ["Tess Gallagher"]
+    assert live_names(s) == ["Tess Gallagher"]
     # The tail is on disk with the front.
     again = LiveRace(store, s.race_id)
     assert again.staged() == [[ids[7]]] and again.staged_tail() == [[ids[9]], [ids[33]]]
@@ -201,8 +212,8 @@ def test_a_dnf_after_a_mark_from_the_back_closes_the_places_up(store, make_race,
     ok(s.act(ids[12], "dnf"))
     assert s.state == "running"
     assert staged_rows(s) == [("Jack Moreau", "2"), ("Ben Szymanski", "3")]
-    # A rider marked from the back who then leaves drops out of the tail.
-    ok(s.act(ids[33], "dnf"))
+    # A rider marked from the back who is then disqualified drops out of the tail.
+    ok(s.act(ids[33], "dq"))
     assert staged_rows(s) == [("Ben Szymanski", "2")]
     assert LiveRace(store, s.race_id).staged_tail() == [[ids[9]]]
 
@@ -477,10 +488,10 @@ def test_elimination_clicks_put_riders_out_and_the_winner_click_completes(
     assert s.undo_text() == "Undo: #3 Marcus Delgado marked Eliminated"
     screen = s.screen()
     assert [(r.place_text, r.entry.names[0]) for r in screen.rows] == [("4", "Marcus Delgado")]
-    assert len(screen.cards) == 3
+    assert len(screen.cards) == 4 and live_cards(s) == [ids[5], ids[7], ids[8]]
     ok(s.click(ids[5]))
     assert s.task().text == "Click the winner." and s.state_label() == "Final sprint"
-    assert not s.click(ids[3]).ok
+    assert s.click(ids[3]) == rc.Outcome(False, "#3 Marcus Delgado is already out (4th).")
     ok(s.click(ids[8]))
     assert s.state == "provisional"
     assert ranks(s) == {
@@ -711,7 +722,8 @@ def test_a_dnf_on_a_rider_already_out_is_only_the_mark_whatever_the_log_order(
     s = LiveRace(store, make_race("elimination", [3, 5, 7, 8, 9], house.elimination()))
     for bib in (3, 7, 8):
         ok(s.click(ids[bib]))
-    ok(s.act(ids[7], "dnf"))
+    # The out row offers no DNF, so the mark goes in as an entry.
+    ok(s._record([Status(entrant_id=ids[7], status="DNF")]))
     assert placed(s) == {"Tom Kowalczyk": 3, "Maya Petrakis": 4, "Marcus Delgado": 5}
     ok(s.review(ids[8], "move_down"))
     assert placed(s) == {"Maya Petrakis": 3, "Tom Kowalczyk": 4, "Marcus Delgado": 5}
@@ -977,7 +989,7 @@ def test_a_dnf_before_a_sprint_stays_out_of_its_correction_after_an_undo(
     dnf = next(r for r in s.rows() if r.kind == "status")
     assert "[from " in dnf.operator_note, "the Undo wrote the DNF again"
     ok(s.reopen_sprint(2))
-    assert s.click(ids[5]) == rc.Outcome(False, "Priya Okafor is DNF. Undo takes it back.")
+    assert s.click(ids[5]) == rc.Outcome(False, "#5 Priya Okafor is marked Did Not Finish.")
 
 
 def test_a_sprint_ridden_again_after_an_undo_to_the_start_has_its_own_moment(
@@ -997,7 +1009,7 @@ def test_a_sprint_ridden_again_after_an_undo_to_the_start_has_its_own_moment(
     clicks(s, ids, 3)
     ok(s.record_sprint())
     ok(s.reopen_sprint(1))
-    assert s.click(ids[5]) == rc.Outcome(False, "Priya Okafor is DNF. Undo takes it back.")
+    assert s.click(ids[5]) == rc.Outcome(False, "#5 Priya Okafor is marked Did Not Finish.")
     # A DNF after this run's sprint still places in its correction.
     s.cancel_edit()
     ok(s.act(ids[7], "dnf"))
@@ -1437,7 +1449,8 @@ def test_win_and_out_staged_places_after_a_vacated_place_are_the_result(store, m
     s = LiveRace(store, make_race("win_and_out", [33, 7, 9, 12, 19], R.win_and_out_rules(3)))
     ok(s.click(ids[33]))
     ok(s.click(ids[7]))
-    ok(s.act(ids[7], "dnf"))
+    # The lap winner's row offers no DNF, so the mark goes in as an entry.
+    ok(s._record([Status(entrant_id=ids[7], status="DNF")]))
     ok(s.click(ids[9]))
     ok(s.click(ids[12]))
     shown = [(r.entry.bibs[0], r.place_text, r.staged) for r in s.screen().rows]
@@ -1469,14 +1482,14 @@ def test_win_and_out_laps_then_the_rest(store, make_race, ids, direction, expect
     want = "1st" if direction == "forward" else "3rd"
     assert s.log_rows()[-1].text == f"Lap 1: #7 Maya Petrakis takes {want}"
     assert s.undo_text() == "Undo: #7 Maya Petrakis won Lap 1"
-    assert not s.click(ids[7]).ok
+    assert s.click(ids[7]) == rc.Outcome(False, f"#7 Maya Petrakis is already placed ({want}).")
     assert s.task().text == "Lap 2: click the winner."
     ok(s.click(ids[12]))
     ok(s.click(ids[33]))
     assert s.task().text == "Click the rest in the order they finish."
     assert s.state_label() == "Final sprint"
     screen = s.screen()
-    assert len(screen.cards) == 2
+    assert len(screen.cards) == 5 and live_cards(s) == [ids[9], ids[19]]
     assert len(screen.rows) == 3 and all(r.entrant_id for r in screen.rows)
     ok(s.click(ids[9]))
     assert s.screen().rows[3].staged and s.screen().rows[3].place_text == "4"
@@ -1679,9 +1692,10 @@ def test_logbook_reads_an_undo_then_a_new_entry_in_order(store, make_race, ids):
     for bib in (7, 12, 33, 9):
         ok(s.click(ids[bib]))
     # Undo takes the finish back to the order as staged before the last
-    # click; unplace 33 and place the last two the other way round.
+    # click; a second Undo unplaces 33, and the last two go the other way round.
     ok(s.undo())
-    for bib in (33, 9, 33):
+    ok(s.undo())
+    for bib in (9, 33):
         ok(s.click(ids[bib]))
     assert [(r.text, r.voided) for r in s.log_rows()] == [
         (CLICKED, True),
@@ -2323,13 +2337,15 @@ def test_a_mishap_refused_outside_the_final_sprint_and_in_other_formats(
     ok(s.record_sprint())
     assert s.task().kind == "final_sprint"
     ok(s.act(ids[12], "out_of_finish"))
-    # Once out of the finish: no card, no second mark, no DNF, a click refused.
-    assert ids[12] not in [c.entrant_id for c in s.screen().cards]
+    # Once out of the finish: a done card, no second mark, no DNF, a click refused.
+    assert ids[12] not in live_cards(s)
     assert s.rider_actions(ids[12]) == []
     line = "Tess Gallagher is out of the finish (mishap). Undo takes it back."
     assert s.act(ids[12], "dnf") == rc.Outcome(False, line)
     assert s.act(ids[12], "out_of_finish") == rc.Outcome(False, line)
-    assert s.click(ids[12]) == rc.Outcome(False, line)
+    assert s.click(ids[12]) == rc.Outcome(
+        False, "#12 Tess Gallagher is marked Out of the Finish (Mishap)."
+    )
     for fmt, rules in (
         ("chase", R.placings_rules()),
         ("elimination", house.elimination()),
@@ -2354,7 +2370,7 @@ def test_a_mishap_rider_rides_an_earlier_sprints_correction_but_not_the_finish(
     clicks(s, ids, 7, 33)
     assert s.state == "provisional"
     ok(s.reopen_sprint(1))
-    assert ids[12] in [c.entrant_id for c in s.screen().cards]
+    assert ids[12] in live_cards(s)
     for eid in [e for g in s.staged() for e in g]:
         ok(s.click(eid))
     clicks(s, ids, 12, 7, 33)
@@ -2362,9 +2378,9 @@ def test_a_mishap_rider_rides_an_earlier_sprints_correction_but_not_the_finish(
     assert s.standings().by_entrant(ids[12]).sprint_points == (10, 0)
     assert ranks(s) == {"Maya Petrakis": 1, "Jack Moreau": 2, "Tess Gallagher": 3}
     ok(s.reopen_sprint(2))
-    assert ids[12] not in [c.entrant_id for c in s.screen().cards]
+    assert ids[12] not in live_cards(s)
     assert s.click(ids[12]) == rc.Outcome(
-        False, "Tess Gallagher is out of the finish (mishap). Undo takes it back."
+        False, "#12 Tess Gallagher is marked Out of the Finish (Mishap)."
     )
     s.cancel_edit()
 
@@ -2384,7 +2400,7 @@ def test_madison_team_out_of_finish_completes_with_the_other_teams(store, make_r
     out = ok(s.act(teams["Red"], "out_of_finish"))
     assert out.message == "Recorded Out of the finish (mishap): Red"
     assert s.undo_text() == "Undo: Red marked Out of the Finish (Mishap)"
-    assert [c.entry.team for c in s.screen().cards] == ["Blue", "Orange"]
+    assert live_names(s, team=True) == ["Blue", "Orange"]
     assert s.task().text == "Final sprint: click every team in order."
     ok(s.click(teams["Orange"]))
     ok(s.click(teams["Blue"]))
@@ -2481,7 +2497,7 @@ def test_a_withdrawn_rider_leaves_the_field_and_ranks_after_the_finishers(store,
     assert out.message == "Recorded Withdrawn: #9 Ben Szymanski"
     assert s.undo_text() == "Undo: #9 Ben Szymanski marked Withdrawn"
     assert s.log_rows()[-1].text == "Withdrawn: #9 Ben Szymanski"
-    assert ids[9] not in [c.entrant_id for c in s.screen().cards]
+    assert ids[9] not in live_cards(s)
     assert s.rider_actions(ids[9]) == [] and s.review_actions(ids[9]) == []
     clicks(s, ids, 33, 7)
     # A rider with a place in the finish crossed the line: the badge first.
@@ -2510,7 +2526,7 @@ def test_a_withdrawn_row_refuses_what_it_cannot_take(store, make_race, ids, hous
     line = "Tess Gallagher is withdrawn. Undo takes it back."
     for key in ("dnf", "withdrawn", "lap_gained"):
         assert s.act(ids[12], key) == rc.Outcome(False, line)
-    assert s.click(ids[12]) == rc.Outcome(False, line)
+    assert s.click(ids[12]) == rc.Outcome(False, "#12 Tess Gallagher is marked Withdrawn.")
     # The points held stay as figures.
     assert s.standings().by_entrant(ids[12]).sprint_points[0] == 7
     ok(s.reopen_sprint(1))
@@ -2549,16 +2565,18 @@ def test_tempo_two_withdrawn_rank_by_the_moment_with_the_points_as_figures(store
     assert s.standings().by_entrant(ids[9]).total_points == 1
 
 
-def test_a_madison_team_withdrawn_leaves_the_cards(store, make_race, ids, house):
+def test_a_madison_team_withdrawn_keeps_a_done_card(store, make_race, ids, house):
     race_id = make_race("madison", [3, 24, 5, 36, 8, 12], house.madison(2), teams=TEAMS)
     s = LiveRace(store, race_id)
     teams = {s.name(t): t for t in s.roster.ids}
     out = ok(s.act(teams["Red"], "withdrawn"))
     assert out.message == "Recorded Withdrawn: Red"
     assert s.undo_text() == "Undo: Red marked Withdrawn"
-    assert [c.entry.team for c in s.screen().cards] == ["Blue", "Orange"]
-    ok(s.undo())
     assert [c.entry.team for c in s.screen().cards] == ["Blue", "Red", "Orange"]
+    assert live_names(s, team=True) == ["Blue", "Orange"]
+    assert s.click(teams["Red"]) == rc.Outcome(False, "Red is marked Withdrawn.")
+    ok(s.undo())
+    assert live_names(s, team=True) == ["Blue", "Red", "Orange"]
 
 
 def test_a_correction_placing_a_rider_withdrawn_since_records_again_after_its_undo(
@@ -2574,7 +2592,7 @@ def test_a_correction_placing_a_rider_withdrawn_since_records_again_after_its_un
     ok(s.record_sprint())
     ok(s.act(ids[9], "withdrawn"))
     ok(s.reopen_sprint(1))
-    assert ids[9] in [c.entrant_id for c in s.screen().cards]
+    assert ids[9] in live_cards(s)
     ok(s.click(ids[9]))
     ok(s.record_sprint())
     assert s.standings().by_entrant(ids[9]).sprint_points[0] > 0
@@ -2591,8 +2609,8 @@ def test_a_correction_placing_a_rider_withdrawn_since_records_again_after_its_un
     clicks(s, ids, 33)
     ok(s.record_sprint())
     ok(s.reopen_sprint(2))
-    assert ids[9] not in [c.entrant_id for c in s.screen().cards]
-    assert s.click(ids[9]) == rc.Outcome(False, "Ben Szymanski is withdrawn. Undo takes it back.")
+    assert ids[9] not in live_cards(s)
+    assert s.click(ids[9]) == rc.Outcome(False, "#9 Ben Szymanski is marked Withdrawn.")
     s.cancel_edit()
 
 

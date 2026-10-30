@@ -48,6 +48,15 @@ PANE_EDGE = "#d7dbe1"
 PANE_SHADE = "#c5cbd4"
 CARD_EDGE = "#c3c9d2"
 CARD_SHADE = "#aab2bd"
+# The window's disabled gray: a disabled button's text, and the fill of a
+# mark that says "nothing to do here".
+DISABLED_INK = "#9aa1ad"
+# A done card (a rider placed, out, or marked): the window's pale gray
+# with an edge a touch darker, so it reads as set aside from the white
+# cards that still take a click while it holds its slot.
+DONE_GROUND = "#f1f3f5"
+DONE_EDGE = "#e1e5ea"
+DONE_SHADE = "#d6dbe1"
 
 # The wash on the row the pointer or the keyboard is on, in every list
 # that opens (a combo's list, a menu, the menu bar): the selected
@@ -235,6 +244,13 @@ QPushButton#rider:pressed {{ background: {ACCENT_TINT_STRONG}; }}
 /* The card whose ⋯ menu is open stays lit until it closes, so the menu
    says whose it is; the row's ⋯ does the same. */
 QPushButton#rider[lit="true"] {{ background: {ACCENT_TINT_STRONG}; }}
+/* A done card takes no click, so it neither tints under the pointer
+   nor when pressed; its menu still lights it. */
+QPushButton#rider[done="true"], QPushButton#rider[done="true"]:hover,
+QPushButton#rider[done="true"]:pressed {{
+    background: {DONE_GROUND}; border: 1px solid {DONE_EDGE}; border-bottom: 2px solid {DONE_SHADE};
+}}
+QPushButton#rider[done="true"][lit="true"] {{ background: {ACCENT_TINT_STRONG}; }}
 /* A row's ⋯ is a strip like the card's: a divider on its left, the row's
    full height and a touch wide (review.DOTS_COL_W), the glyph as large
    as the card's, so it reads as a button and takes a finger: the glyph
@@ -269,6 +285,7 @@ QPushButton#undo:enabled[flash="true"] {{ background: #b5cbf3; }}
 QPushButton#mode[flash="true"] {{ background: #d6dae0; }}
 QPushButton#mode:checked[flash="true"] {{ background: #143f8f; }}
 QPushButton#rider[flash="true"] {{ background: #c4d6f7; }}
+QPushButton#rider[done="true"][flash="true"] {{ background: {DONE_GROUND}; }}
 QToolButton[flash="true"] {{ background: #c4d6f7; }}
 QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
     {fs} min-height: {field_h}px; background: #e2e5ea; border: 1px solid #c3c9d2;

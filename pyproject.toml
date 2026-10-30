@@ -4,7 +4,7 @@
 # one step, and pinned in requirements.txt for reproducible bundles.
 [project]
 name = "madtracker"
-version = "1.0.0"
+version = "1.1.0"
 description = "Scoring software for track cycling racing: manual placing entry, audience scoreboard, USAC results"
 requires-python = ">=3.12"
 license = "MIT"

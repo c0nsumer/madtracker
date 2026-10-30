@@ -3,6 +3,11 @@
 What changed in each build, in the scorer's words. Newest first. Each
 entry names the version shown in About.
 
+## 1.1.0 (2026-Oct-29)
+
+- Changed how the cards work when clicked in races such as the Elimination. Instead of being removed and rearranged to show the remaining riders, they now stay in the same position, grayed out, and show the placing (or the status, such as DNF) of a rider who is out. This is to ensure the scorer doesn't have to re-find the location of a bib or rider name with each position entry.
+- Also added more "Out Earlier" results to the Elimination scoreboard.
+
 ## 1.0.0 (2026-Oct-28)
 
 The first public release. MadTracker scores track cycling races, shows the results on a scoreboard for the crowd, and exports PDF results and the USA Cycling results CSV.
