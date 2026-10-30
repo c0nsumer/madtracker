@@ -10,11 +10,11 @@ MadTracker started as a way to make scoring easier at Detroit's [Mad Track Arena
 
 As the officials call each sprint, elimination, lap gained or lost, or finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
 
-MadTracker follows a clear order. A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar. Each race also keeps the rules it was scored under, and each event keeps its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
+MadTracker follows a clear order of operations: A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar. Each race also keeps the rules it was scored under, and each event keeps its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
 
 Before the racing it exports the night's program, and afterward an archival results sheet, both as PDFs. It imports riders from BikeReg, and it exports a CSV ready to upload to USA Cycling's results site.
 
-MadTracker doesn't do timing or enforce rules; it's a scoring system. It needs no network connection and saves everything on the computer it runs on.
+MadTracker doesn't do timing; it's solely a scoring system. It needs no network connection and saves everything on the computer it runs on (with lots of backup options).
 
 ## Screenshots
 
@@ -42,7 +42,7 @@ The scoreboard on the second display at 1920 by 1080, after the second sprint of
 <td valign="top"><a href="docs/images/multi-race-standings.png"><img src="docs/images/multi-race-standings.png" alt="The Multi-Race Standings window showing a two-night Team Omnium" width="400"></a><br>File > Multi-Race Standings..., with the demo's two-night Team Omnium partway through.</td>
 </tr>
 <tr>
-<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>First page of a final result's PDF.</td>
+<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>First page of a final results PDF.</td>
 <td valign="top"><a href="docs/images/program-pdf.png"><img src="docs/images/program-pdf.png" alt="The first page of a night's program PDF" width="400"></a><br>First page of a demo race program PDF.</td>
 </tr>
 </table>
