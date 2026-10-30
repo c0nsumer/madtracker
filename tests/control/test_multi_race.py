@@ -1181,3 +1181,38 @@ def test_a_two_night_omnium_without_the_last_points_race_breaks_a_tie_on_the_fir
         (2, 2, [38, 38, 40, 11, 40, 38, 40], 245),
         (3, 3, [36, 36, 36, 6, 38, 36, 36], 224),
     ]
+
+
+def test_a_two_night_omnium_with_both_points_races_ridden_ties_on_the_second_nights(store, riders):
+    """USAC 2O3(g) over two events: the last Points Race in the standings is
+    the second night's, so its final sprint decides, and the first night's
+    final sprint counts for nothing in the tie."""
+    ada, bram, cleo = riders[0:3]
+    friday = night(store, riders, "Friday", "2026-10-16")
+    scratch(store, friday, [ada, bram, cleo], name="Scratch")
+    tempo(store, friday, [[ada], [ada], [ada, bram, cleo]], [ada, bram, cleo], name="Tempo")
+    elimination(store, friday, [cleo, ada], bram, name="Elimination")
+    points_race(
+        store, friday, [[bram, ada, cleo], [ada, bram, cleo]], [ada, bram, cleo], name="Points"
+    )
+    saturday = night(store, riders, "Saturday", "2026-10-17")
+    scratch(store, saturday, [bram, cleo, ada], name="Scratch")
+    tempo(store, saturday, [[ada], [ada], [ada, bram, cleo]], [ada, bram, cleo], name="Tempo")
+    elimination(store, saturday, [cleo, ada], bram, name="Elimination")
+    points_race(
+        store,
+        saturday,
+        [[ada, bram, cleo], [ada, bram, cleo], [bram, ada, cleo]],
+        [ada, bram, cleo],
+        name="Points",
+    )
+    sid = rider_standings(store, [friday, saturday], kind=multi_race.FOUR_RACE)
+    got = multi_race.compute(store, sid)
+    assert got.refusal is None and got.state == "final"
+    # Ada and Bram level on 261. Ada won Friday's final sprint and Bram
+    # Saturday's; Saturday's Points Race is the last in the standings.
+    assert [(r.rank, r.bib, r.per_race, r.total) for r in got.groups[0].rows] == [
+        (1, 2, [38, 38, 40, 11, 40, 38, 40, 16], 261),
+        (2, 1, [40, 40, 38, 13, 36, 40, 38, 16], 261),
+        (3, 3, [36, 36, 36, 6, 38, 36, 36, 8], 232),
+    ]
