@@ -157,7 +157,6 @@ It's built on these open-source components:
 | [Pillow](https://python-pillow.github.io/) | MIT-CMU | Images in the PDF (an fpdf2 dependency) |
 | [defusedxml](https://github.com/tiran/defusedxml) | PSF-2.0 | Safe XML parsing (an fpdf2 dependency) |
 | [Material Design Icons](https://pictogrammers.com/library/mdi/) by the Pictogrammers | Pictogrammers Free License (Apache 2.0) | App icon ("bike") and interface icons |
-| [PyObjC](https://pyobjc.readthedocs.io/) (optional, macOS only) | MIT | App name in the macOS menu bar when run from a venv |
 | [Inter](https://github.com/rsms/inter) by Rasmus Andersson | SIL Open Font License 1.1 | The typeface of the window, the scoreboard, and the PDF, bundled |
 
 ## License

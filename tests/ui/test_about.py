@@ -102,7 +102,7 @@ def test_licenses_button_shows_the_mit_text(qtbot, opened):
     assert licenses.text.isReadOnly()
     assert licenses.text.lineWrapMode() == licenses.text.LineWrapMode.NoWrap, "the text's own lines"
     assert "MIT License" in licenses.text.toPlainText()
-    # Only the licenses of what this copy ships, so PyObjC's only on macOS.
+    # Only the licenses of what this copy ships.
     keys = [
         licenses.contents.item(i).data(about.KEY_ROLE) for i in range(licenses.contents.count())
     ]

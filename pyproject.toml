@@ -4,7 +4,7 @@
 # one step, and pinned in requirements.txt for reproducible bundles.
 [project]
 name = "madtracker"
-version = "1.1.0"
+version = "1.1.1"
 description = "Scoring software for track cycling racing: manual placing entry, audience scoreboard, USAC results"
 requires-python = ">=3.12"
 license = "MIT"
@@ -20,12 +20,6 @@ dev = [
     "pytest>=8",
     "pytest-qt>=4.4",
     "ruff>=0.6",
-]
-# Running from a venv on macOS shows "Python" in the menu bar because the
-# process lives in the Python framework's bundle. PyObjC lets the app
-# rename itself there; a packaged .app will not need it.
-macos = [
-    "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

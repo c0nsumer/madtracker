@@ -10,37 +10,6 @@ def test_every_icon_size_is_shipped_and_loads(qapp):
     assert icon.availableSizes()
 
 
-def test_claim_process_name_is_a_no_op_off_macos(monkeypatch):
-    from madtracker import platform_name
-
-    monkeypatch.setattr(platform_name.sys, "platform", "linux")
-    assert platform_name.claim_process_name("MadTracker") is False
-
-
-def test_windows_claims_an_app_user_model_id(monkeypatch):
-    import types
-
-    from madtracker import platform_name
-
-    calls: list[str] = []
-    fake_ctypes = types.SimpleNamespace(
-        windll=types.SimpleNamespace(
-            shell32=types.SimpleNamespace(
-                SetCurrentProcessExplicitAppUserModelID=lambda app_id: calls.append(app_id)
-            )
-        )
-    )
-    monkeypatch.setattr(platform_name.sys, "platform", "win32")
-    monkeypatch.setitem(__import__("sys").modules, "ctypes", fake_ctypes)
-    assert platform_name.claim_process_name("MadTracker") is True
-    assert calls == ["MadTracker.MadTracker"]
-    # The packaged exe leaves the ID to Windows: an explicit ID with no
-    # shortcut to match would draw a blank taskbar group icon.
-    monkeypatch.setattr(platform_name.sys, "frozen", True, raising=False)
-    assert platform_name.claim_process_name("MadTracker") is False
-    assert calls == ["MadTracker.MadTracker"]
-
-
 def test_the_macos_icon_keeps_the_docks_margins_and_the_windows_icon_fills_its_edge(qapp):
     """A tile that filled its canvas would sit in the Dock a sixth larger
     than its neighbors: the .icns leaves Apple's margins, the .ico does
@@ -113,6 +82,6 @@ def test_the_packaged_mac_app_leaves_the_dock_its_bundle_icon():
     from madtracker.platform_name import sets_window_icon
 
     assert not sets_window_icon("darwin", frozen=True)
-    assert sets_window_icon("darwin", frozen=False), "from a venv: or the Dock shows Python"
+    assert sets_window_icon("darwin", frozen=False)
     assert sets_window_icon("win32", frozen=True)
     assert sets_window_icon("linux", frozen=True)

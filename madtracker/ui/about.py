@@ -4,8 +4,7 @@ The program ships as a binary that carries other people's work, so the
 About box owes each of them a credit, a version and the license text.
 The versions are read from the running program rather than typed in,
 so the box cannot drift from what was actually bundled; a component
-that is not installed (PyObjC off macOS) is left out rather than shown
-as missing. The license texts are files under
+that is not installed is left out rather than shown as missing. The license texts are files under
 ``madtracker/assets/licenses/`` (and Inter's beside the fonts), so the
 same text travels in the repository, the wheel and the bundle.
 """
@@ -89,7 +88,6 @@ LICENSES: dict[str, LicenseText] = {
             "pictogrammers", "Pictogrammers Free License", ("licenses", "Pictogrammers.txt")
         ),
         LicenseText("ofl-1.1", "SIL Open Font License 1.1", ("fonts", "LICENSE-Inter.txt")),
-        LicenseText("pyobjc", "PyObjC (MIT)", ("licenses", "PyObjC-MIT.txt")),
     )
 }
 
@@ -222,19 +220,6 @@ def components() -> list[Component]:
             "ofl-1.1",
         )
     )
-    if importlib.util.find_spec("objc") is not None:
-        v = _dist_version("pyobjc-core")
-        if v:
-            out.append(
-                Component(
-                    "PyObjC",
-                    "https://pyobjc.readthedocs.io/",
-                    v,
-                    "MIT",
-                    "pyobjc",
-                    ("pyobjc-core", "pyobjc-framework-Cocoa"),
-                )
-            )
     return out
 
 

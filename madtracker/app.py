@@ -2540,9 +2540,8 @@ def main(argv: list[str] | None = None) -> int:
         _say(lines)
         return 1 if failures else 0
 
-    from madtracker.platform_name import claim_process_name, sets_window_icon
+    from madtracker.platform_name import sets_window_icon
 
-    claim_process_name(APP_NAME)
     app = QApplication.instance() or QApplication([sys.argv[0], *qt_args])
     app.setApplicationName(APP_NAME)
     from madtracker.assets import app_icon
