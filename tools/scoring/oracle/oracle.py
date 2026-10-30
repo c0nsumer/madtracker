@@ -669,9 +669,6 @@ def score_aggregate(rules, entrants, race_views):
     return rows, final
 
 
-score_team_omnium = score_aggregate
-
-
 # ------------------------------------------------------------- dispatch
 
 PLACINGS_KEYS = {

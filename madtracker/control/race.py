@@ -209,7 +209,9 @@ _NOBODY_LEFT = "Eliminating them would leave nobody in the race"
 
 def _dnf_after_finish(problem: str) -> bool:
     """The refusal of a DNF after the finish: a re-appended one within a correction is fine."""
-    return problem.endswith(("cannot be marked DNF after the finish order", "after the race's end"))
+    return problem.endswith(
+        ("cannot be marked DNF after the finish order", "cannot be marked DNF after the race's end")
+    )
 
 
 STAGED_KEY = "race/{race_id}/staged"
@@ -1771,11 +1773,9 @@ class LiveRace:
         return out
 
     @_store_errors
-    def race_actions(
-        self, st: Standings | None = None, task: Task | None = None
-    ) -> list[tuple[str, str]]:
+    def race_actions(self) -> list[tuple[str, str]]:
         """(key, label) for the items of the race's menu open to it now."""
-        return [(key, label) for key, label, why in self.race_menu(st, task) if why is None]
+        return [(key, label) for key, label, why in self.race_menu() if why is None]
 
     def end_race_refusal(self, st: Standings, task: Task) -> str | None:
         """Why the race cannot end with its result as-is now, or None when it can."""
@@ -2723,8 +2723,8 @@ class LiveRace:
         # may be placed in its correction, as a click allows
         # (_racing_at_edit). Once an Undo has put the sprint back, its row
         # stands after the DNF or the withdrawal in the log, and the check
-        # at that position would refuse the same
-        # correction it took before the Undo.
+        # at that position would refuse the same correction it took before
+        # the Undo.
         ridden = (
             {
                 self._humanize(f"Entrant {e} is DNF and cannot be placed")

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from madtracker import APP_NAME, __version__
+from madtracker.assets import fonts
 from madtracker.ui import style
 from madtracker.ui.look import DIALOG_BASE_PT
 from madtracker.ui.widgets import (
@@ -87,7 +88,7 @@ LICENSES: dict[str, LicenseText] = {
         LicenseText(
             "pictogrammers", "Pictogrammers Free License", ("licenses", "Pictogrammers.txt")
         ),
-        LicenseText("ofl-1.1", "SIL Open Font License 1.1", ("fonts", "LICENSE-Inter.txt")),
+        LicenseText("ofl-1.1", "SIL Open Font License 1.1", ("fonts", fonts.LICENSE_FILE)),
     )
 }
 

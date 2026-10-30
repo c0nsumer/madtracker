@@ -354,11 +354,11 @@ def flash(button: QAbstractButton) -> None:
     """
     from madtracker.ui.style import FLASH_MS
 
-    _set_flash(button, True)
-    QTimer.singleShot(FLASH_MS, button, partial(_set_flash, button, False))
+    set_flash(button, True)
+    QTimer.singleShot(FLASH_MS, button, partial(set_flash, button, False))
 
 
-def _set_flash(button: QAbstractButton, on: bool) -> None:
+def set_flash(button: QAbstractButton, on: bool) -> None:
     button.setProperty("flash", on)
     # Qt re-reads property selectors only on a fresh polish of that widget.
     button.style().unpolish(button)

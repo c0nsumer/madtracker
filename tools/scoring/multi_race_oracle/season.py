@@ -43,7 +43,6 @@ COLORS = [
 GROUPS = ["Pro", "Cat 3", "cat 3", "CAT3", "Women", "", "SemiPro A"]
 RIDER_FORMATS = ["chase", "tempo", "elimination", "points", "handicap", "keirin"]
 FOUR = ("chase", "tempo", "elimination", "points")
-STATES = ("setup", "running", "provisional", "final")
 
 
 @dataclass

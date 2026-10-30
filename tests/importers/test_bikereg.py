@@ -173,11 +173,11 @@ def test_parse_refuses_a_file_that_is_not_text(tmp_path):
 
 
 def test_parse_reads_a_byte_cp1252_leaves_undefined(tmp_path):
-    """0x81 is undefined in cp1252: the name reads with a mark, the file is not refused."""
+    """0x81 is undefined in cp1252: the name reads with a "?", the file is not refused."""
     path = tmp_path / "entries.csv"
     path.write_bytes(b"Last Name,First Name\nMori,Ke\x81nji\n")
     (row,) = parse(path)
-    assert (row.last, row.first) == ("Mori", "Ke\ufffdnji")
+    assert (row.last, row.first) == ("Mori", "Ke?nji")
 
 
 def test_parse_refuses_a_file_over_the_size_limit(tmp_path, monkeypatch):

@@ -298,7 +298,7 @@ class AppController:
             self.data_path = Path(tempfile.mkdtemp(prefix="madtracker-demo-")) / DATABASE_FILE_NAME
         else:
             self.data_path, expected = self._remembered_file()
-        # Where Help > Open Demo Data File builds, fixed for the session. For a
+        # Where Help > Demo Data File builds, fixed for the session. For a
         # plain start it is the per-user folder, not the remembered file's:
         # the remembered file can be the demo itself, opened by hand, and
         # the next demo would otherwise be built inside its folder.
@@ -438,12 +438,12 @@ class AppController:
         value = self.settings.value(SCREEN_KEY, None)
         return str(value) if value else None
 
-    def place_board(self, exclude: str | None = None) -> str | None:
+    def place_board(self) -> str | None:
         """Pick a display and, if the scorer wants it up, show the board there."""
         from madtracker.board.window import screen_by_name, screen_infos
         from madtracker.displays import choose_scoreboard_screen
 
-        infos = [s for s in screen_infos() if s.name != exclude]
+        infos = list(screen_infos())
         choice = choose_scoreboard_screen(infos, self.preferred_screen_name())
         self.board_screen = choice.name if choice else None
         if self.board_wanted:
@@ -1244,7 +1244,7 @@ class AppController:
         self._forget_file()
 
     def open_demo_file(self) -> bool:
-        """Help > Open Demo Data File: the last demo opened again, or a new one built and opened.
+        """Help > Demo Data File: the last demo opened again, or a new one built and opened.
 
         A new one every time it is asked for, so a scorer can start over
         without a fresh install, and the last one kept, so a night of
@@ -1260,7 +1260,7 @@ class AppController:
         from madtracker.store import Store, StoreError
         from madtracker.ui import icons
 
-        title = "Open Demo Data File"
+        title = "Demo Data File"
         path = (self.base_dir / DEMO_FOLDER / DEMO_FILE_NAME).absolute()
         # Nothing to open again until a demo exists, or while it is open.
         in_demo = self.store is not None and _same_file(path, self.data_path)
@@ -2540,11 +2540,9 @@ def main(argv: list[str] | None = None) -> int:
         _say(lines)
         return 1 if failures else 0
 
-    from madtracker.platform_name import sets_window_icon
-
     app = QApplication.instance() or QApplication([sys.argv[0], *qt_args])
     app.setApplicationName(APP_NAME)
-    from madtracker.assets import app_icon
+    from madtracker.assets import app_icon, sets_window_icon
     from madtracker.ui.look import apply_look
 
     apply_look(app)

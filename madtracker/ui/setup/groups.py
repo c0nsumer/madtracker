@@ -57,8 +57,6 @@ class RenameGroupDialog(NameDialog):
         event_id: int,
         use: group_rules.GroupUse,
         parent: QWidget | None = None,
-        *,
-        confirm: bool = True,
     ):
         combo = GroupCombo()
         others = [
@@ -71,7 +69,6 @@ class RenameGroupDialog(NameDialog):
         self.store = store
         self.event_id = event_id
         self.use = use
-        self.confirm = confirm
         self.made: str | None = None
         self.group = combo
 
@@ -86,7 +83,7 @@ class RenameGroupDialog(NameDialog):
             ),
             None,
         )
-        if into is not None and self.confirm:
+        if into is not None:
             one = len(use.riders) == 1
             riders = f"{len(use.riders)} rider{'' if one else 's'} {'joins' if one else 'join'}"
             question = f"Merge {use.label} into {into.label}? Its {riders} {into.label}."
@@ -218,16 +215,14 @@ class GroupsDialog(QDialog):
         _refuse(self.status, "")
         return True
 
-    def rename_dialog(self, confirm: bool = True) -> "RenameGroupDialog | None":
+    def rename_dialog(self) -> "RenameGroupDialog | None":
         use = self.selected()
         if use is None or group_rules.rename_refusal(use):
             return None
-        return RenameGroupDialog(self.store, self.event_id, use, self, confirm=confirm)
+        return RenameGroupDialog(self.store, self.event_id, use, self)
 
-    def rename_selected(
-        self, dialog: "RenameGroupDialog | None" = None, confirm: bool = True
-    ) -> bool:
-        dialog = dialog or self.rename_dialog(confirm)
+    def rename_selected(self, dialog: "RenameGroupDialog | None" = None) -> bool:
+        dialog = dialog or self.rename_dialog()
         if (
             dialog is None
             or run_dialog(dialog) != QDialog.DialogCode.Accepted

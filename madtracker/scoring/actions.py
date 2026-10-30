@@ -139,8 +139,9 @@ class Eliminated(Action):
     when the officials put them out together (UCI 3.2.223, USAC 2E3(d)(ii),
     2E3(d)(iii)); a rider lapped or abandoning between sprints is the one
     out at the next sprint (USAC 2E3(d)(i)); an empty list is the green
-    flag, no elimination (UCI 3.2.223, USAC 2E3(d)(iii)). Entrants in one action share a place; to order them,
-    enter separate actions with the same sprint_no."""
+    flag, no elimination (UCI 3.2.223, USAC 2E3(d)(iii)). Entrants in one
+    action share a place; to order them, enter separate actions with the
+    same sprint_no."""
 
     kind: ClassVar[str] = "eliminated"
     sprint_no: int = 0

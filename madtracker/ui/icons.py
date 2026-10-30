@@ -362,7 +362,6 @@ def _copy_strip(box: QMessageBox, text: str) -> QPushButton:
     at = grid.getItemPosition(grid.indexOf(row_box))
     grid.removeWidget(row_box)
     strip = QWidget(box)
-    strip.setObjectName("copyStrip")
     lay = QHBoxLayout(strip)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(style.SM)

@@ -177,7 +177,6 @@ QFrame#boardPane {{
 }}
 QFrame#boardPane[active="true"]:hover {{ border-color: {ACCENT}; background: {ACCENT_TINT}; }}
 QFrame#boardPane[flash="true"] {{ border-color: {ACCENT}; background: {ACCENT_TINT_STRONG}; }}
-QLabel#paneTitle {{ color: {ACCENT}; font-weight: 600; letter-spacing: 1px; }}
 QLabel#raceTitle {{ color: #11151b; }}
 QFrame#eventBand {{ background: {ACCENT_TINT}; border-radius: 6px; }}
 QFrame#eventBand QLabel {{ background: transparent; }}

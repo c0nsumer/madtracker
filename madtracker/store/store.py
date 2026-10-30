@@ -623,8 +623,9 @@ class Store:
         away, even when Undo took every entry back. The setup lock asks
         the narrower question (``has_live_actions``), so a rider can be
         taken out of the field of a race undone to its start list; they
-        are then named only by rows nothing replays or shows, and are no
-        longer held here.
+        are then named only by voided rows, which nothing replays (the
+        log shows them under whoever holds the id now), and are no longer
+        held here.
         """
         row = self._conn.execute(
             "SELECT m.name FROM race_entry re JOIN race r ON r.race_id = re.race_id "

@@ -550,7 +550,7 @@ def test_open_demo_file_asks_first_and_cancel_changes_nothing(
         lambda *a, **k: quiet.extend(["choose:" + a[1], "text:" + a[2], repr(k)]) and None,
     )
     assert not c.open_demo_file()
-    assert quiet[-3] == "choose:Open Demo Data File"
+    assert quiet[-3] == "choose:Demo Data File"
     # The question says where the demo goes, the path on its own line.
     assert quiet[-2].endswith(f"reopen the demo at:\n{tmp_path / 'data' / 'demo' / 'demo.sqlite'}")
     # No demo yet: nothing previous to open.
@@ -573,7 +573,7 @@ def test_open_demo_file_builds_and_opens_the_demo_for_the_session_only(
     assert c.main.open_demo_action.isEnabled()
     c.main.open_demo_action.trigger()
     demo = (tmp_path / "data" / "demo" / "demo.sqlite").absolute()
-    assert quiet[-1] == "choose:Open Demo Data File"
+    assert quiet[-1] == "choose:Demo Data File"
     assert c.data_path == demo and demo.is_file()
     assert c.event.name == "Demo Race Night" and len(c.races) > 1
     assert c.live is not None and c.main.showing() == "surface"
@@ -1673,6 +1673,8 @@ def test_laps_are_routine_and_never_ask(make_app, tmp_path, quiet):
     c.rider_action(eid, "lap_gained")
     c.rider_action(eid, "lap_lost")
     assert not any(q.startswith("ask:") for q in quiet)
+    row = c.live.standings().by_entrant(eid)
+    assert (row.laps_gained, row.laps_lost) == (1, 1)
 
 
 def test_file_riders_edits_a_rider_and_the_cards_show_the_new_name(make_app, tmp_path, monkeypatch):

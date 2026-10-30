@@ -863,7 +863,7 @@ class RidersDialog(QDialog):
     def shown_ids(self) -> list[int]:
         return [self.table.item(r, 0).data(ID_ROLE) for r in range(self.table.rowCount())]
 
-    def tick_all(self, on: bool, confirm: bool = True) -> int:
+    def tick_all(self, on: bool) -> int:
         """Tick (or untick) every rider the list shows; how many changed.
 
         Select none asks once, naming how many come out of races not yet
@@ -882,7 +882,7 @@ class RidersDialog(QDialog):
             reason, races = rider_refusal(self.store, self.event_id, rider_id)
             (refused if reason else movable).append((rider_id, reason, races))
         in_races = sum(1 for _, _, races in movable if races)
-        if confirm and in_races and movable:
+        if in_races and movable:
             riders = f"{len(movable)} rider{'' if len(movable) == 1 else 's'}"
             some = f"{in_races} {'is' if in_races == 1 else 'are'}"
             question = (

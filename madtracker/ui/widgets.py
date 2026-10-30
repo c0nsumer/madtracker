@@ -91,8 +91,6 @@ def button_row(
     primary: str,
     on_primary: Callable[[], object],
     on_cancel: Callable[[], object] | None = None,
-    *,
-    cancel: str = "Cancel",
 ) -> tuple[QHBoxLayout, dict[str, QPushButton]]:
     """A dialog's buttons in one order on every platform.
 
@@ -106,7 +104,7 @@ def button_row(
     width = style.control_height(DIALOG_BASE_PT) * 3
     row.addStretch(1)
     if on_cancel is not None:
-        b = QPushButton(cancel)
+        b = QPushButton("Cancel")
         b.setMinimumWidth(width)
         b.clicked.connect(on_cancel)
         row.addWidget(b)
@@ -135,7 +133,15 @@ def show_message(label: QLabel, text: str) -> None:
 
 # Said, never refused: the name is the rider's or the team's own, and the
 # sheets print a "?" for each run of letters they lack.
-UNPRINTABLE_NOTE = 'Some letters in this name print as "?" on the PDF sheets.'
+
+
+def unprintable_words(what: str) -> str:
+    """The one phrase for a name the PDF font cannot draw, wherever it is said."""
+    return f'some letters in {what} show as "?" on the PDF sheets'
+
+
+_words = unprintable_words("this name")
+UNPRINTABLE_NOTE = _words[0].upper() + _words[1:] + "."
 
 
 def note_unprintable(

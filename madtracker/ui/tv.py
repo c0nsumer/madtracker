@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from madtracker.board.window import BoardCanvas
-from madtracker.ui import style
+from madtracker.ui import look, style
 from madtracker.ui.icons import mdi_pixmap
 
 # Why a click does nothing: the TV shows nothing, or there is no race yet.
@@ -42,7 +42,6 @@ class BoardPreview(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("boardPreview")
         self.canvas = BoardCanvas(parent=self)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # The narrowest program column (window.PROGRAM_NARROW_W, 240) less
@@ -129,7 +128,6 @@ class OffVeil(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("boardOff")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def text(self) -> str:
@@ -149,7 +147,6 @@ class HoverVeil(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("boardHover")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._text = ""
 
@@ -230,19 +227,13 @@ class TvPane(QFrame):
         if self._hidden or not self._ready:
             return
         self.set_live(not self._live)
-        self._set_flash(True)
+        look.set_flash(self, True)
         # The pane is no button, so look.ClickFlash never sees it: the
         # same flash for the same time, cleared by a single shot bound to
         # the pane, so a pane gone first is never touched (a free-floating
         # single shot can fire on a deleted pane).
-        QTimer.singleShot(style.FLASH_MS, self, partial(self._set_flash, False))
+        QTimer.singleShot(style.FLASH_MS, self, partial(look.set_flash, self, False))
         self.live_toggled.emit(self._live)
-
-    def _set_flash(self, on: bool) -> None:
-        self.setProperty("flash", on)
-        # Qt re-reads property selectors only on a fresh polish.
-        self.style().unpolish(self)
-        self.style().polish(self)
 
     def set_board_hidden(self, hidden: bool) -> None:
         """The TV shows nothing: the picture is veiled, and the menu brings it back."""

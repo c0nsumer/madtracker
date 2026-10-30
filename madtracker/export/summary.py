@@ -202,11 +202,6 @@ STATE_WORDS = {
 }
 
 
-def stand_words(after_sprint: int) -> str:
-    """'Race ended after 3 sprints': a race the officials ended short of its distance."""
-    return race_ended_note(after_sprint)
-
-
 def state_line(
     race: Race,
     tagged: bool = False,
@@ -227,7 +222,7 @@ def state_line(
     if shortened is not None:
         parts.append(race_shortened_note(*shortened))
     if ended_after is not None:
-        parts.append(stand_words(ended_after))
+        parts.append(race_ended_note(ended_after))
     if race.state in FINISHED_STATES and race.announced_utc:
         parts.append(f"announced {local_clock(race.announced_utc)}")
     # Only the line's first word is capitalized: "Provisional, race ended after ...".

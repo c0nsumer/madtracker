@@ -79,7 +79,7 @@ def test_the_icon_composer_bundle_names_its_layers_and_they_are_full_bleed(qapp)
 def test_the_packaged_mac_app_leaves_the_dock_its_bundle_icon():
     """Qt's window icon would replace the bundle's icon in the Dock while
     the app runs, so the packaged Mac app does not set one."""
-    from madtracker.platform_name import sets_window_icon
+    from madtracker.assets import sets_window_icon
 
     assert not sets_window_icon("darwin", frozen=True)
     assert sets_window_icon("darwin", frozen=False)

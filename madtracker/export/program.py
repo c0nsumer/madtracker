@@ -75,9 +75,7 @@ def build_program(store: Store, event_id: int) -> list[ProgramRace]:
     """The event's races in program order, each with its riders or teams."""
     riders: dict[int, Rider] = {}
     for entry, r in store.entries_with_riders(event_id):
-        riders[entry.rider_id] = Rider(
-            entry.rider_id, entry.bib, f"{r.first_name} {r.last_name}".strip()
-        )
+        riders[entry.rider_id] = Rider(entry.rider_id, entry.bib, r.name)
     return [
         _program_race(store, n, race, riders) for n, race in enumerate(store.races(event_id), 1)
     ]
@@ -166,8 +164,8 @@ def _heading(pdf: P._Doc, race: ProgramRace, more: bool) -> P.Heading:
     return P.lay_heading(pdf, race.number, race.name, race.group, detail, right=True, more=more)
 
 
-def _heading_h(pdf: P._Doc, race: ProgramRace, more: bool = False) -> float:
-    return _heading(pdf, race, more).height + 1.5
+def _heading_h(pdf: P._Doc, race: ProgramRace) -> float:
+    return _heading(pdf, race, False).height + 1.5
 
 
 def _rows_h(pdf: P._Doc, race: ProgramRace) -> float:

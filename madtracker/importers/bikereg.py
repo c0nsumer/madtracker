@@ -381,7 +381,7 @@ def _decode(raw: bytes) -> str:
         except UnicodeDecodeError:
             # cp1252 leaves five bytes undefined; one stray byte in a name
             # is a "?" there, not a file refused as not CSV.
-            return raw.decode("cp1252", errors="replace")
+            return raw.decode("cp1252", errors="replace").replace("\ufffd", "?")
     except UnicodeDecodeError:
         raise ImportFormatError(NOT_CSV) from None
 

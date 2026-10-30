@@ -98,8 +98,7 @@ NAME_SHRINK = 0.85
 # block is as tall as the taller of the two, not the name's line plus
 # a line per rider. A table where any rider's name would wrap there
 # puts every team's riders under its name instead, since a wrapped rider
-# beside a name reads as a third rider. Off, the riders always go under.
-TEAM_BLOCK_BESIDE = True
+# beside a name reads as a third rider.
 HEADER_PT = 8.0
 # The air between a heading and its header row, and under the header's rule.
 HEAD_TO_TABLE = 1.0

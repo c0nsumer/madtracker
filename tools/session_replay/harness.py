@@ -14,7 +14,6 @@ import dataclasses
 import random
 import resource
 import shutil
-import sqlite3
 import traceback
 from collections import Counter
 from collections.abc import Callable
@@ -802,11 +801,3 @@ def _norm(value):
     import json
 
     return json.loads(json.dumps(value))
-
-
-def sqlite_rows(path: Path, sql: str) -> list[tuple]:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    try:
-        return conn.execute(sql).fetchall()
-    finally:
-        conn.close()

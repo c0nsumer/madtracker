@@ -915,13 +915,11 @@ def _team_block(
     pdf: _Doc, summary: RaceSummary, left: float, right: float
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]] | None:
     """A team's name column from ``left``, then its riders' bib and name columns beside it;
-    None when the riders go under the name (``T.TEAM_BLOCK_BESIDE``).
+    None when the riders go under the name.
 
     The bib column is as wide as the widest bib at the podium's rider
     size, so the riders sit close to the name.
     """
-    if not T.TEAM_BLOCK_BESIDE:
-        return None
     rows = T.ordered(summary.rows, lambda r: r.is_finisher)
     riders = [(r, tier) for row, tier in rows for r in row.riders or ()]
     bib_w = max(
@@ -1227,8 +1225,8 @@ def _heading(pdf: _Doc, summary: RaceSummary, more: bool) -> Heading:
     )
 
 
-def _heading_h(pdf: _Doc, summary: RaceSummary, more: bool = False) -> float:
-    return _heading(pdf, summary, more).height
+def _heading_h(pdf: _Doc, summary: RaceSummary) -> float:
+    return _heading(pdf, summary, False).height
 
 
 def _detail_line(summary: RaceSummary) -> str:

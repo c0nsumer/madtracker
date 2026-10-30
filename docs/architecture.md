@@ -22,7 +22,7 @@ The code is Python 3.12 or newer, with PySide6 (Qt) for the windows, the standar
 | `help` | The scorer's help pages, plain Markdown shipped with the program and rendered by `ui`. | Nothing. |
 | `assets` | Icons (Material Design Icons), the bundled Inter typeface, the license texts, the app's own wordmark. | Nothing. |
 
-`madtracker/app.py` wires the windows, the displays, and the store together, and is meant to stay thin. Beside it sit a few small modules with one job each: `applog.py` (the program's log file), `dates.py` (dates as people read them, 2026-Oct-14), `displays.py` (which screen the board goes on, pure logic), `inputs.py` (typed text and numbers made safe to store), `keep_awake.py` (the displays never blank during a race), and `platform_name.py` (whether the packaged Mac app sets Qt's window icon). Qt appears only in `board`, `ui`, and `app.py`, which is why everything under them can be tested as plain Python.
+`madtracker/app.py` wires the windows, the displays, and the store together, and is meant to stay thin. Beside it sit a few small modules with one job each: `applog.py` (the program's log file), `dates.py` (dates as people read them, 2026-Oct-14), `displays.py` (which screen the board goes on, pure logic), `inputs.py` (typed text and numbers made safe to store), and `keep_awake.py` (the displays never blank during a race). Qt appears only in `board`, `ui`, and `app.py`, which is why everything under them can be tested as plain Python.
 
 The rule that matters most: `scoring` imports nothing from the project and `store` imports nothing from `scoring`, so each can be tested without the other.
 

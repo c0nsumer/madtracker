@@ -5,7 +5,7 @@ Delete under them, the selected one's page beside them, and the Standings
 box in the rest. Every change is saved as it is made (a tick, a kind, a name
 or the place points when the field is left), and the Standings box is computed again from the races
 each time, as the PDF will be, so what the scorer reads here is what
-prints. Nothing here scores a race: there is no Undo and nothing goes
+the PDF shows. Nothing here scores a race: there is no Undo and nothing goes
 in a race's log.
 
 Each prompt (a name, a confirmation) is a method argument with a dialog
@@ -244,7 +244,6 @@ def refusal_view(refusal: multi_race.Refusal) -> QWidget:
     weekend short of two formats reads as a list rather than a red block.
     """
     view = QWidget()
-    view.setObjectName("refusal")
     lay = QVBoxLayout(view)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(0)
@@ -277,7 +276,7 @@ def refusal_view(refusal: multi_race.Refusal) -> QWidget:
 
 
 class GroupStandings(QWidget):
-    """One group's table as the PDF prints it, in three parts side by side.
+    """One group's table as the PDF sets it out, in three parts side by side.
 
     Place, Team, and Riders on the left (Place, Bib, and Rider for a rider
     kind) and Total on the right stay in view; the race columns between
@@ -630,7 +629,7 @@ class GroupStandings(QWidget):
         return self.races, col - 3
 
     def headers(self) -> list[str]:
-        """Every column's heading as the sheet prints it, a race's name whole."""
+        """Every column's heading as the sheet heads it, a race's name whole."""
         return list(self.full_headers)
 
     def shown_headers(self) -> list[str]:
@@ -826,7 +825,6 @@ class StandingsDialog(QDialog):
         self.groups_lay.setSpacing(style.SM)
         self.groups.setObjectName("standingsGroups")
         self.scroll = QScrollArea()
-        self.scroll.setObjectName("standingsScroll")
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.scroll.setWidget(self.groups)

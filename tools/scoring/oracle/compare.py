@@ -343,43 +343,6 @@ def run_aggregate(seeds):
     return stats, counts, found
 
 
-def remap(a, mapping):
-    from madtracker.scoring.actions import (
-        Eliminated,
-        FinishOrder,
-        LapGained,
-        LapLost,
-        LapNotCounted,
-        OutOfFinish,
-        PointsAdjusted,
-        SprintResult,
-        Status,
-        Withdrawn,
-    )
-
-    if isinstance(a, SprintResult):
-        return SprintResult(a.sprint_no, [[mapping[e] for e in g] for g in a.places])
-    if isinstance(a, FinishOrder):
-        return FinishOrder([[mapping[e] for e in g] for g in a.places])
-    if isinstance(a, LapGained):
-        return LapGained([mapping[e] for e in a.entrant_ids], sprint_no=a.sprint_no)
-    if isinstance(a, LapLost):
-        return LapLost([mapping[e] for e in a.entrant_ids])
-    if isinstance(a, LapNotCounted):
-        return LapNotCounted([mapping[e] for e in a.entrant_ids])
-    if isinstance(a, Eliminated):
-        return Eliminated(a.sprint_no, [mapping[e] for e in a.entrant_ids])
-    if isinstance(a, Status):
-        return Status(mapping[a.entrant_id], a.status, a.reason)
-    if isinstance(a, OutOfFinish):
-        return OutOfFinish(mapping[a.entrant_id])
-    if isinstance(a, Withdrawn):
-        return Withdrawn(mapping[a.entrant_id])
-    if isinstance(a, PointsAdjusted):
-        return PointsAdjusted(mapping[a.entrant_id], a.points)
-    raise TypeError(a)
-
-
 def main():
     args = sys.argv[1:]
     out = Path(tempfile.gettempdir()) / "madtracker-scoring" / "oracle"

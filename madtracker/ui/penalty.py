@@ -76,7 +76,7 @@ class OmniumPenaltyDialog(QDialog):
     """``riders`` are (rider_id, label, current penalty) for the standings' table.
 
     The omnium's penalty is on the standings, not on a race, so this
-    asks who as well as how much: the preview's rows are read, never
+    asks who as well as how much: the Standings box's rows are read, never
     picked, and the button under it is the one door. ``rider_id()`` and
     ``points()`` are the answer once accepted.
     """

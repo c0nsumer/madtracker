@@ -51,6 +51,7 @@ from madtracker.ui.widgets import (
     run_dialog,
     setup_table,
     show_message,
+    unprintable_words,
 )
 
 USE, ACTION, P_FIRST, P_LAST, P_LICENSE, UCI, P_BIB, P_GROUP, DETAILS = range(9)
@@ -477,7 +478,7 @@ class ImportPreview(QDialog):
         # Imported all the same: the name is the rider's own.
         for what, text in (("name", plan.row.name), ("group", plan.group or "")):
             if not prints(text):
-                details.append(f'some letters in the {what} print as "?" on the PDF sheets')
+                details.append(unprintable_words(f"the {what}"))
         return details
 
     def _action_choice(self, row: int) -> None:

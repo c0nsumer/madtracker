@@ -141,7 +141,7 @@ def _columns(pdf: P._Doc, group: GroupTable) -> _Cols:
     team = (x, room - n * race_w)
     races = tuple((right - T.GAP - (n - i) * race_w, race_w) for i in range(n))
     name = riders = None
-    if not group.riders and T.TEAM_BLOCK_BESIDE:
+    if not group.riders:
         rows = T.ordered(group.rows, lambda r: not r.status)
         names = [(row.team, tier.size) for row, tier in rows]
         riders_w = max(

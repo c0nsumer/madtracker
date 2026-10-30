@@ -23,9 +23,9 @@ click, because that click is the entry.
 A rider placed, out, or marked keeps a done card in the same slot until
 the result completes, so no card moves under the scorer's finger: the
 pale gray ground, the plate and the name dimmed, no lap buttons, and the
-place in the badge's full blue or the status's short word in a chip of
-the lap chip's shape. A click on it records nothing and the red line
-says why; its ⋯ is the rider's result row's menu.
+place in the badge's dimmed blue or the status's short word in a chip
+of the lap chip's shape. A click on it does nothing; its ⋯ is the
+rider's result row's menu.
 
 Every size comes from the font's line height, so the card is the same
 shape on Windows, macOS and Linux. The grid picks its column count from

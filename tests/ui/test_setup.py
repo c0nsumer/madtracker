@@ -3451,7 +3451,7 @@ def test_an_import_row_the_sheets_cannot_print_is_flagged_and_imported(store, ev
     )
     preview = su.ImportPreview(store, event[0], plan_import(store, event[0], parse(csv)))
     qtbot.addWidget(preview)
-    flag = 'some letters in the name print as "?" on the PDF sheets'
+    flag = 'some letters in the name show as "?" on the PDF sheets'
     details = [preview.table.item(r, su.DETAILS).text() for r in range(2)]
     assert flag in details[0] and flag not in details[1]
     assert preview.table.item(0, su.USE).checkState() == preview.table.item(1, su.USE).checkState()
