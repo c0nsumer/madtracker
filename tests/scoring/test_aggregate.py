@@ -184,6 +184,15 @@ def test_validate_flags_missing_races_and_strangers():
     assert any("sum_total_races" in p for p in problems)
 
 
+def test_validate_flags_a_final_sprint_race_past_the_last_race():
+    races = [race((1, 1, 0), (2, 2, 0)), race((1, 1, 0), (2, 2, 0))]
+    rules = AggregateRules(tie_break="last_race_final_sprint", final_sprint_race=1)
+    assert not aggregate.validate(rules, [1, 2], races)
+    rules = AggregateRules(tie_break="last_race_final_sprint", final_sprint_race=2)
+    problems = aggregate.validate(rules, [1, 2], races)
+    assert problems == ["final_sprint_race names race 2 but only 2 were given"]
+
+
 def test_team_omnium_dnf_keeps_its_madison_points():
     """UCI 3.3.012 A: a team that DNFs a madison keeps the points it
     scored there, so the team omnium sums them like everyone else's."""
