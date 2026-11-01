@@ -10,7 +10,9 @@ MadTracker started as a way to make scoring easier at Detroit's [Mad Track Arena
 
 As the officials call each sprint, elimination, lap gained or lost, or finish, the scorer clicks the riders and the program does the rest: it calculates the scores, shows the scoreboard on a second display, and keeps a history of what was scored and when.
 
-MadTracker follows a clear order of operations: A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar. Each race also keeps the rules it was scored under, and each event keeps its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
+MadTracker follows a clear order of operations: A venue's settings cascade to its events. Each event has a roster of riders and a program of races, and each race's field comes from that roster. Races are scored one at a time, and Multi-Race Standings combine results across races and events. Every format is scored with similar steps, so once you've scored one kind of race, the others are familiar.
+
+Each previously-scored race saves the rules it was scored under, and each event saves its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
 
 Before the racing it exports the night's program, and afterward an archival results sheet, both as PDFs. It imports riders from BikeReg, and it exports a CSV ready to upload to USA Cycling's results site.
 
