@@ -1,8 +1,8 @@
 # MadTracker
 
-MadTracker is software for scoring [track cycling](https://en.wikipedia.org/wiki/Track_cycling) races. The scorer clicks riders as the officials call each placing, and MadTracker works out the result and shows it on a scoreboard for the crowd.
+MadTracker is software for scoring [track cycling](https://en.wikipedia.org/wiki/Track_cycling) races. The person handling scoring clicks riders as the race officials call each placing and MadTracker works out the result. It shows the result on-screen, on a scoreboard for the crowd, and in file exports.
 
-**NOTE**: MadTracker is not a USA Cycling product and is not endorsed by USA Cycling. It aims to score races exactly as the [USA Cycling Rulebook, version 8•25](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf), describes, citing the rulebook's articles directly. It also scores a few club formats.
+**NOTE**: MadTracker is not a USA Cycling product and is not endorsed by USA Cycling. It aims to score races exactly as the [USA Cycling Rulebook, version 8•25](https://assets.usacycling.org/prod/documents/USACycling_RuleBook_8_2025.pdf), describes, citing the rulebook's articles directly, but is has no relation to the organization. (It also scores a few club formats.)
 
 ## About
 
@@ -14,7 +14,7 @@ MadTracker follows a clear order of operations: A venue's settings cascade to it
 
 Each previously-scored race saves the rules it was scored under, and each event saves its riders' bibs and groups. So as riders change categories or the rules change, the history of what happened and how it was scored isn't lost.
 
-Before the racing it exports the night's program, and afterward an archival results sheet, both as PDFs. It imports riders from BikeReg, and it exports a CSV ready to upload to USA Cycling's results site.
+Before the racing it exports the event's program, and afterward an archival results sheet, both as PDFs. Riders can be manually entered or imported riders from BikeReg-style exports, and it exports a CSV ready to upload to USA Cycling's results site.
 
 MadTracker doesn't do timing; it's solely a scoring system. It needs no network connection and saves everything on the computer it runs on (with lots of backup options).
 
@@ -84,7 +84,7 @@ MadTracker also calculates standings over several races and nights:
 
 ## Race types it doesn't score
 
-MadTracker doesn't currently score:
+MadTracker (currently) does not support scoring:
 
 - Timed events, such as pursuits, time trials, and team sprints. Their results are times, and MadTracker has no way to enter a time.
 - Brackets, such as sprint or keirin tournaments.
@@ -144,7 +144,7 @@ The setup, test, and lint commands are in [Building](docs/building.md), along wi
 
 MadTracker is developed by Steve Vigneau ([nuxx.net](https://nuxx.net)), with Claude Code, an AI coding tool.
 
-This would not have been possible without working in partnership with Glenn OConner, the current scoring wizard at Mad Track Arena. An additional thank-you to Kevin Morrison, whose feedback on scoring methodology guided and polished MadTracker getting it ready for release.
+This project would not have been possible without the partnership with Glenn OConner, the current scoring wizard at Mad Track Arena. An additional thank-you to Kevin Morrison, whose feedback on scoring methodology guided and polished MadTracker getting it ready for release.
 
 It's built on these open-source components:
 
