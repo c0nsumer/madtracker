@@ -91,7 +91,7 @@ MadTracker (currently) does not support scoring:
 
 ## Installing
 
-Download it from the [GitHub Releases page](https://github.com/c0nsumer/madtracker/releases) and install it: a setup `.exe` or a portable zip on Windows, a `.dmg` on a Mac with Apple silicon, or a tarball on Linux.
+Download it from the [GitHub Releases page](https://github.com/c0nsumer/madtracker/releases) and install it: a setup `.exe` or a portable zip on Windows 10 or 11, a `.dmg` on a Mac with Apple silicon running macOS 14 or newer, or a tarball on 64-bit Linux.
 
 **NOTE**: The builds aren't code-signed, so macOS and Windows warn about them the first time they're opened. [Installing](docs/installing.md) walks through getting past that.
 

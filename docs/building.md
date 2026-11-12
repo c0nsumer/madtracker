@@ -56,7 +56,7 @@ To check the icon on a Mac without building the app, run `tools/check_macos_icon
 
 ## Build on Linux
 
-Linux needs 64-bit Linux, Python 3.12 or newer, and Git. Clone the repository, open a terminal in it, and run `packaging/build_linux.sh`. Add `--skip-tests` to skip the test suite. The script writes `dist/MadTracker` and `dist/MadTracker-<version>-linux-x86_64.tar.gz`.
+Linux needs 64-bit Linux, Python 3.12 or newer, and Git. Clone the repository, open a terminal in it, and run `packaging/build_linux.sh`. Add `--skip-tests` to skip the test suite. The built program runs only on systems with the build machine's glibc version or newer. The script writes `dist/MadTracker` and `dist/MadTracker-<version>-linux-x86_64.tar.gz`.
 
 ## Release builds
 

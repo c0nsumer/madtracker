@@ -119,7 +119,9 @@ jobs:
 
   linux:
     if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux'
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest: the built program needs at least the
+    # glibc of the system that built it, and docs/installing.md states it.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

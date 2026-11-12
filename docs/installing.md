@@ -10,7 +10,7 @@ Get the file for the laptop's system from the project's GitHub Releases page.
 
 - Windows 10 or 11: `MadTracker-<version>-setup.exe` is the installer. Use it for the scoring laptop. `MadTracker-<version>-portable.zip` is the same program without an installer; unzip it to a folder on the laptop's own disk and run `MadTracker.exe`.
 - macOS 14 (Sonoma) or newer, on a Mac with Apple silicon (M1 or later): `MadTracker-<version>.dmg`. There is no build for Intel Macs. A `MadTracker-<version>-macos.zip` with the same app is also there.
-- Linux, 64-bit Intel or AMD with a graphical desktop: `MadTracker-<version>-linux-x86_64.tar.gz`.
+- Linux, 64-bit Intel or AMD with a graphical desktop and glibc 2.39 or newer (eg: Ubuntu 24.04, Debian 13, Fedora 40, or later): `MadTracker-<version>-linux-x86_64.tar.gz`.
 
 ## Install on Windows
 
