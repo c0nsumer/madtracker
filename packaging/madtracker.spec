@@ -217,8 +217,8 @@ if sys.platform == "darwin":
             "CFBundleVersion": VERSION,
             # Without this, Retina displays render the scoreboard blurry.
             "NSHighResolutionCapable": True,
-            # PySide6 6.11 needs macOS 12 or newer.
-            "LSMinimumSystemVersion": "12.0",
+            # The pinned PySide6 wheel for macOS needs macOS 14 or newer.
+            "LSMinimumSystemVersion": "14.0",
             "NSPrincipalClass": "NSApplication",
         },
     )

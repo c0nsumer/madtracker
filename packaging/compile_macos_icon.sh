@@ -34,13 +34,13 @@ fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-# The app runs on macOS 12 and up; a target below 26 makes actool write an
+# The app runs on macOS 14 and up; a target below 26 makes actool write an
 # .icns from the same .icon for the older systems.
 xcrun actool "$ICON" \
     --compile "$OUT" \
     --platform macosx \
     --target-device mac \
-    --minimum-deployment-target 12.0 \
+    --minimum-deployment-target 14.0 \
     --app-icon madtracker \
     --include-all-app-icons \
     --output-partial-info-plist "$OUT/partial.plist" \

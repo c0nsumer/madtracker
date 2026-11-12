@@ -156,7 +156,7 @@ ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 # diskutil image is the newer tool and hdiutil create warns that it is
 # deprecated there; a Mac older than that has only hdiutil. UDZO either
-# way: compressed, and readable by every macOS the app runs on (12+).
+# way: compressed, and readable by every macOS the app runs on (14+).
 if diskutil image create from --help >/dev/null 2>&1; then
     diskutil image create from --format UDZO --volumeName "MadTracker" "$STAGE" "$DMG"
 else
