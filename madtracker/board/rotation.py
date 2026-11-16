@@ -106,3 +106,27 @@ def until_change(since: float, rows: int) -> float:
 def page_at(since: float, rows: int, pages: int) -> int:
     """The page in view: each page shows names, then color, then the next page turns up."""
     return int(max(0.0, since) // cycle_ms(rows)) % max(1, pages)
+
+
+def resumed(held: float, rows: int) -> float:
+    """Where the rotation picks up after it held at ``held`` while scores played.
+
+    A table held on the names view starts its names hold over on the same
+    page. A table held anywhere else goes back to names through the
+    change back, from the point whose look is the held one, so no row
+    jumps; the names hold follows.
+    """
+    held = max(0.0, held)
+    cycle = cycle_ms(rows)
+    base = (held // cycle) * cycle
+    s = held - base
+    change = change_ms(rows)
+    back = NAMES_MS + change + COLOR_MS
+    if s <= NAMES_MS:
+        return base
+    if s < NAMES_MS + change:
+        # The change back runs the change to color backward in time.
+        return base + back + (NAMES_MS + change - s)
+    if s < back:
+        return base + back
+    return held

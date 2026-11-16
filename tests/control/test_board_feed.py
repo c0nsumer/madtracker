@@ -471,6 +471,21 @@ def test_the_madison_finish_order_is_scored_once(store, make_race, house):
     assert scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"], KEY["Red"]])
 
 
+def test_a_team_marked_out_that_fills_the_final_sprint_plays_it(store, make_race, house):
+    """The card's Did Not Finish on the last team the final sprint waits for
+    records the status and the finish order together, as one entry."""
+    s, teams = _madison(store, make_race, house, sprints=1)
+    for name in ("Orange", "Blue"):
+        assert s.click(teams[name]).ok
+    assert ("dnf", "Did Not Finish") in s.rider_actions(teams["Red"])
+    before = s.view().actions
+    assert s.act(teams["Red"], "dnf").ok
+    assert s.state == "provisional"
+    assert len(s.view().actions) == len(before) + 2
+    scored = bf.standings(s.view(), before=before).scored
+    assert scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"]])
+
+
 def test_nothing_is_scored_without_a_before_or_for_a_points_race(store, make_race, event, house):
     s, teams = _madison(store, make_race, house)
     for name in ("Orange", "Blue"):

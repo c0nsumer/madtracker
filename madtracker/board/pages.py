@@ -1049,9 +1049,9 @@ TEAM_LAPS_MOST = 96
 TEAM_FIGURE_LEAST = 84
 # The riders' surnames, side by side on the row, as a share of its height.
 # They stop growing at the start list's largest surname
-# (``team_rows.START_SURNAME_MOST``): a lone team's or a pair's totals keep
-# their full share of the tall row, and surnames set to that row would
-# leave each other no room beside the figures.
+# (``team_rows.START_SURNAME_MOST``): surnames set to a lone team's or a
+# pair's tall row would leave each other no room beside the figures, which
+# give way to them only down to TEAM_FIGURE_LEAST.
 TEAM_SURNAME_SHARE = 0.48
 # The team's name in the color view, as a share of the row's height.
 TEAM_LABEL_SHARE = 0.52
@@ -1329,8 +1329,9 @@ class StandingsPage(Page):
         # The Madison table's layout and what it was worked out for, so a
         # frame of the rotation measures nothing.
         self._layout: tuple[tuple, TeamTable] | None = None
-        # The clock's time when the rotation last started: a new race or
-        # sprint (a new header) starts it over on the names view.
+        # The clock's time when the rotation last started: a new race
+        # starts it over on the names view, and a sprint's new header
+        # leaves it running, so the look in view never jumps.
         self._rotation_from = 0.0
         # Frames run only while a change between views moves; between
         # changes one timer waits for the next, so the board idles.
@@ -1357,6 +1358,8 @@ class StandingsPage(Page):
         self._settle(now)
         if self.data is None or getattr(self.data, "header", None) != getattr(data, "header", None):
             self.page = 0
+        if prev is None or self.data is None or self.data.header.race_id != data.header.race_id:
+            self.stop_motion()
             self._rotation_from = now
         super().set_data(data, prev)
         if self.clock is None or not self.teams():
@@ -1386,7 +1389,7 @@ class StandingsPage(Page):
 
     def stop_motion(self) -> None:
         if self._held is not None:
-            self._rotation_from = self.now()
+            self._rotation_from = self.now() - rotation.resumed(self._held, self.per_page())
         self._queue.cancel()
         self._scenes.clear()
         self._held = None
@@ -1396,19 +1399,22 @@ class StandingsPage(Page):
         return self.clock is not None and self._queue.busy(self.clock.now())
 
     def _settle(self, now: float) -> None:
-        """Once the last play ends, the rotation starts over on the names view.
+        """Once the last play ends, the rotation goes on from the look it held.
 
-        It starts over from the moment the queue emptied, not from when
-        this board next looks: the TV and the preview get the same calls
-        but paint at their own times, and one hidden while the queue
-        drains must still turn its views and pages with the other.
+        A table held on the names view starts its names hold over; one
+        held anywhere else eases back to names first (``rotation.resumed``).
+        It goes on from the moment the queue emptied, not from when this
+        board next looks: the TV and the preview get the same calls but
+        paint at their own times, and one hidden while the queue drains
+        must still turn its views and pages with the other.
         """
         if self._held is None or self._queue.busy(now):
             return
         ended = self._queue.ended_at(now)
+        resume = rotation.resumed(self._held, self.per_page())
         self._held = None
         self._scenes.clear()
-        self._rotation_from = ended if ended is not None else now
+        self._rotation_from = (ended if ended is not None else now) - resume
 
     @staticmethod
     def _redraw(data: Standings, prev) -> bool:
@@ -1515,8 +1521,12 @@ class StandingsPage(Page):
         return self.rotates() and rotation.moving(self.since(), self.per_page())
 
     def wake_in(self) -> float | None:
-        """Milliseconds until the table next wakes to play a change; None while none waits."""
-        return float(self._wake.remainingTime()) if self._wake.isActive() else None
+        """Milliseconds the last paint set to wait for the next change; None while none waits.
+
+        The delay as scheduled, not the time left on the wall clock, so a
+        test reads it the same however long its own steps took.
+        """
+        return float(self._wake.interval()) if self._wake.isActive() else None
 
     def _busy(self) -> bool:
         return self.isVisible() and (self.scoring_now() or self.moving_now())

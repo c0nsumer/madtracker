@@ -88,6 +88,11 @@ def render_mockups(out_dir: str | Path) -> list[Path]:
     with tempfile.TemporaryDirectory(prefix="madtracker-mockup-") as tmp, _answering_yes():
         settings = QSettings(str(Path(tmp) / "settings.ini"), QSettings.Format.IniFormat)
         c = AppController(app, demo=True, settings=settings, data_dir=Path(tmp) / "data")
+        # A board with a clock is drawn wherever its motion stands when the
+        # grab lands, which the platform's timing decides; with none, every
+        # picture is the page at rest on every platform.
+        for canvas in c.boards:
+            canvas.set_clock(None)
         c.main.set_screens(
             [
                 ("\\\\.\\DISPLAY1", "Display 1, 1366x768 (Primary) (Windowed)"),

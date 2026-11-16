@@ -1,8 +1,8 @@
 """Motion for the scoreboard: a clock, easing curves and a repaint ticker.
 
 Animation reads time from a ``Clock`` the canvas holds, so a test
-drives it with a ``ManualClock`` and a headless canvas has none, which
-leaves every page drawn at rest and the mockup renders deterministic.
+drives it with a ``ManualClock``, and a headless canvas and the mockup
+renders have none, which leaves every page drawn at rest.
 """
 
 from __future__ import annotations

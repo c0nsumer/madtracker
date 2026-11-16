@@ -123,9 +123,71 @@ def test_the_rotation_says_when_it_moves_and_how_long_until_it_next_does():
     assert rotation.moving(rotation.cycle_ms(5) - 1, 5)
 
 
+def test_after_a_hold_the_rotation_goes_on_from_the_look_it_held():
+    from madtracker.board import rotation
+
+    rows, cycle, change = 6, rotation.cycle_ms(6), rotation.change_ms(6)
+    to_color, color = rotation.NAMES_MS, rotation.NAMES_MS + change
+    back = color + rotation.COLOR_MS
+    for page in (0, 1, 3):
+        base = page * cycle
+        # Held on names: the names hold starts over on the same page.
+        for s in (0, 5000, rotation.NAMES_MS):
+            assert rotation.resumed(base + s, rows) == base
+        # Held anywhere else: the same look, now on its way back to names.
+        for s in (to_color + 1, to_color + 300, color - 1, color, color + 2000, back, back + 400):
+            at = rotation.resumed(base + s, rows)
+            assert at >= base + back and rotation.page_at(at, rows, 4) == page % 4
+            for row in range(rows):
+                assert rotation.look(at, row, rows) == rotation.look(base + s, row, rows)
+
+
 def test_the_page_turns_after_each_names_and_color_cycle():
     from madtracker.board import rotation
 
     cycle = rotation.cycle_ms(6)
     assert [rotation.page_at(t, 6, 2) for t in (0, cycle - 1, cycle, 2 * cycle + 5)] == [0, 0, 1, 0]
     assert rotation.page_at(5 * cycle, 6, 1) == 0
+
+
+def test_the_mockups_draw_every_board_with_no_clock(qtbot, tmp_path, monkeypatch):
+    """A native platform gives the boards a clock; the mockups take it away,
+    so every picture is the page at rest whatever the platform's timing."""
+    from contextlib import nullcontext
+
+    from apps import dispose_app
+
+    from madtracker import app as app_module
+    from madtracker.board import window
+    from madtracker.ui import mockup
+
+    monkeypatch.setattr(window, "default_clock", motion.ManualClock)
+    made = []
+    controller = app_module.AppController
+
+    def keep(*args, **kwargs):
+        c = controller(*args, **kwargs)
+        made.append(c)
+        assert c.board.clock is not None and c.main.board_preview.clock is not None
+        return c
+
+    monkeypatch.setattr(app_module, "AppController", keep)
+    clocks = []
+
+    def grab(w, size, path, over=None):
+        clocks.append((path.name, made[0].board.clock, made[0].main.board_preview.clock))
+        return path
+
+    monkeypatch.setattr(mockup, "_grab", grab)
+    # The app's log stays open in its data folder, which a temporary
+    # folder's cleanup cannot remove on Windows.
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(mockup.tempfile, "TemporaryDirectory", lambda **_: nullcontext(work))
+    try:
+        mockup.render_mockups(tmp_path / "out")
+    finally:
+        for c in made:
+            dispose_app(c)
+    assert any(name == "board_madison.png" for name, *_ in clocks)
+    assert all(board is None and preview is None for _name, board, preview in clocks)

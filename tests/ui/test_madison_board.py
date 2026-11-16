@@ -351,7 +351,7 @@ def test_a_partial_sweep_stops_partway_with_a_light_leading_edge(qapp):
 
 
 def test_a_dark_team_gets_no_ring(qapp):
-    """Spec section 7: a light ring was tried and rejected; the names carry a dark team."""
+    """A dark color has no ring; the riders' names carry a dark team (design section 10)."""
     from madtracker.board import team_rows
     from madtracker.board import theme as t
 
@@ -1029,6 +1029,83 @@ def test_the_rotation_pauses_during_a_sequence_and_restarts_on_names(qtbot, draw
     bands.clear()
     frame(w, clock, drawn, drained + rotation.NAMES_MS + 330)
     assert max(s for _r, s, _z in bands) > 0
+
+
+def sweeps_through(w, clock, drawn, bands, ats) -> list[list[float]]:
+    """Each row's sweep at each of the clock times ``ats``."""
+    seen = []
+    for at in ats:
+        bands.clear()
+        frame(w, clock, drawn, at)
+        seen.append([s for _r, s, _z in bands])
+    return seen
+
+
+@pytest.mark.parametrize("kind", ["lap_gained", "sprint"])
+def test_a_score_change_in_the_color_view_eases_back_to_names_after(
+    qtbot, drawn, monkeypatch, kind
+):
+    """The slams play over the color view; once the queue drains the table
+    takes the change back to names, never a jump. A sprint's new header
+    leaves the rotation where it stands."""
+    from madtracker.board import rotation, scorebug
+
+    bands = record_bands(monkeypatch)
+    prev = standings(5)
+    if kind == "sprint":
+        data = scored(prev, {"Red": 5, "Orange": 3}, status="After Sprint 3 of 4")
+    else:
+        data = scored(prev, {"Black": 20}, kind=kind, laps={"Black": 1})
+    w, clock = playing(qtbot, prev, size=(960, 540))
+    page = w.pages["madison"]
+    start = color_view_ms() + 500
+    before = sweeps_through(w, clock, drawn, bands, [start])
+    w.set_layout("madison", data)
+    drained = start + scorebug.duration(page._queue.playing(clock.now()))
+    change = rotation.change_ms(5)
+    first = sweeps_through(w, clock, drawn, bands, range(start + 16, start + 160, 16))
+    held = sweeps_through(w, clock, drawn, bands, range(start + 200, drained - 160, 200))
+    last = sweeps_through(w, clock, drawn, bands, range(drained - 160, drained + change + 200, 16))
+    assert all(s == [1.0] * 5 for s in before + first + held)
+    steps = before + first
+    for frames in (steps, last):
+        for a, b in zip(frames, frames[1:], strict=False):
+            assert max(abs(x - y) for x, y in zip(a, b, strict=True)) < 0.25
+    assert last[0] == [1.0] * 5 and last[-1] == [0.0] * 5
+    assert any(0 < s < 1 for f in last for s in f)
+    # Then the names hold, in full.
+    rest = sweeps_through(w, clock, drawn, bands, [drained + change + rotation.NAMES_MS - 100])
+    assert rest == [[0.0] * 5]
+
+
+def test_only_a_new_race_starts_the_rotation_over_on_the_first_pages_names(
+    qtbot, drawn, monkeypatch
+):
+    from madtracker.board import rotation
+
+    bands = record_bands(monkeypatch)
+    prev = standings(12)
+    names = surnames(prev)
+    second = [r.entry.team for r in prev.rows[6:]]
+    w, clock = playing(qtbot, prev, size=(960, 540))
+    start = rotation.cycle_ms(6) + color_view_ms(6)
+    bands.clear()
+    at = frame(w, clock, drawn, start)
+    assert {s for _r, s, _z in bands} == {1.0} and set(second) <= set(at)
+    # The same race's new status leaves the color view and the page in view.
+    status = copy.deepcopy(prev)
+    status.header.status = "After Sprint 3 of 4"
+    w.set_layout("madison", status)
+    bands.clear()
+    at = frame(w, clock, drawn, start + 16)
+    assert {s for _r, s, _z in bands} == {1.0} and set(second) <= set(at)
+    other = copy.deepcopy(prev)
+    other.header.race_id = 2
+    w.set_layout("madison", other)
+    bands.clear()
+    at = frame(w, clock, drawn, start + 32)
+    assert {s for _r, s, _z in bands} == {0.0}
+    assert [s for s in strings(drawn) if s in names] == names[:12]
 
 
 def test_a_board_that_paints_nothing_while_the_scoring_ends_keeps_in_step(

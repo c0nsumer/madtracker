@@ -91,8 +91,7 @@ def paint_band(
     ``sweep`` fills the color solid from the swatch toward ``zone_right``
     (the row's right end when None), 0 none and 1 all of it; while it is
     partway the fill leads with a soft light edge. A dark color has no
-    ring: a ring was tried and read as ugly, and the riders' names carry
-    a dark team (design section 10).
+    ring; the riders' names carry a dark team (design section 10).
     """
     r = ROW_RADIUS * u
     shape = QPainterPath()

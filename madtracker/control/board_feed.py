@@ -24,8 +24,12 @@ from madtracker.scoring.actions import (
     FinishOrder,
     LapGained,
     LapLost,
+    LapNotCounted,
+    OutOfFinish,
     PointsAdjusted,
     SprintResult,
+    Status,
+    Withdrawn,
 )
 from madtracker.scoring.result import Standing
 from madtracker.scoring.rules import SprintPointsRules, _Rules
@@ -237,6 +241,18 @@ def _sprint_keys(view: RaceView, final_no: int | None) -> list[tuple[str, ...]] 
     return [tuple(entry.bibs) for _place, entry, _pts in card.placings]
 
 
+# What a card's menu records about one rider (``LiveRace.act``).
+RIDER_ACTION_TYPES = (
+    LapGained,
+    LapLost,
+    LapNotCounted,
+    PointsAdjusted,
+    OutOfFinish,
+    Withdrawn,
+    Status,
+)
+
+
 def scored(before: tuple[Action, ...] | None, view: RaceView) -> P.Scored | None:
     """What the newest entry scored, when it is new scoring and not a correction.
 
@@ -245,12 +261,23 @@ def scored(before: tuple[Action, ...] | None, view: RaceView) -> P.Scored | None
     and an Undo replace or remove rows, so the log is no longer the old
     one plus one and the table changes quietly. A penalty taken down, a
     lap not counted and a sprint number already scored are quiet too.
+    A rider action that fills the final sprint's finish goes in with
+    the finish order as one entry, and it plays as the final sprint.
     """
     if before is None or not view.roster.is_team or not view.actions:
         return None
-    if view.actions[:-1] != before:
+    if view.actions[: len(before)] != before:
         return None
-    new = view.actions[-1]
+    added = view.actions[len(before) :]
+    if (
+        len(added) == 2
+        and isinstance(added[0], RIDER_ACTION_TYPES)
+        and isinstance(added[1], FinishOrder)
+    ):
+        added = added[1:]
+    if len(added) != 1:
+        return None
+    new = added[0]
     if isinstance(new, SprintResult):
         if any(isinstance(a, SprintResult) and a.sprint_no == new.sprint_no for a in before):
             return None
