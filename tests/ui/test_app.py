@@ -3944,8 +3944,9 @@ def test_a_madison_sprint_reaches_the_board_as_scored_and_undo_does_not(make_app
 
 def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
     """The first scorer's change slams onto its total on the TV; an Undo stops the play."""
-    from madtracker.board import pages
+    from madtracker.board import pages, scorebug
     from madtracker.board.motion import ManualClock
+    from madtracker.board.payloads import PreRace
 
     chips: list[str] = []
     chip = pages.score_chip
@@ -3969,6 +3970,10 @@ def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_pat
     before = next(p for p in reversed(sent[:-1]) if p.header.race_id == new.header.race_id)
     old = {tuple(r.entry.bibs): r.total for r in getattr(before, "rows", [])}
     gain = next(r.total for r in new.rows if tuple(r.entry.bibs) == first) - old.get(first, 0)
+    if isinstance(before, PreRace):
+        # The start list turns into the table before the first score plays.
+        rows = min(page.per_page(), len(new.rows))
+        clock.advance(scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS)
     clock.advance(100)
     c.board.grab()
     assert page.scoring_now() and chips == [f"+{gain}"]

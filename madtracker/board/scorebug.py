@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from madtracker.board.motion import ease_out, phase
 from madtracker.board.payloads import MINUS
+from madtracker.board.rotation import ROW_STAGGER_MS
 
 SLAM_MS = 260
 OLD_OUT_MS = 160
@@ -28,6 +29,15 @@ REORDER_MS = 600
 # Queue speed while two or more plays wait behind the one playing, so a
 # burst of sprints catches up to the newest totals.
 RUSH = 2.0
+# The first score of a race turns the start list into the table before it
+# plays: row by row, top to bottom, as the rotation's changes move, each
+# row's start list fading out as it drifts INTRO_DRIFT units left while
+# the table's row fades in from as far right. The zero table then holds
+# for INTRO_HOLD_MS, so the turn and the first chip read as two moves.
+INTRO_STAGGER_MS = ROW_STAGGER_MS
+INTRO_FADE_MS = 500
+INTRO_DRIFT = 30
+INTRO_HOLD_MS = 400
 
 Key = tuple[str, ...]
 
@@ -67,6 +77,16 @@ class Frame:
     chips: dict[Key, float]
     # Fractional row index per key.
     rows: dict[Key, float]
+
+
+def intro_ms(rows: int) -> float:
+    """How long the turn from the start list takes, from the first row's start to the last row's end."""
+    return (max(1, rows) - 1) * INTRO_STAGGER_MS + INTRO_FADE_MS
+
+
+def intro_row(ms: float, row: int) -> float:
+    """How far row ``row`` has turned into the table ``ms`` into the turn, 0..1."""
+    return ease_out(phase(ms, row * INTRO_STAGGER_MS, INTRO_FADE_MS))
 
 
 def _reorder_at(play: Play) -> float:

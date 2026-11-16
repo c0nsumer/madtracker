@@ -450,8 +450,14 @@ class BoardCanvas(QWidget):
         race_id = payload.header.race_id
         prev = self._shown.get(race_id) if race_id == self._on_screen else None
         if name != self._layout_name:
-            self.pages[self._layout_name].stop_motion()
-        page.set_data(payload, prev)
+            outgoing = self.pages[self._layout_name]
+            outgoing.stop_motion()
+            # The page turned to may turn in from what is on screen.
+            page.outgoing = outgoing
+        try:
+            page.set_data(payload, prev)
+        finally:
+            page.outgoing = None
         self._shown[race_id] = payload
         self._on_screen = race_id
         self.top_bar.header = payload.header

@@ -913,24 +913,207 @@ def test_the_chip_shows_the_change_to_the_total(qtbot, drawn, monkeypatch):
     assert "−14" in at and "−1L" in at and strings(drawn).count("6") == 1
 
 
+def zero_table(teams: int = 5) -> P.Standings:
+    """The table a Madison's start list turns into: every team at 0, in start-list order."""
+    roster = start_list(teams).roster
+    rows = [P.StandingRow(rank=i + 1, entry=e, sprints=[]) for i, e in enumerate(roster)]
+    header = replace(HEADER, status="After Sprint 1 of 4")
+    return P.Standings(header=header, sprint_count=4, rows=rows, current_sprint=1)
+
+
+def turn_ms(teams: int = 5) -> float:
+    """When the turn from the start list and its hold end and the first score plays."""
+    from madtracker.board import scorebug
+
+    return scorebug.intro_ms(teams) + scorebug.INTRO_HOLD_MS
+
+
 def test_the_first_sprint_plays_from_a_zero_table_in_start_list_order(qtbot, drawn):
     prev = start_list(5)
-    rows = [P.StandingRow(rank=i + 1, entry=e, sprints=[]) for i, e in enumerate(prev.roster)]
-    header = replace(HEADER, status="After Sprint 1 of 4")
-    zero = P.Standings(header=header, sprint_count=4, rows=rows, current_sprint=1)
-    data = scored(zero, {"Red": 5, "Orange": 3})
+    data = scored(zero_table(5), {"Red": 5, "Orange": 3})
     w, clock = playing(qtbot, prev, layout="pre_race")
     w.set_layout("madison", data)
-    clock.advance(100)
-    drawn.clear()
-    w.grab()
+    at = frame(w, clock, drawn, turn_ms() + 100)
     # Every total reads 0, Red's old one too as it is knocked down.
     assert strings(drawn).count("0") == 5
-    at = {s: (QRectF(r), px, c) for s, r, px, c in drawn}
     assert order(at, RIDERS) == ["Delgado", "Okafor", "Kowalczyk", "Whitfield", "Ferreira"]
-    at = frame(w, clock, drawn, SETTLED)
+    at = frame(w, clock, drawn, turn_ms() + SETTLED)
     assert order(at, RIDERS) == ["Okafor", "Kowalczyk", "Delgado", "Whitfield", "Ferreira"]
     assert {"5", "3"} <= set(at)
+
+
+# The turn from the start list -----------------------------------------------------
+
+
+@pytest.mark.parametrize("teams", range(1, 9))
+def test_the_start_list_and_the_table_stand_their_rows_on_the_same_bands(
+    qtbot, drawn, monkeypatch, teams
+):
+    """The turn fades each start list row into the table's row on the same band."""
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "pre_race", start_list(teams))
+    start = [(r.top(), r.bottom()) for r, _s, _z in bands]
+    bands.clear()
+    w.set_layout("madison", zero_table(teams))
+    w.grab()
+    assert [(r.top(), r.bottom()) for r, _s, _z in bands] == start
+    assert len(start) == teams
+
+
+def record_looks(monkeypatch) -> list[tuple[str, float, float]]:
+    """Every string the board paints, with the painter's opacity and its shift right."""
+    from madtracker.board import theme
+
+    looks: list[tuple[str, float, float]] = []
+    text = theme.text
+
+    def record(p, rect, s, *args, **kwargs):
+        looks.append((s, p.opacity(), p.transform().dx()))
+        return text(p, rect, s, *args, **kwargs)
+
+    monkeypatch.setattr(theme, "text", record)
+    return looks
+
+
+def turning(qtbot, teams: int = 5):
+    """A clocked board on a Madison's start list, and the first sprint's payload."""
+    prev = start_list(teams)
+    w, clock = playing(qtbot, prev, layout="pre_race")
+    return w, clock, prev, scored(zero_table(teams), {"Red": 5, "Orange": 3})
+
+
+def test_the_first_score_turns_the_start_list_into_the_table_row_by_row(qtbot, drawn, monkeypatch):
+    from madtracker.board import scorebug
+
+    chips = record_chips(monkeypatch)
+    looks = record_looks(monkeypatch)
+    w, clock, _prev, data = turning(qtbot)
+    picture = w.pages["pre_race"].grab().toImage()
+    w.set_layout("madison", data)
+    page = w.pages["madison"]
+    # At once the page is still the start list, every row of it, and no total.
+    clock.advance(0)
+    looks.clear()
+    assert page.grab().toImage() == picture
+    assert not looks and not chips and page.scoring_now()
+    # Partway, the rows turn top to bottom: the first nearly in, the last
+    # still fading in from the right.
+    looks.clear()
+    frame(w, clock, drawn, 4 * scorebug.INTRO_STAGGER_MS + 80)
+    seen = {s: (op, dx) for s, op, dx in looks}
+    first, last = seen["Delgado"], seen["Ferreira"]
+    assert first[0] > last[0] > 0
+    assert 0 <= first[1] < last[1] <= scorebug.INTRO_DRIFT
+    # The zero table holds with no chip until the turn and the hold end.
+    at = frame(w, clock, drawn, turn_ms() - 1)
+    assert not chips and strings(drawn).count("0") == 5
+    assert {op for s, op, _dx in looks if s in at} >= {1.0}
+    frame(w, clock, drawn, turn_ms() + 50)
+    assert [s for s, *_ in chips] == ["+5"]
+
+
+def test_a_redraw_mid_turn_leaves_it_turning(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    w, clock, _prev, data = turning(qtbot)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("madison", quiet(data))
+    frame(w, clock, drawn, 400)
+    assert w.pages["madison"].scoring_now() and not chips
+    frame(w, clock, drawn, turn_ms() + 50)
+    assert [s for s, *_ in chips] == ["+5"]
+
+
+def test_a_second_score_mid_turn_plays_after_the_first(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    w, clock, _prev, data = turning(qtbot)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("madison", scored(data, {"Blue": 4}))
+    frame(w, clock, drawn, turn_ms() + 50)
+    assert [s for s, *_ in chips] == ["+5"]
+    chips.clear()
+    frame(w, clock, drawn, turn_ms() + SETTLED)
+    assert [s for s, *_ in chips] == ["+4"]
+
+
+def test_an_undo_mid_turn_shows_the_current_state_at_once(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    # Back to the start list.
+    w, clock, prev, data = turning(qtbot)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("pre_race", prev)
+    at = frame(w, clock, drawn, 310)
+    assert w.layout_name() == "pre_race" and "0" not in at and "Kowalczyk" in at
+    assert not w.pages["madison"].scoring_now()
+    # To another table: it shows whole, with nothing left to play.
+    w, clock, _prev, data = turning(qtbot)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 300)
+    other = scored(zero_table(5), {"Blue": 2})
+    w.set_layout("madison", quiet(other))
+    looks = record_looks(monkeypatch)
+    at = frame(w, clock, drawn, 310)
+    assert {"2", "1"} <= set(at) and {op for _s, op, _dx in looks} == {1.0}
+    assert not w.pages["madison"].scoring_now()
+    frame(w, clock, drawn, turn_ms() + 50)
+    assert not chips
+
+
+def test_the_tv_and_the_preview_turn_together_when_one_paints_late(qtbot):
+    from madtracker.board.motion import ManualClock
+    from madtracker.board.window import ScoreboardWindow
+
+    prev = start_list(5)
+    data = scored(zero_table(5), {"Red": 5, "Orange": 3})
+    clock = ManualClock()
+    boards = []
+    for _ in range(2):
+        w = ScoreboardWindow("Test Velodrome", "Test Event")
+        qtbot.addWidget(w)
+        w.resize(1920, 1080)
+        w.set_clock(clock)
+        w.set_layout("pre_race", prev)
+        w.grab()
+        boards.append(w)
+    for w in boards:
+        w.set_layout("madison", data)
+    tv, preview = boards
+    # The TV paints every step; the preview first paints partway.
+    for at in (100, 200, 300, 350):
+        clock.advance(at - clock.now())
+        if at < 350:
+            tv.grab()
+    assert tv.grab().toImage() == preview.grab().toImage()
+    clock.advance(turn_ms() + 300 - clock.now())
+    assert tv.grab().toImage() == preview.grab().toImage()
+
+
+def test_a_headless_board_turns_to_the_table_at_once(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    w = render(qtbot, "pre_race", start_list(5))
+    drawn.clear()
+    w.set_layout("madison", scored(zero_table(5), {"Red": 5, "Orange": 3}))
+    w.grab()
+    assert not chips and {"5", "3"} <= set(strings(drawn))
+    assert not w.pages["madison"].scoring_now()
+
+
+def test_a_race_coming_back_to_the_board_shows_its_table_without_a_turn(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    looks = record_looks(monkeypatch)
+    w, clock, _prev, data = turning(qtbot)
+    other = standings(5)
+    other.header.race_id = 2
+    w.set_layout("madison", other)
+    frame(w, clock, drawn, 100)
+    w.set_layout("madison", data)
+    looks.clear()
+    at = frame(w, clock, drawn, 110)
+    assert {"5", "3"} <= set(at) and not chips
+    assert {op for _s, op, _dx in looks} == {1.0}
+    assert not w.pages["madison"].scoring_now()
 
 
 def test_an_undo_mid_sequence_shows_the_current_table_at_once(qtbot, drawn):

@@ -8,11 +8,11 @@ knows how standings are computed.
 
 import copy
 import math
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from madtracker.board import rotation, scorebug, team_rows
@@ -114,6 +114,9 @@ class Page(QWidget):
         # to spare gives it to the block rather than leave small bars and
         # names in an empty row.
         self.team_fill = 0.0
+        # The page the board turns from while ``set_data`` runs, so a page
+        # can turn in from what was on screen; None at any other time.
+        self.outgoing: Page | None = None
         # The page paints its whole rect, so Qt can skip clearing it.
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
 
@@ -1303,6 +1306,29 @@ def row_key(row: StandingRow) -> Key:
     return tuple(row.entry.bibs)
 
 
+@dataclass
+class Turn:
+    """The start list turning into the Madison table before the race's first score plays.
+
+    ``start`` is the clock's time at the turn and ``picture`` the start
+    list as the board showed it (None when there was none to take).
+    ``rows`` turn on ``page``. ``plays`` are the score changes that wait
+    for the turn and its hold: they join the queue at ``release``, a time
+    worked out from the turn's start and not from when a board next
+    paints, so the TV and the preview start them at one moment.
+    """
+
+    start: float
+    picture: QPixmap | None
+    rows: int
+    page: int
+    plays: list[Play] = field(default_factory=list)
+
+    @property
+    def release(self) -> float:
+        return self.start + scorebug.intro_ms(self.rows) + scorebug.INTRO_HOLD_MS
+
+
 def reorder_progress(play: Play, frame: Frame) -> float:
     """How far the rows have slid to their new order, 0 to 1; 0 for a play that keeps its order."""
     after = {k: j for j, k in enumerate(play.after)}
@@ -1357,6 +1383,8 @@ class StandingsPage(Page):
         # the rotation holds that look until the queue is empty. None while
         # nothing plays.
         self._held: float | None = None
+        # The turn from the start list while it plays or holds, else None.
+        self._turn: Turn | None = None
 
     def now(self) -> float:
         return self.clock.now() if self.clock is not None else 0.0
@@ -1377,6 +1405,8 @@ class StandingsPage(Page):
             isinstance(prev, (Standings, PreRace)) and prev.header.race_id == data.header.race_id
         )
         if data.scored is not None and same_race:
+            if isinstance(prev, PreRace):
+                self._turn_from_start_list(data, now)
             # New scoring with nothing in view to play (every team that
             # scored is on another page, or no total changed) updates
             # quietly: it leaves what plays alone, and shows when that ends.
@@ -1385,8 +1415,12 @@ class StandingsPage(Page):
                 play, scene = built
                 if self._held is None:
                     self._held = self.since()
-                self._queue.push(play, now)
                 self._scenes[id(play)] = scene
+                if self._turn is not None:
+                    # Behind the turn, in the order the entries came.
+                    self._turn.plays.append(play)
+                else:
+                    self._queue.push(play, now)
                 self._ticker.poke()
             return
         # A redraw (the scorer staging the next sprint's places) leaves a
@@ -1401,10 +1435,43 @@ class StandingsPage(Page):
         self._queue.cancel()
         self._scenes.clear()
         self._held = None
+        self._turn = None
+
+    def _turn_from_start_list(self, data: Standings, now: float) -> None:
+        """Start the turn from the start list in view to this table, before its first score.
+
+        The table is new to the stands, so it starts on the names view of
+        its first page, which is where the start list's rows stand.
+        """
+        self.stop_motion()
+        self._rotation_from = now
+        self._held = 0.0
+        outgoing = self.outgoing
+        picture = outgoing.grab() if isinstance(outgoing, PreRacePage) else None
+        rows = min(self.per_page(), len(data.rows))
+        self._turn = Turn(start=now, picture=picture, rows=rows, page=0)
+        self._ticker.poke()
+
+    def _release(self, now: float) -> None:
+        """Once the turn and its hold end, the plays behind it join the queue at that moment."""
+        turn = self._turn
+        if turn is None or now < turn.release:
+            return
+        self._turn = None
+        for play in turn.plays:
+            self._queue.push(play, turn.release)
+        if not turn.plays and self._held is not None:
+            # Nothing to play: the rotation goes on from the zero table.
+            self._rotation_from = turn.release - rotation.resumed(self._held, self.per_page())
+            self._held = None
 
     def scoring_now(self) -> bool:
-        """Whether a score change plays or waits to play."""
-        return self.clock is not None and self._queue.busy(self.clock.now())
+        """Whether the turn from the start list or a score change plays, or one waits to play."""
+        if self.clock is None:
+            return False
+        now = self.clock.now()
+        self._release(now)
+        return self._turn is not None or self._queue.busy(now)
 
     def _settle(self, now: float) -> None:
         """Once the last play ends, the rotation goes on from the look it held.
@@ -1416,7 +1483,8 @@ class StandingsPage(Page):
         paint at their own times, and one hidden while the queue drains
         must still turn its views and pages with the other.
         """
-        if self._held is None or self._queue.busy(now):
+        self._release(now)
+        if self._held is None or self._turn is not None or self._queue.busy(now):
             return
         ended = self._queue.ended_at(now)
         resume = rotation.resumed(self._held, self.per_page())
@@ -1565,11 +1633,14 @@ class StandingsPage(Page):
         u = self.u
         now = self.now()
         self._settle(now)
+        turn = self._turn if self.clock is not None else None
         play = self._queue.playing(now) if self.clock is not None else None
         scene = self._scenes.get(id(play)) if play is not None else None
         pages = self.page_count()
         per_page = page_rows(len(d.rows), self.page_most())
-        if scene is not None:
+        if turn is not None:
+            page = min(turn.page, pages - 1)
+        elif scene is not None:
             page = min(scene.page, pages - 1)
         elif self.rotates():
             page = rotation.page_at(self.since(), per_page, pages)
@@ -1582,7 +1653,7 @@ class StandingsPage(Page):
             playing = None
             if scene is not None:
                 playing = (play, self._queue.frame(now), scene)
-            self.team_table(p, area, d, page * per_page, rows, n, bottom, playing)
+            self.team_table(p, area, d, page * per_page, rows, n, bottom, playing, turn)
         else:
             self.rider_table(p, area, d, rows, n, bottom)
 
@@ -1756,6 +1827,7 @@ class StandingsPage(Page):
         n: int,
         bottom: float,
         playing: tuple[Play, Frame, Scene] | None = None,
+        turn: Turn | None = None,
     ) -> None:
         """The Madison page: place, then each team's row, its riders' surnames leading.
 
@@ -1768,7 +1840,8 @@ class StandingsPage(Page):
         name on it, and back (design section 10). ``first`` is the
         payload index of the page's first row. ``playing`` is a score
         change's play, its frame now, and its scene, drawn over the same
-        layout (``team_play``).
+        layout (``team_play``); ``turn`` is the turn from the start list
+        (``team_turn``).
         """
         u = self.u
         key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
@@ -1780,6 +1853,9 @@ class StandingsPage(Page):
             )
         lay = self._layout[1]
         ordinals = self.ordinals(d)
+        if turn is not None:
+            self.team_turn(p, area, lay, rows, turn)
+            return
         if playing is not None:
             self.team_play(p, area, lay, bottom, *playing)
             return
@@ -1819,9 +1895,11 @@ class StandingsPage(Page):
         e = row.entry
         band = QRectF(lay.row_x, y, area.right() - lay.row_x, lay.rh)
         team_rows.paint_band(p, band, e.color, u, sweep=look.sweep, zone_right=lay.zone_r)
+        # The views' fades scale the painter's opacity, so a row fading in
+        # whole (the turn from the start list) keeps its parts in step.
         if look.names > 0:
             p.save()
-            p.setOpacity(look.names)
+            p.setOpacity(p.opacity() * look.names)
             self.team_riders(p, band, e, lay)
             p.restore()
         if look.label > 0 and label is not None:
@@ -1830,7 +1908,7 @@ class StandingsPage(Page):
             pad = team_rows.ROW_PAD * u
             rect = QRectF(band.x() + pad, y + rise, lay.zone_r - band.x() - 2 * pad, lay.rh)
             p.save()
-            p.setOpacity(look.label)
+            p.setOpacity(p.opacity() * look.label)
             t.text(p, rect, name, f, t.team_ink(QColor(e.color)), CENTER)
             p.restore()
         cell = QRectF(0, y, 0, lay.rh)
@@ -1847,6 +1925,82 @@ class StandingsPage(Page):
         if total is not None:
             rect = cell.adjusted(lay.total_r - lay.total_col, 0, lay.total_r, 0)
             t.text(p, rect, total, lay.total_f, t.TEXT, RIGHT)
+
+    def team_turn(self, p: QPainter, area: QRectF, lay: TeamTable, rows: list, turn: Turn) -> None:
+        """The start list turning into the table, a row at a time, then the table held.
+
+        The start list's rows and the table's start at the page's top with
+        one height and gap, so each row's band of the start list's picture
+        fades out drifting left while the table's row fades in from the
+        right over the same band; only opacity and position move. The
+        table's rows stand as the first play starts from them, so the
+        play's first frame follows on with nothing moving but its chip.
+        """
+        u = self.u
+        ms = self.now() - turn.start
+        drift = scorebug.INTRO_DRIFT * u
+        pitch = lay.rh + lay.gap
+        for i, (row, place, laps, penalty, total, label) in enumerate(
+            self._turn_rows(lay, rows, turn)
+        ):
+            y = lay.rows_top + i * pitch
+            k = scorebug.intro_row(ms, i)
+            if k < 1 and turn.picture is not None:
+                p.save()
+                # The band and half the gap on each side, so the rows'
+                # bands of the picture meet with nothing left between.
+                p.setClipRect(QRectF(0, y - lay.gap / 2, self.width(), pitch))
+                # The start list leaves faster than the table arrives, so
+                # the two rows' names are never on the row at full strength
+                # together.
+                p.setOpacity((1 - k) ** 3)
+                p.drawPixmap(QPointF(-drift * k, 0), turn.picture)
+                p.restore()
+            if k > 0:
+                p.save()
+                p.setOpacity(k)
+                p.translate(drift * (1 - k), 0)
+                rect = QRectF(area.x(), y, lay.rank_w, lay.rh)
+                t.text(p, rect, place, lay.place_f, place_ink(place))
+                self.team_row(p, area, lay, y, rotation.NAMES, row, label, laps, penalty, total)
+                p.restore()
+
+    def _turn_rows(self, lay: TeamTable, rows: list, turn: Turn) -> list[tuple]:
+        """The table's rows as the turn shows them: row, place, laps, penalty, total and label.
+
+        In the first play's starting order and figures, so the turn hands
+        over to the play with nothing jumping; the page's rows as they
+        stand when nothing plays.
+        """
+        labels = {row_key(r): label for r, label in zip(self.data.rows, lay.labels, strict=True)}
+        if not turn.plays:
+            decided = self.ordinals(self.data)
+            return [
+                (
+                    r,
+                    ordinal(r.rank) if decided else str(r.rank),
+                    r.laps,
+                    r.penalty,
+                    r.status or total_text(r.total),
+                    labels.get(row_key(r)),
+                )
+                for r in rows
+            ]
+        play = turn.plays[0]
+        scene = self._scenes[id(play)]
+        ends = {row_key(r): r for r in scene.end.rows}
+        steps = {s.key: s for s in play.steps}
+        out = []
+        for k in play.before[: turn.rows]:
+            row = ends[k]
+            place = scene.places.get(k, str(row.rank))
+            step = steps.get(k)
+            if step is None:
+                figures = (row.laps, row.penalty, row.status or total_text(row.total))
+            else:
+                figures = (step.old_laps, scene.penalties.get(k, 0), total_text(step.old))
+            out.append((row, place, *figures, labels.get(k)))
+        return out
 
     def team_play(
         self,
