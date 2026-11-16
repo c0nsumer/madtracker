@@ -1213,7 +1213,9 @@ class StandingsPage(Page):
         # Frames run only while a change between views moves; between
         # changes one timer waits for the next, so the board idles.
         self._ticker = Ticker(self, self._busy)
-        self._wake = QTimer(self, singleShot=True)
+        # Precise, since a coarse timer may fire a few percent of its 10 s
+        # late, and a change's first frame would land partway through it.
+        self._wake = QTimer(self, singleShot=True, timerType=Qt.TimerType.PreciseTimer)
         self._wake.timeout.connect(self._wake_up)
 
     def set_data(self, data) -> None:
@@ -1654,6 +1656,8 @@ class StandingsPage(Page):
                 "place_f": place_f,
                 "rank_w": rank_w,
                 "room": max(0.0, half - team_rows.RIDER_GAP * u),
+                "reserve_row_x": area.x() + reserve_rank_w,
+                "reserve_zone_r": zone_r,
             }
 
         # The place and the total give way to the surnames: they step down
@@ -1695,12 +1699,15 @@ class StandingsPage(Page):
         plate_h = min(
             rh * team_rows.BIBS_ONLY_PLATE_SHARE,
             team_rows.BIBS_ONLY_PLATE_MOST * u,
-            max(0.0, half - team_rows.RIDER_GAP * u) / t.plate_width(1.0),
+            room / t.plate_width(1.0),
         )
 
         # The color view's team name: as large as its share of the row
         # while it fits the area, then smaller down to the floor, then cut.
-        label_room = zone_r - row_x - 2 * team_rows.ROW_PAD * u
+        # Like the surnames and the plates, it is sized for the area a
+        # penalty and ordinal places would leave, and placed in the area
+        # drawn, so neither steps it down when it comes.
+        label_room = cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u
         labels = []
         for r in d.rows:
             name = r.entry.team or ""

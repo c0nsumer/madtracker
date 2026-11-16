@@ -498,22 +498,70 @@ def test_long_surnames_drive_the_figures_to_84_before_they_shrink(qtbot, drawn):
     assert total > pages.TEAM_FIGURE_LEAST and surname_px == 96
 
 
-@pytest.mark.parametrize("teams", [1, 2, 5])
-def test_the_first_lap_penalty_and_stamp_never_step_the_table_down(qtbot, drawn, teams):
-    """The sizes are decided as though a lap, a penalty, and ordinal places
-    stood, so none of them steps the totals or the surnames down."""
+LONG_TEAM = "Corktown and Woodbridge Wheelmen"
+
+
+def race_states(teams: int) -> list[P.Standings]:
+    """One table as a race goes on: no lap, a first lap, a first penalty, the stamp."""
 
     def data(laps=0, penalty=0, status="After Sprint 2 of 4"):
         d = standings(teams, status=status)
         for r in d.rows:
             r.laps = 0
         d.rows[0].laps, d.rows[-1].penalty = laps, penalty
+        d.rows[0].entry.team = LONG_TEAM
         return d
 
-    start = table_sizes(qtbot, drawn, data())
-    assert table_sizes(qtbot, drawn, data(laps=1)) == start
-    assert table_sizes(qtbot, drawn, data(laps=1, penalty=-20)) == start
-    assert table_sizes(qtbot, drawn, data(laps=1, penalty=-20, status="Final")) == start
+    return [data(), data(laps=1), data(laps=1, penalty=-20), data(1, -20, "Final")]
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5])
+def test_the_first_lap_penalty_and_stamp_never_step_the_table_down(qtbot, drawn, teams):
+    """The sizes are decided as though a lap, a penalty, and ordinal places
+    stood, so none of them steps the totals or the surnames down."""
+    seen = [table_sizes(qtbot, drawn, d) for d in race_states(teams)]
+    assert all(s == seen[0] for s in seen)
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5])
+def test_the_color_name_and_bib_plates_hold_their_size_through_a_race(
+    qtbot, drawn, monkeypatch, teams
+):
+    """The color view's team name and the Bibs Only plates are sized for the
+    room a penalty and ordinal places would leave, as the surnames are, so
+    a long team name never steps down as the race goes on."""
+    from madtracker.board import theme as t
+
+    heights: list[float] = []
+    plate = t.plate
+
+    def record(p, r, bib, out=False):
+        heights.append(round(r.height(), 3))
+        return plate(p, r, bib, out)
+
+    monkeypatch.setattr(t, "plate", record)
+
+    def looks(data: P.Standings) -> tuple[int, set[float]]:
+        w = render(qtbot, "madison", data)
+        clocked(w, color_view_ms(teams))
+        drawn.clear()
+        w.grab()
+        [label] = {px for s, _r, px, _c in drawn if s == LONG_TEAM}
+        heights.clear()
+        render(qtbot, "madison", data, label="bibs")
+        return label, set(heights)
+
+    seen = [looks(d) for d in race_states(teams)]
+    assert all(s == seen[0] for s in seen) and len(seen[0][1]) == 1
+
+
+def test_the_wake_timer_is_precise(qtbot):
+    """A coarse timer may fire a few percent of its 10 s late, and the
+    change's first frame would land partway through it."""
+    from PySide6.QtCore import Qt
+
+    w = render(qtbot, "madison", standings(5))
+    assert w.pages["madison"]._wake.timerType() == Qt.TimerType.PreciseTimer
 
 
 def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, monkeypatch):
