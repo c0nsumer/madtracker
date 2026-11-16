@@ -374,38 +374,42 @@ def _corners(path, row: QRectF) -> tuple[list[float], list[float]]:
     return top, bottom
 
 
-def test_a_slanted_band_and_its_swatch_are_parallelograms_at_the_slant(qapp):
-    """The row's left end is cut at the slant, its foot at the row's left
-    edge, and the swatch is a stripe SWATCH_W wide along it; the right
-    end keeps its rounded corners."""
+def test_a_band_has_a_square_left_end_and_a_swatch_slanted_on_its_right(qapp):
+    """The row's left end is square, top and bottom, and its right end
+    keeps its rounded corners. The swatch is flush with the square end:
+    its left edge is vertical, its right edge leans at the slant, and it
+    is SWATCH_W wide at its foot, wider toward the top."""
     from madtracker.board import team_rows
     from madtracker.board import theme as t
 
     run = t.SLANT * ROW.height()
-    top, bottom = _corners(team_rows.band_shape(ROW, 1.0, t.SLANT), ROW)
-    assert top[0] == pytest.approx(ROW.left() + run) and bottom[0] == pytest.approx(ROW.left())
+    shape = team_rows.band_shape(ROW, 1.0)
+    top, bottom = _corners(shape, ROW)
+    assert top[0] == pytest.approx(ROW.left()) and bottom[0] == pytest.approx(ROW.left())
+    # Both left corners are right angles: the left edge runs straight
+    # from the top to the bottom, with no point inside a rounding.
+    left = [q for q in shape.toFillPolygon() if q.x() < ROW.left() + team_rows.ROW_RADIUS]
+    assert {round(q.x(), 3) for q in left} == {ROW.left()}
     r = team_rows.ROW_RADIUS
     assert top[-1] == pytest.approx(ROW.right() - r, abs=0.5)
+    assert bottom[-1] == pytest.approx(ROW.right() - r, abs=0.5)
     top, bottom = _corners(team_rows.swatch_shape(ROW, 1.0, t.SLANT), ROW)
     w = team_rows.SWATCH_W
-    assert top == pytest.approx([ROW.left() + run, ROW.left() + run + w])
+    assert top == pytest.approx([ROW.left(), ROW.left() + w + run])
     assert bottom == pytest.approx([ROW.left(), ROW.left() + w])
-    # Unslanted, as on the start list, both ends are rounded.
-    top, _bottom = _corners(team_rows.band_shape(ROW, 1.0), ROW)
-    assert top[0] == pytest.approx(ROW.left() + r, abs=0.5)
 
 
 def test_a_slanted_sweep_ends_along_the_slant_short_of_the_zone(qapp):
-    """The color's end leans as the swatch does, its top corner at the
-    zone's edge at a full sweep, so the color opens and closes along the
-    slant."""
+    """The color's left end is the row's square end; its right end leans
+    as the swatch's does, its top corner at the zone's edge at a full
+    sweep, so the color opens and closes along the slant."""
     from madtracker.board import team_rows
     from madtracker.board import theme as t
 
     zone = ROW.left() + 500
     run = t.SLANT * ROW.height()
     top, bottom = _corners(team_rows.fill_shape(ROW, 1.0, 1.0, zone, t.SLANT), ROW)
-    assert top == pytest.approx([ROW.left() + run, zone])
+    assert top == pytest.approx([ROW.left(), zone])
     assert bottom == pytest.approx([ROW.left(), zone - run])
     # Partway, the leading edge leans the same way.
     top, bottom = _corners(team_rows.fill_shape(ROW, 1.0, 0.5, zone, t.SLANT), ROW)
@@ -691,10 +695,11 @@ def test_the_color_view_shows_the_team_name_in_its_ink(qtbot, drawn, monkeypatch
     laps = next(r for s, r, *_ in drawn if s == "+1L")
     assert {sweep for _r, sweep, _z in bands} == {1.0}
     assert all(z < laps.left() for _r, _s, z in bands)
-    # The name is centered on the area.
+    # The name is centered on the area, across the row's middle.
     row, _sweep, zone = bands[0]
     red = next(r for s, r, *_ in drawn if s == "Red")
-    assert red.center().x() == pytest.approx((row.left() + zone) / 2, abs=1)
+    middle = zone - t.SLANT * row.height() / 2
+    assert red.center().x() == pytest.approx((row.left() + middle) / 2, abs=1)
     assert red.center().y() == pytest.approx(row.center().y(), abs=1)
 
 
@@ -740,7 +745,8 @@ def test_the_surnames_stand_clear_of_the_slanted_swatch(qtbot, drawn, monkeypatc
 @pytest.mark.parametrize("teams", [1, 2, 5, 8])
 def test_the_team_name_stands_inside_the_slanted_color(qtbot, drawn, monkeypatch, teams):
     """The color view's name, as wide as its room, keeps clear of the
-    color's slanted ends at the top and the bottom of its line."""
+    color's square left end and of its slanted right end at the bottom of
+    its line."""
     from PySide6.QtGui import QFontMetricsF
 
     from madtracker.board import theme as t
@@ -756,12 +762,10 @@ def test_the_team_name_stands_inside_the_slanted_color(qtbot, drawn, monkeypatch
     assert sweep == 1.0
     rect, px = next((r, px) for s, r, px, _c in drawn if s == LONG_TEAM)
     h = QFontMetricsF(t.font(px, t.HEAVY)).height()
-    top, bottom = rect.center().y() - h / 2, rect.center().y() + h / 2
-    # The color's left end where it meets the line's top, and its right
-    # end where it meets the line's bottom: the nearest each comes.
-    left = row.left() + t.SLANT * (row.bottom() - top)
+    bottom = rect.center().y() + h / 2
+    # The color's right end where it meets the line's bottom: the nearest it comes.
     right = zone - t.SLANT * (bottom - row.top())
-    assert left < rect.left() and rect.right() < right
+    assert row.left() < rect.left() and rect.right() < right
 
 
 def test_the_chip_and_the_rows_share_one_slant(qtbot, drawn, monkeypatch):
@@ -794,11 +798,102 @@ def test_the_chip_and_the_rows_share_one_slant(qtbot, drawn, monkeypatch):
     assert top.x() - bottom.x() == pytest.approx(0.3)
 
 
-def test_the_start_list_keeps_its_square_swatch(qtbot, monkeypatch):
+def test_the_start_list_rows_take_the_tables_slant(qtbot, monkeypatch):
+    """The start list's swatch is the table's, so the turn from one to
+    the other crossfades like for like."""
+    from madtracker.board import theme as t
+
     slants: list[float] = []
     record_bands(monkeypatch, slants)
     render(qtbot, "pre_race", start_list(5))
-    assert set(slants) == {0.0}
+    assert set(slants) == {t.SLANT}
+
+
+def swatch_air(row: QRectF, x: float, top: float, u: float) -> float:
+    """The air between the swatch's slanted right edge and ``x``, at the height ``top``."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    return x - (row.left() + team_rows.SWATCH_W * u + t.SLANT * (row.bottom() - top))
+
+
+def record_plates(monkeypatch) -> list[QRectF]:
+    from madtracker.board import theme as t
+
+    plates: list[QRectF] = []
+    plate = t.plate
+
+    def record(p, r, bib, out=False):
+        plates.append(QRectF(r))
+        return plate(p, r, bib, out)
+
+    monkeypatch.setattr(t, "plate", record)
+    return plates
+
+
+def first_plate_air(bands, plates, u: float) -> float:
+    """The least air between a row's swatch and the plate nearest it."""
+    least = float("inf")
+    for row, *_ in bands:
+        mine = [pl for pl in plates if row.contains(pl.center())]
+        if mine:
+            near = min(mine, key=lambda pl: pl.left())
+            least = min(least, swatch_air(row, near.left(), near.top(), u))
+    return least
+
+
+@pytest.mark.parametrize("label", ["names", "bibs_names", "bibs"])
+@pytest.mark.parametrize("teams", [1, 2, 5, 8])
+def test_the_start_list_names_and_plates_stand_clear_of_the_swatch(
+    qtbot, drawn, monkeypatch, teams, label
+):
+    """However tall the row, and so however far the swatch's top leans,
+    the first rider's plate and the capitals of the stacked name keep
+    SLANT_AIR from its slanted right edge."""
+    from PySide6.QtGui import QFontMetricsF
+
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    plates = record_plates(monkeypatch)
+    data = start_list(teams)
+    if teams > 1:
+        # A rider with no bib is named with Bibs Only, so the stacked name
+        # stands where the plate would.
+        data.roster[-1].bibs = ["", data.roster[-1].bibs[1]]
+    w = render(qtbot, "pre_race", data, label=label)
+    u = w.pages["pre_race"].u
+    air = team_rows.SLANT_AIR * u - 0.01
+    if label != "names":
+        assert plates and first_plate_air(bands, plates, u) >= air
+    at = {s: (r, px) for s, r, px, _c in drawn}
+    for (row, *_), e in zip(bands, data.roster, strict=True):
+        if label == "bibs" and e.bibs[0]:
+            continue
+        first, last = e.names[0].split(" ", 1)
+        for word, weight in ((first, t.SEMI), (last, t.HEAVY)):
+            rect, px = at[word]
+            fm = QFontMetricsF(t.font(px, weight))
+            top = rect.y() + fm.ascent() - fm.capHeight()
+            assert swatch_air(row, rect.left(), top, u) >= air, (word, teams, label)
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5, 8])
+def test_the_tables_bib_plates_stand_clear_of_the_swatch(qtbot, monkeypatch, teams):
+    """With Bibs Only the plates stand where the surnames would, and keep
+    SLANT_AIR from the swatch's slanted edge at their largest, as a race
+    goes on too."""
+    from madtracker.board import team_rows
+
+    bands = record_bands(monkeypatch)
+    plates = record_plates(monkeypatch)
+    for data in race_states(teams):
+        bands.clear()
+        plates.clear()
+        w = render(qtbot, "madison", data, label="bibs")
+        u = w.pages["madison"].u
+        assert first_plate_air(bands, plates, u) >= team_rows.SLANT_AIR * u - 0.01
 
 
 def test_a_long_team_name_shrinks_to_the_floor_then_is_cut(qtbot, drawn):

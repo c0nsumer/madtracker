@@ -716,7 +716,10 @@ class PreRacePage(Page):
         lone team takes half the page. Every page is set for a full page's
         rows, so the names keep one size as the pages turn. The list
         leaves the board at the first sprint or lap, so a row keeps no
-        room for a lap.
+        room for a lap. The rows are the table's: a square left end and a
+        swatch whose right edge leans at the score chip's slant
+        (``theme.SLANT``), so the turn to the table crossfades like for
+        like.
         """
         u = self.u
         pages = self.page_count()
@@ -732,7 +735,7 @@ class PreRacePage(Page):
         )
         for i, e in enumerate(rows):
             row = QRectF(area.x(), area.y() + i * (rh + gap), area.width(), rh)
-            team_rows.paint_band(p, row, e.color, u)
+            team_rows.paint_band(p, row, e.color, u, slant=t.SLANT)
             team_rows.paint_start_riders(
                 p, row, e.bibs, e.names, first_px, last_px, u, self.rider_label
             )
@@ -1833,9 +1836,10 @@ class StandingsPage(Page):
     ) -> None:
         """The Madison page: place, then each team's row, its riders' surnames leading.
 
-        The row is the start list's swatch and fade with its left end, the
-        swatch, and the color view's edges cut at the score chip's slant
-        (``theme.SLANT``), and the figures sit on its dark right end: the
+        The row is the start list's: a square left end with the swatch
+        flush against it, and the swatch's right edge, the fade's start,
+        and the color view's moving edge at the score chip's slant
+        (``theme.SLANT``). The figures sit on its dark right end: the
         laps in the gain or loss color, the penalty while one stands, and
         the total in white, the row's largest type. There is no heading
         row: the figures' colors and order say which is which. On a timer
@@ -1910,10 +1914,12 @@ class StandingsPage(Page):
         if look.label > 0 and label is not None:
             name, f = label
             rise = (1 - look.label) * 12 * u
-            # Inside the color's slanted ends where they cross the row's
-            # middle, so the name keeps its air from both at every height.
-            pad = team_rows.ROW_PAD * u + team_rows.run(band, t.SLANT) / 2
-            rect = QRectF(band.x() + pad, y + rise, lay.zone_r - band.x() - 2 * pad, lay.rh)
+            # Inside the color's square left end and its slanted right end
+            # where it crosses the row's middle, so the name keeps its air
+            # from both at every height.
+            pad = team_rows.ROW_PAD * u
+            right = lay.zone_r - team_rows.run(band, t.SLANT) / 2 - pad
+            rect = QRectF(band.x() + pad, y + rise, right - band.x() - pad, lay.rh)
             p.save()
             p.setOpacity(p.opacity() * look.label)
             t.text(p, rect, name, f, t.team_ink(QColor(e.color)), CENTER)
@@ -2152,9 +2158,13 @@ class StandingsPage(Page):
         size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
         fig_gap = FIGURE_GAP * u
         total_r = area.right() - TEAM_FIGURE_PAD * u
-        # The swatch leans right as it rises; a tall row's surnames step
+        # The swatch's right edge leans right as it rises; a tall row's
+        # surnames, and with Bibs Only its plates at their largest, step
         # right of it, a short row's stay where they are.
         shift = team_rows.slant_shift(rh, size, u)
+        if self.bibs_only:
+            most = min(rh * team_rows.BIBS_ONLY_PLATE_SHARE, team_rows.BIBS_ONLY_PLATE_MOST * u)
+            shift = max(shift, team_rows.clearance(rh, most / 2, u))
         pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
 
         def columns(big_px: float) -> dict:
@@ -2259,11 +2269,12 @@ class StandingsPage(Page):
         # Like the surnames and the plates, it is sized for the area a
         # penalty and ordinal places would leave, and placed in the area
         # drawn, so neither steps it down when it comes.
-        # The room is inside the color's slanted ends where they cross the
-        # row's middle, as the name is placed (``team_row``).
+        # The room is inside the color's square left end and its slanted
+        # right end where it crosses the row's middle, as the name is
+        # placed (``team_row``).
         run = t.SLANT * rh
         label_room = (
-            cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u - run
+            cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u - run / 2
         )
         labels = []
         for r in d.rows:

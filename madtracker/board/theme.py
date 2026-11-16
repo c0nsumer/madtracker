@@ -33,8 +33,8 @@ PLATE_OUT = QColor("#262c36")
 PLATE_OUT_TEXT = QColor("#b4bdcb")
 # The board's one slant, as horizontal run per unit of height, leaning as
 # italic type does (the top right of the bottom): the score chip's sides
-# and the Madison table's row ends, swatch, and color edges share it, so
-# the chip lands at the angle the rows are cut to.
+# and the Madison rows' swatch and color edges, on the start list and the
+# table, share it, so the chip lands at the angle the rows are cut to.
 SLANT = 0.18
 # The venue's accent (design section 11): the one color for emphasis.
 DEFAULT_ACCENT = "#ffc83d"
