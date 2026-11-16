@@ -1780,7 +1780,10 @@ class StandingsPage(Page):
         g = u * max(1.0, fill / (RIDER_ROW_FULL * u))
         while g > u and not self.names_whole(entries, *layout(g, reserve=True)[2:]):
             g = max(u, g * 0.96)
-        rh, cols, name_rect, name_size = layout(g)
+        rh, cols, _rect, name_size = layout(g)
+        # The names are fitted and drawn in the room a PENALTY column
+        # leaves, so the first penalty given neither shrinks nor cuts them.
+        name_rect = layout(g, reserve=True)[2]
         place_f = t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True)
         total_f = t.font(min(60 * g, rh * 0.84), t.HEAVY, tabular=True)
         pad = 24 * g
@@ -1829,9 +1832,8 @@ class StandingsPage(Page):
         num = t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True)
         self.team_fill = 0.0
         # Measured over every row, not the page's, as the rank and total
-        # columns are, so the names hold still as the page turns, and
-        # beside a PENALTY column, so the first penalty never shrinks them.
-        scale = self.entry_scale(entries, layout(g, reserve=True)[2], name_size, True)
+        # columns are, so the names hold still as the page turns.
+        scale = self.entry_scale(entries, name_rect, name_size, True)
         band_h = rh - band_gap(rh, u)
         dpr = self.devicePixelRatioF()
         for i, row in enumerate(rows):

@@ -238,29 +238,33 @@ def test_rider_names_plates_and_lap_chips_clear_the_bar(
 
 
 def _still(drawn, bands, names) -> tuple:
-    """What a race must never move: the bands, the names' places, and the names' sizes."""
+    """What a race must never move: the bands, the names' places, and the names' sizes and text.
+
+    The text as shown, so a name cut or initialed further is a change.
+    """
     texts = sorted(
-        (round(r.x(), 2), round(r.y(), 2), px) for s, r, px, _c in drawn if named(s, names)
+        (round(r.x(), 2), round(r.y(), 2), px, s) for s, r, px, _c in drawn if named(s, names)
     )
     return (
         [b["row"].getRect() for b in bands],
-        [(x, y) for x, y, _px in texts],
-        [px for _x, _y, px in texts],
+        [(x, y) for x, y, _px, _s in texts],
+        [(px, s) for _x, _y, px, s in texts],
     )
 
 
 @pytest.mark.parametrize("long", [False, True], ids=["usual", "long"])
 @pytest.mark.parametrize("label", ["bibs_names", "names"])
 @pytest.mark.parametrize("n", [1, 3, 5, 9, 16])
-@pytest.mark.parametrize("size", [(1920, 1080), (1280, 720), (1000, 900)])
+@pytest.mark.parametrize("size", [(1920, 1080), (1280, 720), (1024, 768), (1000, 900)])
 def test_nothing_on_the_rider_pages_steps_down_through_a_lap_and_a_penalty(
     qtbot, drawn, monkeypatch, n, label, size, long
 ):
     """The first lap taken, the first penalty given, and the stamp never
     move a row, its bar, or its name, on the start list or the table,
-    however much of its room a long name takes. A start list at its base
-    sizes sets its names smaller for a lap chip, as it always has (design
-    section 10); a grown one keeps their size too."""
+    however much of its room a long name takes: a name keeps its size and
+    is never cut or initialed further. A start list at its base sizes sets
+    its names smaller for a lap chip, as it always has (design section
+    10); a grown one keeps their size and text too."""
     bands = record_bands(monkeypatch)
     names = [e.names[0] for e in start_list(n, long=long).roster]
     pages: dict = {}
