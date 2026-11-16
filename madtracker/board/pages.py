@@ -34,7 +34,6 @@ from madtracker.board.payloads import (
     Finish,
     Placing,
     PreRace,
-    SprintResult,
     StandingRow,
     Standings,
     lap_text,
@@ -68,30 +67,6 @@ def team_laps_text(n: int) -> str:
 
 # Between two figure columns on a team row.
 FIGURE_GAP = 40
-# The sprint card's points sit this far after the widest team block or rider.
-SPRINT_GAP = 28
-# The widest the sprint card grows, in the card's own unit.
-SPRINT_CARD_MOST = 1200
-# The card is drawn in a unit larger than the page's, up to this much,
-# since it is up for a few seconds and must be read from the stands at a
-# glance; a card with more places takes a smaller unit so it stays on
-# the page with this much air above and below it.
-SPRINT_CARD_SCALE = 1.5
-SPRINT_CARD_AIR = 40
-# The card's height in its unit: the title band, the rows, the foot.
-SPRINT_ROW_H = 84
-SPRINT_HEAD_H = 130
-SPRINT_FOOT_H = 30
-# The table behind the card is dimmed to this alpha: dark enough that
-# the card is what the eye finds, light enough to show the table is there.
-SPRINT_VEIL = 235
-
-
-def sprint_card_scale(rows: int, area_h: float, u: float) -> float:
-    """The card's unit over the page's: the largest up to the cap that fits ``area_h``."""
-    h = (SPRINT_HEAD_H + rows * SPRINT_ROW_H + SPRINT_FOOT_H) * u
-    fit = (area_h - 2 * SPRINT_CARD_AIR * u) / h
-    return max(0.0, min(SPRINT_CARD_SCALE, fit))
 
 
 def lap_chip_height(u: float) -> float:
@@ -1279,17 +1254,6 @@ class EliminationPage(Page):
             x += pw + gap
 
 
-def sprint_title(res: SprintResult) -> str:
-    """The card's title, worded like the header's "After Sprint 2 of 3"."""
-    # "Final sprint" is the task line's phrase for the last sprint, so the
-    # audience reads the same words the scorer does.
-    if res.of is not None and res.number >= res.of:
-        return "Final sprint"
-    if res.of is not None:
-        return f"Sprint {res.number} of {res.of}"
-    return f"Sprint {res.number}"
-
-
 # The most rows a page shows. Sixteen is the most riders a 166 m track
 # may start (USAC 2B7), so a full field at the venue is one page the
 # stands can read whole, its names at the design's floor (section 10). A
@@ -1552,13 +1516,17 @@ class Scene(NamedTuple):
 
     ``end`` is the payload the play ends on: a play waiting in the queue
     was built against the one before it, so a frame reads its rows, not
-    the newest payload's. ``places`` and ``penalties`` are each row's as
-    the table stood before the play, and ``page`` the page it plays on.
+    the newest payload's. ``places``, ``penalties`` and ``sprints`` (a
+    rider's SPRINT PTS) are each row's as the table stood before the
+    play, ``leaders`` the rows ranked first then, and ``page`` the page
+    it plays on.
     """
 
     end: Standings
     places: dict[Key, str]
     penalties: dict[Key, int]
+    sprints: dict[Key, int]
+    leaders: frozenset[Key]
     page: int
 
 
@@ -1569,6 +1537,34 @@ def place_ink(place: str) -> QColor:
 
 def row_key(row: StandingRow) -> Key:
     return tuple(row.entry.bibs)
+
+
+def sprint_points(row: StandingRow) -> int:
+    """A rider's sprint points so far, the figure under SPRINT PTS."""
+    return sum(v for v in row.sprints if v)
+
+
+class RiderTable(NamedTuple):
+    """A rider table's layout, worked out once per payload and board size.
+
+    A frame of a score change only reads it, so the motion never
+    measures text. ``name_rect`` is the first row's name area and
+    ``scale`` the names' shared fit.
+    """
+
+    head_h: float
+    rows_top: float
+    rh: float
+    band_h: float
+    cols: RiderColumns
+    name_rect: QRectF
+    name_size: float
+    scale: float
+    place_f: QFont
+    total_f: QFont
+    num: QFont
+    pad: float
+    penalized: bool
 
 
 @dataclass
@@ -1613,12 +1609,13 @@ class StandingsPage(Page):
     ("+1"): a bare number under SPRINTS reads as a count of sprints, and
     "+1 (+20)" mixes laps with points. The Madison page drops SPRINT PTS,
     names each team by its riders' surnames on a row of its color, and
-    turns to the team's color and name on a timer (``team_table``). Each
-    sprint of a Points Race shows for a few seconds on the sprint-result
-    card as it lands; the operator table and the results sheet keep
-    every sprint. More than PAGE_ROWS rows (TEAM_PAGE_ROWS for teams) are
-    shown a page at a time; ``advance`` turns the page, and a Madison
-    table with a clock turns its own pages with its rotation.
+    turns to the team's color and name on a timer (``team_table``). With
+    a clock, each score change plays on its rider's or team's TOTAL as a
+    chip, then the rows reorder (``team_play``, ``rider_play``); the
+    operator table and the results sheet keep every sprint. More than
+    PAGE_ROWS rows (TEAM_PAGE_ROWS for teams) are shown a page at a time;
+    ``advance`` turns the page, and a Madison table with a clock turns its
+    own pages with its rotation.
     """
 
     page = 0
@@ -1626,8 +1623,10 @@ class StandingsPage(Page):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         # The Madison table's layout and what it was worked out for, so a
-        # frame of the rotation measures nothing.
+        # frame of the rotation measures nothing; the rider table's, so a
+        # frame of a score change measures nothing.
         self._layout: tuple[tuple, TeamTable] | None = None
+        self._rider_layout: tuple[tuple, RiderTable] | None = None
         # The clock's time when the rotation last started: a new race
         # starts it over on the names view, and a sprint's new header
         # leaves it running, so the look in view never jumps.
@@ -1639,7 +1638,7 @@ class StandingsPage(Page):
         # late, and a change's first frame would land partway through it.
         self._wake = QTimer(self, singleShot=True, timerType=Qt.TimerType.PreciseTimer)
         self._wake.timeout.connect(self._wake_up)
-        # The Madison table's score changes, one play a scoring entry, and
+        # The table's score changes, one play a scoring entry, and
         # what each play's frames draw beside its steps (``Scene``), by the
         # play's id.
         self._queue = ScoreQueue()
@@ -1663,16 +1662,16 @@ class StandingsPage(Page):
             self.stop_motion()
             self._rotation_from = now
         super().set_data(data, prev)
-        if self.clock is None or not self.teams():
+        if self.clock is None:
             self.stop_motion()
             return
         same_race = (
             isinstance(prev, (Standings, PreRace)) and prev.header.race_id == data.header.race_id
         )
         if data.scored is not None and same_race:
-            if isinstance(prev, PreRace):
+            if isinstance(prev, PreRace) and self.teams():
                 self._turn_from_start_list(data, now)
-            # New scoring with nothing in view to play (every team that
+            # New scoring with nothing in view to play (every entrant that
             # scored is on another page, or no total changed) updates
             # quietly: it leaves what plays alone, and shows when that ends.
             built = self._play_for(data, prev)
@@ -1768,12 +1767,12 @@ class StandingsPage(Page):
         return isinstance(prev, Standings) and table(prev) == table(data)
 
     def _play_for(self, data: Standings, prev: Standings | PreRace) -> tuple[Play, Scene] | None:
-        """The play from ``prev``'s table to ``data``'s, for the teams on the page in view.
+        """The play from ``prev``'s table to ``data``'s, for the entrants on the page in view.
 
-        The first score of a race plays from the start list: every team
-        at 0, in start-list order. A team that scored on another page
-        goes straight to its new values, and a team whose total did not
-        change has no step. None when no step is left.
+        The first score of a race plays from the start list: every rider
+        or team at 0, in start-list order, with no leader. One that scored
+        on another page goes straight to its new values, and one whose
+        total did not change has no step. None when no step is left.
         """
         olds: dict[Key, StandingRow] = {}
         if isinstance(prev, PreRace):
@@ -1782,7 +1781,8 @@ class StandingsPage(Page):
         else:
             olds = {row_key(r): r for r in prev.rows}
             old_order = list(olds)
-            decided = self.ordinals(prev)
+            # The rider table words its places as numbers, decided or not.
+            decided = self.teams() and self.ordinals(prev)
             places = {row_key(r): ordinal(r.rank) if decided else str(r.rank) for r in prev.rows}
         rows = {row_key(r): r for r in data.rows}
         new_order = list(rows)
@@ -1790,7 +1790,7 @@ class StandingsPage(Page):
         seen = set(before)
         before += [k for k in new_order if k not in seen]
         per_page = self.per_page()
-        page = rotation.page_at(self.since(), per_page, self.page_count())
+        page = self.shown_page()
         lo, hi = page * per_page, (page + 1) * per_page
         shown_before, shown_after = before[lo:hi], new_order[lo:hi]
         steps: list[Step] = []
@@ -1812,7 +1812,9 @@ class StandingsPage(Page):
             after=(*shown_after, *(k for k in shown_before if k not in shown_after)),
         )
         penalties = {k: r.penalty for k, r in olds.items()}
-        return play, Scene(data, places, penalties, page)
+        sprints = {k: sprint_points(r) for k, r in olds.items()}
+        leaders = frozenset(k for k, r in olds.items() if r.rank == 1 and not r.status)
+        return play, Scene(data, places, penalties, sprints, leaders, page)
 
     def teams(self) -> bool:
         return self.data is not None and any(r.entry.color for r in self.data.rows)
@@ -1831,6 +1833,13 @@ class StandingsPage(Page):
         rows = len(self.data.rows) if self.data is not None else 0
         return max(1, -(-rows // page_rows(rows, self.page_most())))
 
+    def shown_page(self) -> int:
+        """The page in view when nothing plays: the rotation's, or the one ``advance`` turned to."""
+        pages = self.page_count()
+        if self.rotates():
+            return rotation.page_at(self.since(), self.per_page(), pages)
+        return self.page % pages
+
     def ordinals(self, d: Standings) -> bool:
         """Whether the places read "1st", "2nd": once the officials have decided the race.
 
@@ -1841,7 +1850,9 @@ class StandingsPage(Page):
         return d.header.status in DECIDED
 
     def advance(self) -> None:
-        if self.page_count() > 1:
+        # A score change plays out on the page it began on; the page turns
+        # on the pager's next tick after it.
+        if self.page_count() > 1 and not self.scoring_now():
             self.page = (self.page + 1) % self.page_count()
             self.update()
 
@@ -1879,12 +1890,12 @@ class StandingsPage(Page):
 
     def _schedule(self) -> None:
         """Frames while anything moves, else one timer for the next change's start."""
-        if not self.rotates():
-            self._wake.stop()
-            return
         if self._held is not None:
             self._wake.stop()
             self._ticker.poke()
+            return
+        if not self.rotates():
+            self._wake.stop()
             return
         since, rows = self.since(), self.per_page()
         if rotation.moving(since, rows):
@@ -1907,30 +1918,32 @@ class StandingsPage(Page):
             page = min(turn.page, pages - 1)
         elif scene is not None:
             page = min(scene.page, pages - 1)
-        elif self.rotates():
-            page = rotation.page_at(self.since(), per_page, pages)
         else:
-            page = self.page % pages
+            page = self.shown_page()
         rows = d.rows[page * per_page : (page + 1) * per_page]
         n = max(1, min(len(d.rows), per_page))
         bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
+        playing = None
+        if scene is not None:
+            playing = (play, self._queue.frame(now), scene)
         if self.teams():
-            playing = None
-            if scene is not None:
-                playing = (play, self._queue.frame(now), scene)
             self.team_table(p, area, d, page * per_page, rows, n, bottom, playing, turn)
         else:
-            self.rider_table(p, area, d, rows, n, bottom)
+            self.rider_table(p, area, d, rows, n, bottom, playing)
 
         if pages > 1:
             page_dots(p, area, pages, page, u)
-
-        if d.sprint_result is not None:
-            self.paint_overlay(p, area, d)
         self._schedule()
 
     def rider_table(
-        self, p: QPainter, area: QRectF, d: Standings, rows: list, n: int, bottom: float
+        self,
+        p: QPainter,
+        area: QRectF,
+        d: Standings,
+        rows: list,
+        n: int,
+        bottom: float,
+        playing: tuple[Play, Frame, Scene] | None = None,
     ) -> None:
         """The Points Race and Tempo Race page: a heading row, then a rider row per rider.
 
@@ -1938,12 +1951,60 @@ class StandingsPage(Page):
         row is the Madison's, its bar the accent for the leader and
         neutral for the rest (``team_rows.rider_bar``); the plate and the
         name stand clear of the bar at their largest (``bar_lead``), and
-        RIDER stands over them.
+        RIDER stands over them. ``playing`` is a score change's play, its
+        frame now, and its scene, drawn over the same layout
+        (``rider_play``).
         """
         u = self.u
-        head_h = 44 * u
+        key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
+        if self._rider_layout is None or self._rider_layout[0] != key:
+            # A copy, so a payload changed where it stands is not taken for the one measured.
+            self._rider_layout = (
+                (*key[:-1], copy.deepcopy(d)),
+                self.rider_table_layout(area, d, n, bottom),
+            )
+        lay = self._rider_layout[1]
+        cols = lay.cols
         top = area.y()
-        rows_top = top + head_h + 8 * u
+        head_h = lay.head_h
+        pad = lay.pad
+        lab = t.label(u)
+        # Room to the left for a heading wider than its column.
+        reach = 120 * u
+        name_x, name_w = lay.name_rect.x(), lay.name_rect.width()
+        t.text(p, QRectF(area.x(), top, cols.rank_w, head_h), "#", lab, t.MUTED)
+        t.text(p, QRectF(name_x, top, name_w, head_h), "RIDER", lab, t.MUTED)
+        rect = QRectF(cols.sprints_x - reach, top, cols.sprints_w - pad + reach, head_h)
+        t.text(p, rect, "SPRINT PTS", lab, t.MUTED, RIGHT)
+        rect = QRectF(cols.laps_x, top, cols.laps_w - pad, head_h)
+        t.text(p, rect, "LAPS", lab, t.MUTED, RIGHT)
+        if lay.penalized:
+            rect = QRectF(cols.penalty_x - reach, top, cols.penalty_w - pad + reach, head_h)
+            t.text(p, rect, "PENALTY", lab, t.MUTED, RIGHT)
+        rect = QRectF(cols.total_x, top, cols.total_w - 20 * u, head_h)
+        t.text(p, rect, "TOTAL", lab, t.TEXT, RIGHT)
+        if playing is not None:
+            self.rider_play(p, area, lay, bottom, *playing)
+            return
+        for i, row in enumerate(rows):
+            y = lay.rows_top + i * lay.rh
+            place = str(row.rank)
+            # The leader in the accent, as "1st" is on the result page; the
+            # rest in full ink, not the row's dimmest text.
+            t.text(
+                p, QRectF(area.x(), y, cols.rank_w, lay.rh), place, lay.place_f, place_ink(place)
+            )
+            total = row.status or total_text(row.total)
+            leader = row.rank == 1
+            self.rider_row(
+                p, area, lay, y, row, leader, sprint_points(row), row.laps, row.penalty, total
+            )
+
+    def rider_table_layout(self, area: QRectF, d: Standings, n: int, bottom: float) -> RiderTable:
+        """The rider table's rows, columns and fonts for this payload on this board."""
+        u = self.u
+        head_h = 44 * u
+        rows_top = area.y() + head_h + 8 * u
         # The feed leaves a status row off the board; a page given one
         # prints the status for a total and no figures, so a penalty on it
         # opens no column.
@@ -1977,119 +2038,165 @@ class StandingsPage(Page):
         # The names are fitted and drawn in the room a PENALTY column
         # leaves, so the first penalty given neither shrinks nor cuts them.
         name_rect = layout(g, reserve=True)[2]
-        place_f = t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True)
-        total_f = t.font(min(60 * g, rh * 0.84), t.HEAVY, tabular=True)
-        pad = 24 * g
-        right = area.right()
-        (
-            rank_w,
-            name_x,
-            name_w,
-            sprints_x,
-            sprints_w,
-            laps_x,
-            laps_w,
-            penalty_x,
-            penalty_w,
-            total_x,
-            total_w,
-        ) = cols
-        lab = t.label(u)
-        # Room to the left for a heading wider than its column.
-        reach = 120 * u
-
-        t.text(p, QRectF(area.x(), top, rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(name_rect.x(), top, name_rect.width(), head_h), "RIDER", lab, t.MUTED)
-        t.text(
-            p,
-            QRectF(sprints_x - reach, top, sprints_w - pad + reach, head_h),
-            "SPRINT PTS",
-            lab,
-            t.MUTED,
-            RIGHT,
-        )
-        t.text(p, QRectF(laps_x, top, laps_w - pad, head_h), "LAPS", lab, t.MUTED, RIGHT)
-        if penalized:
-            t.text(
-                p,
-                QRectF(penalty_x - reach, top, penalty_w - pad + reach, head_h),
-                "PENALTY",
-                lab,
-                t.MUTED,
-                RIGHT,
-            )
-        t.text(p, QRectF(total_x, top, total_w - 20 * u, head_h), "TOTAL", lab, t.TEXT, RIGHT)
-
-        # The figures keep pace with the names: at sixteen rows a sprint
-        # value set at half the row would be 26 px, under the board's minimum.
-        num = t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True)
         self.team_fill = 0.0
         # Measured over every row, not the page's, as the rank and total
         # columns are, so the names hold still as the page turns.
         scale = self.entry_scale(entries, name_rect, name_size, True)
-        band_h = rh - band_gap(rh, u)
+        return RiderTable(
+            head_h=head_h,
+            rows_top=rows_top,
+            rh=rh,
+            band_h=rh - band_gap(rh, u),
+            cols=cols,
+            name_rect=name_rect,
+            name_size=name_size,
+            scale=scale,
+            place_f=t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True),
+            total_f=t.font(min(60 * g, rh * 0.84), t.HEAVY, tabular=True),
+            # The figures keep pace with the names: at sixteen rows a sprint
+            # value set at half the row would be 26 px, under the board's minimum.
+            num=t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True),
+            pad=24 * g,
+            penalized=penalized,
+        )
+
+    def rider_row(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: RiderTable,
+        y: float,
+        row: StandingRow,
+        leader: bool,
+        sprints: int,
+        laps: int,
+        penalty: int,
+        total: str | None,
+    ) -> None:
+        """One rider's row at ``y``: band, plate and name, and figures.
+
+        ``sprints``, ``laps``, ``penalty`` and ``total`` are the figures in
+        view, which a score change holds at their old values until its new
+        total rises in; ``total`` is None while the change plays on the
+        cell, which then draws it (``total_change``). ``leader`` gives the
+        bar the accent.
+        """
+        u = self.u
+        cols = lay.cols
+        band_y = y + (lay.rh - lay.band_h) / 2
+        band = QRectF(cols.name_x, band_y, area.right() - cols.name_x, lay.band_h)
+        bar = team_rows.rider_bar(1 if leader else 2, t.ACCENT)
         dpr = self.devicePixelRatioF()
-        for i, row in enumerate(rows):
-            y = rows_top + i * rh
-            band = QRectF(name_x, y + (rh - band_h) / 2, right - name_x, band_h)
-            bar = team_rows.rider_bar(row.rank, t.ACCENT)
-            team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
-            cell = QRectF(0, y, 0, rh)
-            t.text(
-                p,
-                QRectF(area.x(), y, rank_w, rh),
-                str(row.rank),
-                place_f,
-                # The leader in the accent, as "1st" is on the result page;
-                # the rest in full ink, not the row's dimmest text.
-                t.ACCENT if row.rank == 1 else t.TEXT,
-            )
-            self.entry_line(
-                p,
-                name_rect.translated(0, y - rows_top),
-                row.entry,
-                name_size,
-                two_line_names=True,
-                scale=scale,
-            )
-            # The sprint points so far, a plain number: a "+" here is the
-            # laps chip's language and would read as a lap. Zero stays
-            # blank so the TV stays quiet until a rider scores.
-            sprint_points = sum(v for v in row.sprints if v)
-            if sprint_points and not row.status:
-                t.text(
-                    p,
-                    cell.adjusted(sprints_x, 0, sprints_x + sprints_w - pad, 0),
-                    str(sprint_points),
-                    num,
-                    t.TEXT,
-                    RIGHT,
-                )
-            if row.laps and not row.status:
-                # The laps alone: the points they earn are the venue's
-                # known value and are already in the total.
-                t.text(
-                    p,
-                    cell.adjusted(laps_x, 0, laps_x + laps_w - pad, 0),
-                    lap_text(row.laps),
-                    num,
-                    t.GAIN if row.laps > 0 else t.LOSS,
-                    RIGHT,
-                )
-            if penalized and row.penalty and not row.status:
-                # Written as a lap lost is, in the loss color: points taken.
-                t.text(
-                    p,
-                    cell.adjusted(penalty_x, 0, penalty_x + penalty_w - pad, 0),
-                    lap_text(row.penalty),
-                    num,
-                    t.LOSS if row.penalty < 0 else t.GAIN,
-                    RIGHT,
-                )
-            shown_total = row.status or total_text(row.total)
-            t.text(
-                p, cell.adjusted(total_x, 0, right - 20 * u, 0), shown_total, total_f, t.TEXT, RIGHT
-            )
+        team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
+        name_rect = lay.name_rect.translated(0, y - lay.rows_top)
+        self.entry_line(
+            p, name_rect, row.entry, lay.name_size, two_line_names=True, scale=lay.scale
+        )
+        cell = QRectF(0, y, 0, lay.rh)
+        pad = lay.pad
+        # The sprint points so far, a plain number: a "+" here is the
+        # laps chip's language and would read as a lap. Zero stays
+        # blank so the TV stays quiet until a rider scores.
+        if sprints and not row.status:
+            rect = cell.adjusted(cols.sprints_x, 0, cols.sprints_x + cols.sprints_w - pad, 0)
+            t.text(p, rect, str(sprints), lay.num, t.TEXT, RIGHT)
+        if laps and not row.status:
+            # The laps alone: the points they earn are the venue's
+            # known value and are already in the total.
+            rect = cell.adjusted(cols.laps_x, 0, cols.laps_x + cols.laps_w - pad, 0)
+            t.text(p, rect, lap_text(laps), lay.num, t.GAIN if laps > 0 else t.LOSS, RIGHT)
+        if lay.penalized and penalty and not row.status:
+            # Written as a lap lost is, in the loss color: points taken.
+            rect = cell.adjusted(cols.penalty_x, 0, cols.penalty_x + cols.penalty_w - pad, 0)
+            t.text(p, rect, lap_text(penalty), lay.num, t.LOSS if penalty < 0 else t.GAIN, RIGHT)
+        if total is not None:
+            t.text(p, self.rider_total_cell(area, lay, y), total, lay.total_f, t.TEXT, RIGHT)
+
+    def rider_total_cell(self, area: QRectF, lay: RiderTable, y: float) -> QRectF:
+        """A rider row's TOTAL cell at ``y``: the total and its chip stand to its right edge."""
+        return QRectF(lay.cols.total_x, y, area.right() - 20 * self.u - lay.cols.total_x, lay.rh)
+
+    def rider_play(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: RiderTable,
+        bottom: float,
+        play: Play,
+        frame: Frame,
+        scene: Scene,
+    ) -> None:
+        """A score change's frame on the rider table, as ``team_play`` draws the Madison's.
+
+        Each row's SPRINT PTS, laps and penalty settle with its new total.
+        The accent bar stays with the leader the stands saw until the last
+        total has risen in, then goes with the new leader as the rows slide.
+        """
+        rows = {row_key(r): r for r in scene.end.rows}
+        steps = {s.key: s for s in play.steps}
+        landed = not frame.chips and all(frame.totals[s.key] == s.new for s in play.steps)
+        clip = len(play.before) > self.per_page()
+        if clip:
+            # A row moving onto the page or off it slides in or out below the last row.
+            p.save()
+            p.setClipRect(QRectF(0, lay.rows_top, self.width(), bottom - lay.rows_top))
+        for k in play.before:
+            row = rows.get(k)
+            if row is None:
+                continue
+            y = lay.rows_top + frame.rows[k] * lay.rh
+            shown = frame.totals.get(k, row.total)
+            # The figures beside the total settle with it.
+            settled = shown == row.total
+            penalty = row.penalty if settled else scene.penalties.get(k, 0)
+            sprints = sprint_points(row) if settled else scene.sprints.get(k, 0)
+            total = None if k in frame.chips else (row.status or total_text(shown))
+            laps = frame.laps.get(k, row.laps)
+            leader = row.rank == 1 if landed else k in scene.leaders
+            self.rider_row(p, area, lay, y, row, leader, sprints, laps, penalty, total)
+        if clip:
+            p.restore()
+        x, w = area.x(), lay.cols.rank_w
+        self.play_places(p, x, w, lay.rows_top, lay.rh, lay.rh, lay.place_f, play, frame, scene)
+        for k, ms in frame.chips.items():
+            cell = self.rider_total_cell(area, lay, lay.rows_top + frame.rows[k] * lay.rh)
+            self.total_change(p, cell, lay.total_f, steps[k], ms, self.u)
+
+    def play_places(
+        self,
+        p: QPainter,
+        x: float,
+        w: float,
+        top: float,
+        pitch: float,
+        h: float,
+        f: QFont,
+        play: Play,
+        frame: Frame,
+        scene: Scene,
+        decided: bool = False,
+    ) -> None:
+        """A play's places, each slot's old place turning to its new one as the rows slide.
+
+        The places stay with their slots, ``pitch`` apart from ``top``,
+        each ``w`` by ``h`` from ``x``; ``decided`` words them as ordinals.
+        """
+        rows = {row_key(r): r for r in scene.end.rows}
+        moved = reorder_progress(play, frame)
+        for slot in range(min(self.per_page(), len(play.before))):
+            rect = QRectF(x, top + slot * pitch, w, h)
+            after = rows.get(play.after[slot])
+            new = (ordinal(after.rank) if decided else str(after.rank)) if after else ""
+            old = scene.places.get(play.before[slot], new)
+            if old == new:
+                t.text(p, rect, new, f, place_ink(new))
+                continue
+            for s, k in ((old, 1 - moved), (new, moved)):
+                if k > 0:
+                    p.save()
+                    p.setOpacity(k)
+                    t.text(p, rect, s, f, place_ink(s))
+                    p.restore()
 
     def team_table(
         self,
@@ -2334,33 +2441,26 @@ class StandingsPage(Page):
             self.team_row(p, area, lay, y, look, row, labels.get(k), laps, penalty, total)
         if clip:
             p.restore()
-        moved = reorder_progress(play, frame)
         decided = self.ordinals(scene.end)
-        for slot in range(min(per_page, len(play.before))):
-            y = lay.rows_top + slot * pitch
-            rect = QRectF(area.x(), y, lay.rank_w, lay.rh)
-            after = rows.get(play.after[slot])
-            new = (ordinal(after.rank) if decided else str(after.rank)) if after else ""
-            old = scene.places.get(play.before[slot], new)
-            if old == new:
-                t.text(p, rect, new, lay.place_f, place_ink(new))
-                continue
-            for s, k in ((old, 1 - moved), (new, moved)):
-                if k > 0:
-                    p.save()
-                    p.setOpacity(k)
-                    t.text(p, rect, s, lay.place_f, place_ink(s))
-                    p.restore()
+        x, w = area.x(), lay.rank_w
+        self.play_places(
+            p, x, w, lay.rows_top, pitch, lay.rh, lay.place_f, play, frame, scene, decided
+        )
         for k, ms in frame.chips.items():
-            self.total_change(p, lay, lay.rows_top + frame.rows[k] * pitch, steps[k], ms, u)
+            y = lay.rows_top + frame.rows[k] * pitch
+            cell = QRectF(lay.total_r - lay.total_col, y, lay.total_col, lay.rh)
+            self.total_change(p, cell, lay.total_f, steps[k], ms, u)
 
     def total_change(
-        self, p: QPainter, lay: TeamTable, y: float, step: Step, ms: float, u: float
+        self, p: QPainter, cell: QRectF, f: QFont, step: Step, ms: float, u: float
     ) -> None:
-        """A team's TOTAL cell ``ms`` into its step: the old total knocked out, the chip, the new total."""
-        rh = lay.rh
-        f = lay.total_f
-        cell = QRectF(lay.total_r - lay.total_col, y, lay.total_col, rh)
+        """A TOTAL ``cell`` ``ms`` into its step: the old total knocked out, the chip, the new total.
+
+        The total and the chip stand to the cell's right edge, and the new
+        total rises in clipped to the cell; ``f`` is the total's font.
+        """
+        rh = cell.height()
+        y = cell.y()
         out = ease_out(phase(ms, 0, scorebug.OLD_OUT_MS))
         if out < 1:
             p.save()
@@ -2380,7 +2480,7 @@ class StandingsPage(Page):
         chip_f = t.font(max(f.pixelSize() * CHIP_TYPE, t.MIN_PX * u), t.HEAVY, tabular=True)
         w = t.text_width(step.text, chip_f) + CHIP_PAD * f.pixelSize()
         h = CHIP_HEIGHT * rh
-        rect = QRectF(lay.total_r - w, y + (rh - h) / 2, w, h)
+        rect = QRectF(cell.right() - w, y + (rh - h) / 2, w, h)
         # A gain in the accent, a loss (a lap lost, a penalty) in the loss red.
         fill, ink = (t.ACCENT, t.ACCENT_INK) if step.gain else (t.OUT, t.TEXT)
         score_chip(p, rect, step.text, chip_f, fill, ink, ms, rh, u)
@@ -2588,121 +2688,6 @@ class StandingsPage(Page):
             plate_h=plate_h,
             labels=labels,
         )
-
-    def paint_overlay(self, p: QPainter, area: QRectF, d: Standings) -> None:
-        """The sprint's result over the standings: place, who, and the points one gap after.
-
-        The card is as wide as its content and centered on the board, so
-        each "+5" sits beside its team block or rider, where the eye
-        already is, rather than across an empty row; the blocks share the
-        widest name's width so the points stand in one right-aligned
-        column.
-        """
-        res = d.sprint_result
-        p.fillRect(self.rect(), QColor(5, 6, 9, SPRINT_VEIL))
-        # A team is its color and name on a three-second card; its pair
-        # of names would be cut to fragments there and add nothing.
-        placings = [
-            (pl, replace(e, names=[]) if e.color else e, pts) for pl, e, pts in res.placings
-        ]
-        # The page's unit is scaled for the card alone, so every helper the
-        # card calls (plates, name fitting) measures as it draws; the team
-        # blocks are sized for the table behind at the page's own unit.
-        scale = sprint_card_scale(len(placings), area.height(), self.u)
-        # The page's unit follows its height, so on a board narrower than
-        # 16:9 (a window of any shape) a card of long names can be wider
-        # than the page: it takes a smaller unit until it fits with air at
-        # its sides.
-        room = self.width() - 2 * SPRINT_CARD_AIR * self.u
-        for _ in range(8):
-            w = self._card_at(p, area, placings, res, scale, draw=False)
-            if w <= room:
-                break
-            scale *= min(0.995, room / w)
-        self.card_scale = scale
-        self._card_at(p, area, placings, res, scale)
-
-    def _card_at(self, p, area, placings, res, scale: float, draw: bool = True) -> float:
-        """``_paint_card`` in the card's unit, ``scale`` times the page's; the card's width."""
-        page_u, self.u = self.u, self.u * scale
-        page_team_w, self.team_w = self.team_w, self.team_w * scale
-        try:
-            return self._paint_card(p, area, placings, res, draw)
-        finally:
-            self.u, self.team_w = page_u, page_team_w
-
-    def _paint_card(self, p: QPainter, area: QRectF, placings, res, draw: bool = True) -> float:
-        u = self.u
-        rh = SPRINT_ROW_H * u
-        size = 46 * u
-        side, place_w, gap = 48 * u, 120 * u, SPRINT_GAP * u
-        title = sprint_title(res)
-        title_f = t.font(54 * u, t.HEAVY)
-        pts_f = t.font(60 * u, t.HEAVY, tabular=True)
-        figs = [f"+{pts}" for _, _, pts in placings]
-        pts_w = max((t.text_width(s, pts_f) for s in figs), default=0.0)
-        # The card grows to SPRINT_CARD_MOST at most: wide enough that a
-        # long name stays at a size the stands read in the few seconds
-        # the card is up.
-        most = SPRINT_CARD_MOST * u - 2 * side - place_w - gap - pts_w
-        room = QRectF(0, 0, most, rh - 16 * u)
-        entries = [e for _, e, _ in placings]
-        # The blocks keep to the widest name: a bar the card's width would
-        # be a second row band, not a label.
-        self.team_fill = 0.0
-        fit = self.entry_scale(entries, room, size, False)
-        if any(e.color for e in entries):
-            entry_w = self.team_w
-        else:
-            # Rounded up to the pixel: the column is the sum of a name's
-            # parts, and float sums can land a hair under the name they were
-            # measured from, which would initial the widest name.
-            entry_w = math.ceil(
-                max((self.entry_width(room, e, size, fit) for e in entries), default=0.0)
-            )
-        w = max(2 * side + place_w + entry_w + gap + pts_w, 2 * side + t.text_width(title, title_f))
-        if not draw:
-            return w
-        h = SPRINT_HEAD_H * u + len(placings) * rh + SPRINT_FOOT_H * u
-        card = QRectF(area.center().x() - w / 2, area.center().y() - h / 2, w, h)
-        p.setPen(QPen(t.ACCENT, 3 * u))
-        p.setBrush(t.BAR)
-        p.drawRoundedRect(card, 20 * u, 20 * u)
-        t.text(
-            p,
-            QRectF(card.x() + side, card.y() + 30 * u, w - 2 * side, 70 * u),
-            title,
-            title_f,
-            t.ACCENT,
-        )
-        # A rule under the title: the card reads as a card over the
-        # table, not as a brighter part of it.
-        p.setPen(QPen(t.ACCENT, 2 * u))
-        rule_y = card.y() + 108 * u
-        p.drawLine(QPointF(card.x() + side, rule_y), QPointF(card.right() - side, rule_y))
-        x = card.x() + side
-        y = card.y() + 124 * u
-        place_f = t.font(40 * u, t.BOLD, tabular=True)
-        for (place, entry, _pts), fig in zip(placings, figs, strict=True):
-            t.text(p, QRectF(x, y, 110 * u, rh), ordinal(place), place_f, t.MUTED)
-            entry_rect = QRectF(x + place_w, y + 8 * u, entry_w, rh - 16 * u)
-            self.entry_line(p, entry_rect, entry, size, two_line_names=False, scale=fit)
-            figs_rect = QRectF(entry_rect.right() + gap, y, pts_w, rh)
-            t.text(p, figs_rect, fig, pts_f, t.TEXT, RIGHT)
-            y += rh
-        return w
-
-    def entry_width(self, rect: QRectF, entry: Entry, size: float, scale: float) -> float:
-        """How much of ``rect`` a rider's plate and name take, the name as ``fit_name`` sets it."""
-        texts = self.entry_texts(rect, entry, size, False, scale)
-        end = rect.x()
-        if self.show_bibs and entry.bibs:
-            end += t.plate_width(self.plate_height(rect.height()))
-        for r, s, f, _kind in texts:
-            if s:
-                shown = t.fit_name(s, r.width(), f)
-                end = max(end, r.x() + min(r.width(), t.text_width(shown, f)))
-        return end - rect.x()
 
 
 # The closest the result's rows below the podium are set: a 72 px row

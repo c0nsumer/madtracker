@@ -59,13 +59,6 @@ SMALL = (
         400,
     ),
     (
-        "board_sprint_result.png",
-        "scoreboard-sprint-result.png",
-        "The scoreboard's sprint result card",
-        "The sprint result card the scoreboard shows briefly after a sprint is recorded.",
-        400,
-    ),
-    (
         "board_madison_two.png",
         "scoreboard-madison-two-teams.png",
         "The scoreboard showing a two-team Madison's standings",
@@ -195,14 +188,13 @@ def render_shots(app, out: Path) -> None:
         click("42", "17", "31", "8")
         mockup._grab(c.board, mockup.BOARD_SIZE, out / "board_elimination.png")
         finish("42", "17", "31", "8")
-        # The points race: the card the board shows as the second sprint is recorded.
+        # The points race, run to its result.
         c.select_race(races[mockup.POINTS].race_id)
         click("12", "7", "33", "4", "22", "9")
         c.record_sprint()
         c.rider_action(c.live.roster.resolve("19"), "lap_gained")
         click("7", "12", "4", "19", "9", "38")
         c.record_sprint()
-        mockup._grab(c.board, mockup.BOARD_SIZE, out / "board_sprint_result.png")
         finish()
 
         def rename_teams(race_id: int, names: dict[str, str]) -> None:

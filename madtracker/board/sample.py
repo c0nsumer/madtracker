@@ -13,7 +13,6 @@ from madtracker.board.payloads import (
     Header,
     Placing,
     PreRace,
-    SprintResult,
     StandingRow,
     Standings,
 )
@@ -107,7 +106,7 @@ def _rows(entries, sprints_by_key, laps_by_key, lap_value, sprint_count, key):
     return _rank(rows)
 
 
-def sprint_points(with_result: bool = False) -> Standings:
+def sprint_points() -> Standings:
     # After Sprint 2 of 3; 10-7-5-3-2-1 per sprint.
     s = {
         "12": [10, 7],
@@ -124,17 +123,6 @@ def sprint_points(with_result: bool = False) -> Standings:
     laps = {"19": 1, "51": -1}
     entries = [Entry(bibs=[b], names=[n]) for b, n in GROUP_B]
     rows = _rows(entries, s, laps, 10, 3, key=lambda e: e.bibs[0])
-    result = None
-    if with_result:
-        order = ["7", "12", "4", "19", "9", "38"]
-        result = SprintResult(
-            number=2,
-            of=3,
-            placings=[
-                (i + 1, _rider(b, GROUP_B), pts)
-                for i, (b, pts) in enumerate(zip(order, [10, 7, 5, 3, 2, 1], strict=True))
-            ],
-        )
     return Standings(
         header=Header(
             title="6 Mile Points",
@@ -144,7 +132,6 @@ def sprint_points(with_result: bool = False) -> Standings:
         sprint_count=3,
         rows=rows,
         current_sprint=2,
-        sprint_result=result,
     )
 
 

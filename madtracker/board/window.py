@@ -7,7 +7,6 @@ it goes on (``madtracker.displays``) and reacts to hot-plug signals; the
 scoring side decides what to show and calls ``set_layout``.
 """
 
-import dataclasses
 import sys
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
@@ -32,13 +31,6 @@ TOP_BAR_HEIGHT = 140
 # follows the image's aspect up to this width instead of squeezing it
 # into a square-ish slot where it would print at a third of its height.
 LOGO_MAX_W = 620
-
-# How long a sprint's result card stays up, whatever its length: one
-# time the stands and the announcer can count on, rather than three
-# seconds a place, which would only ever vary for a Tempo Race. The
-# next entry takes it down sooner, so a sprint every lap
-# never waits on it.
-SPRINT_CARD_MS = 10000
 
 
 # The board as an ordinary window on the laptop, for setup and testing:
@@ -337,7 +329,6 @@ class BoardCanvas(QWidget):
     # How long the loud treatments last before the board settles. These are
     # the only timers on the board; everything else redraws on new data.
     ELIMINATION_HIGHLIGHT_MS = 5000
-    SPRINT_OVERLAY_MS = SPRINT_CARD_MS
     PAGE_MS = 6000
 
     def __init__(
@@ -392,8 +383,6 @@ class BoardCanvas(QWidget):
         self._on_screen: int | None = None
         self._highlight = QTimer(self, singleShot=True, interval=self.ELIMINATION_HIGHLIGHT_MS)
         self._highlight.timeout.connect(self._settle_elimination)
-        self._overlay = QTimer(self, singleShot=True, interval=self.SPRINT_OVERLAY_MS)
-        self._overlay.timeout.connect(self._clear_overlay)
         # A standings table longer than a page turns its pages on its own.
         self._pager = QTimer(self, interval=self.PAGE_MS)
         self._pager.timeout.connect(self._turn_page)
@@ -434,11 +423,6 @@ class BoardCanvas(QWidget):
             self._out_seen[payload.header.race_id] = ()
             self._highlight.stop()
             self.pages["elimination"].fresh = False
-        result = getattr(payload, "sprint_result", None)
-        if result is not None:
-            self._overlay.start(self.SPRINT_OVERLAY_MS)
-        else:
-            self._overlay.stop()
         if payload.header != self.top_bar.header:
             # A new race, or a new sprint, starts a long table on its first
             # page (StandingsPage.set_data), so the page clock starts over
@@ -569,16 +553,6 @@ class BoardCanvas(QWidget):
             return
         if page.data is not None and hasattr(page, "advance"):
             page.advance()
-
-    def _clear_overlay(self) -> None:
-        # The TV and the preview are handed one payload object. Clearing
-        # the card on it in place would let whichever timer fired first
-        # clear it for both, and the other would find nothing to clear and
-        # never repaint, so each canvas takes a copy without the card.
-        page = self.pages[self._layout_name]
-        if getattr(page.data, "sprint_result", None) is not None:
-            page.data = dataclasses.replace(page.data, sprint_result=None)
-        page.update()
 
     def _apply_scale(self) -> None:
         u = self.height() / DESIGN_HEIGHT

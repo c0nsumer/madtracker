@@ -2797,7 +2797,6 @@ def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_
     # sprint is what the table plays.
     assert c.board.layout_name() == "madison"
     data = _shown(c)
-    assert data.sprint_result is None
     assert data.scored.kind == "sprint"
     assert list(data.scored.keys) == [
         tuple(str(b) for b in c.live.roster.get(c.live.roster.resolve(t)).bibs)
@@ -2807,19 +2806,45 @@ def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_
     lap("Orange")(c)
     assert c.board.layout_name() == "madison"
     data = _shown(c)
-    assert data.sprint_result is None
     assert data.scored.kind == "lap_gained"
 
     c.rider_action(c.live.roster.resolve("Yellow"), "lap_lost")
     assert c.board.layout_name() == "madison"
     data = _shown(c)
-    assert data.sprint_result is None
     assert data.scored.kind == "lap_lost"
 
     # Undo takes the score back and the board keeps the table, with
     # nothing new to play.
     assert c.undo()
     assert c.board.layout_name() == "madison"
+    assert _shown(c).scored is None
+
+
+@pytest.mark.parametrize("row", [POINTS, TEMPO], ids=["points", "tempo"])
+def test_the_points_board_has_a_start_list_then_a_table_that_plays_scoring_not_a_sprint_card(
+    app, row
+):
+    c = app
+    c.set_board_live(True)
+    select(c, row)
+    assert c.board.layout_name() == "pre_race"
+    assert getattr(_shown(c), "scored", None) is None
+    click("12", "7")(c)
+    record(c)
+    # Record Sprint turns the board to the table, which plays the sprint
+    # itself: each rider that scored, by bib, in place order (a Tempo
+    # Race's sprint scores its winner alone).
+    assert c.board.layout_name() == "sprint_points"
+    data = _shown(c)
+    awarded = [("12",), ("7",)] if row == POINTS else [("12",)]
+    assert data.scored.kind == "sprint" and list(data.scored.keys) == awarded
+    lap("33")(c)
+    data = _shown(c)
+    assert data.scored.kind == "lap_gained" and list(data.scored.keys) == [("33",)]
+    # Undo takes the lap back and the board keeps the table, with
+    # nothing new to play.
+    assert c.undo()
+    assert c.board.layout_name() == "sprint_points"
     assert _shown(c).scored is None
 
 

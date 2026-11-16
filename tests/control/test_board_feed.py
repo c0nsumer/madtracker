@@ -58,42 +58,34 @@ def test_elimination_remaining_last_out_and_out_earlier(store, make_race, event,
     assert payload.header.status == "Provisional"
 
 
-def test_sprint_points_columns_overlay_and_provisional(store, make_race, event, house):
+def test_sprint_points_columns_and_provisional(store, make_race, event, house):
     ids = ids_of(event)
     s = live(store, make_race, "points", [7, 12, 33, 19], house.points(3))
     layout, payload = bf.board_for(s.view())
     assert layout == "pre_race"
     sprint(s, ids, 12, 7, 33)
     assert s.act(ids[19], "lap_gained").ok
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view())
     assert layout == "sprint_points"
     assert payload.sprint_count == 3
     assert payload.current_sprint == 1
-    # The last entry was a lap, not a sprint, so there is no card to show.
-    assert payload.sprint_result is None
     rows = {r.entry.bibs[0]: r for r in payload.rows}
     assert rows["12"].sprints == [10, None, None]
     assert rows["19"].laps == 1 and rows["19"].lap_points == 10 and rows["19"].total == 10
     assert payload.header.status == "After Sprint 1 of 3"
 
     sprint(s, ids, 7, 12)
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view())
     assert payload.current_sprint == 2
-    card = payload.sprint_result
-    assert card.number == 2
-    assert card.of == 3
-    assert [(place, e.bibs[0], pts) for place, e, pts in card.placings] == [
-        (1, "7", 10),
-        (2, "12", 7),
-    ]
+    rows = {r.entry.bibs[0]: r for r in payload.rows}
+    assert rows["7"].sprints == [7, 10, None] and rows["12"].sprints == [10, 7, None]
 
     clicks(s, ids, 7, 12, 33, 19)
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view())
     assert payload.current_sprint == 3
-    assert payload.sprint_result.number == 3
-    # The finish order is the final sprint; the page words it from number == of.
-    assert payload.sprint_result.of == 3
-    assert payload.sprint_result.placings[0][2] == 20
+    # The finish order is the final sprint, doubled.
+    rows = {r.entry.bibs[0]: r for r in payload.rows}
+    assert rows["7"].sprints == [7, 10, 20]
     assert payload.header.status == "Provisional"
     assert [r.rank for r in payload.rows] == [1, 2, 3, 4]
 
@@ -102,16 +94,17 @@ def test_a_race_ended_with_its_results_standing_shows_the_sprints_ridden(
     store, make_race, event, house
 ):
     """USAC 2M6: the board's table stops at the sprints ridden, no empty
-    columns for the rest, and no sprint card for the end itself."""
+    columns for the rest, and the end itself scores nothing new."""
     ids = ids_of(event)
     s = live(store, make_race, "points", [7, 12, 33, 19], house.points(4))
     sprint(s, ids, 12, 7, 33)
     sprint(s, ids, 7, 12)
+    before = s.view().actions
     assert s.end_race().ok
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view(), before=before)
     assert layout == "sprint_points"
     assert payload.sprint_count == 2
-    assert payload.sprint_result is None
+    assert payload.scored is None
     rows = {r.entry.bibs[0]: r for r in payload.rows}
     assert rows["12"].sprints == [10, 7] and rows["7"].sprints == [7, 10]
     assert payload.header.status == "Provisional"
@@ -119,8 +112,8 @@ def test_a_race_ended_with_its_results_standing_shows_the_sprints_ridden(
 
 def test_a_shortened_race_shows_the_count_it_rides_to(store, make_race, event, house):
     """USAC 1G4(b): set for 4 sprints and shortened to 3, the board shows
-    three sprint columns, After Sprint 2 of 3, and the finish's card as
-    the final sprint, doubled."""
+    three sprint columns, After Sprint 2 of 3, and the finish order
+    scored as the final sprint, doubled."""
     ids = ids_of(event)
     s = live(store, make_race, "points", [7, 12, 33, 19], house.points(4))
     sprint(s, ids, 12, 7, 33)
@@ -130,13 +123,13 @@ def test_a_shortened_race_shows_the_count_it_rides_to(store, make_race, event, h
     assert layout == "sprint_points"
     assert payload.sprint_count == 3
     assert payload.header.status == "After Sprint 2 of 3"
+    before = s.view().actions
     clicks(s, ids, 33, 7, 12, 19)
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view(), before=before)
     assert payload.sprint_count == 3
-    assert payload.sprint_result.number == 3 and payload.sprint_result.of == 3
-    assert payload.sprint_result.placings[0][2] == 20, "the new final sprint doubles"
+    assert payload.scored == P.Scored("sprint", [("33",), ("7",), ("12",), ("19",)])
     rows = {r.entry.bibs[0]: r for r in payload.rows}
-    assert rows["33"].sprints == [5, 0, 20]
+    assert rows["33"].sprints == [5, 0, 20], "the new final sprint doubles"
 
 
 def test_madison_rows_carry_team_and_color(store, make_race, house):
@@ -204,7 +197,7 @@ def test_payloads_coerce_cleanly(store, make_race, event, house):
     ids = ids_of(event)
     s = live(store, make_race, "points", [7, 12], house.points(2))
     sprint(s, ids, 7, 12)
-    layout, payload = bf.board_for(s.view(), overlay=True)
+    layout, payload = bf.board_for(s.view())
     assert P.coerce(P.LAYOUT_PAYLOADS[layout], payload) is payload
 
 
@@ -382,8 +375,7 @@ def test_a_new_madison_sprint_is_scored_in_sprint_order(store, make_race, house)
     for name in ("Orange", "Blue", "Red"):
         assert s.click(teams[name]).ok
     assert s.record_sprint().ok
-    payload = bf.standings(s.view(), overlay=True, before=before)
-    assert payload.sprint_result is None, "a team roster gets no sprint card"
+    payload = bf.standings(s.view(), before=before)
     assert payload.scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"], KEY["Red"]])
 
 
@@ -489,15 +481,49 @@ def test_a_team_marked_out_that_fills_the_final_sprint_plays_it(store, make_race
     assert scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"]])
 
 
-def test_nothing_is_scored_without_a_before_or_for_a_points_race(store, make_race, event, house):
+def test_nothing_is_scored_without_a_before(store, make_race, house):
     s, teams = _madison(store, make_race, house)
     for name in ("Orange", "Blue"):
         assert s.click(teams[name]).ok
     assert s.record_sprint().ok
     assert bf.standings(s.view(), before=None).scored is None
+
+
+def test_a_points_race_sprint_is_scored_for_riders(store, make_race, event, house):
+    """A rider roster's table plays its scoring as the Madison's does:
+    each rider keyed by their bib, in place order, only the places the
+    sprint awarded; a lap, a lap lost and a penalty; the finish order as
+    the final sprint. Undo plays nothing."""
     ids = ids_of(event)
-    p = live(store, make_race, "points", [7, 12, 33, 9], house.points(2))
-    before = p.view().actions
-    sprint(p, ids, 33, 7)
-    payload = bf.standings(p.view(), overlay=True, before=before)
-    assert payload.scored is None and payload.sprint_result is not None
+    s = live(store, make_race, "points", [3, 5, 7, 9, 12, 19, 33, 44], house.points(2))
+    before = s.view().actions
+    sprint(s, ids, 12, 7, 33, 19, 9, 44, 3)
+    payload = bf.board_for(s.view(), before=before)[1]
+    # Six places score; the seventh rider clicked earned nothing.
+    assert payload.scored == P.Scored("sprint", [(b,) for b in ("12", "7", "33", "19", "9", "44")])
+    for key, kind in (
+        ("lap_gained", "lap_gained"),
+        ("lap_lost", "lap_lost"),
+        ("points_penalty:2", "penalty"),
+    ):
+        before = s.view().actions
+        assert s.act(ids[5], key).ok
+        assert bf.standings(s.view(), before=before).scored == P.Scored(kind, [("5",)])
+    before = s.view().actions
+    assert s.undo().ok
+    assert bf.standings(s.view(), before=before).scored is None
+    before = s.view().actions
+    clicks(s, ids, 7, 12, 33, 19, 9, 44, 3, 5)
+    assert s.state == "provisional"
+    scored = bf.standings(s.view(), before=before).scored
+    assert scored == P.Scored("sprint", [(b,) for b in ("7", "12", "33", "19", "9", "44")])
+
+
+def test_a_tempo_race_sprint_scores_its_winner(store, make_race, event):
+    ids = ids_of(event)
+    s = live(store, make_race, "tempo", [7, 12, 33], R.tempo_rules(sprint_count=3))
+    before = s.view().actions
+    sprint(s, ids, 33, 7)
+    payload = bf.board_for(s.view(), before=before)[1]
+    assert payload.scored == P.Scored("sprint", [("33",)])
+    assert {r.entry.bibs[0]: r.total for r in payload.rows}["33"] == 1

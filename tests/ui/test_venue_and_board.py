@@ -1,4 +1,4 @@
-"""Venue settings, the Settings dialog, the logo on the board, and overlay pacing."""
+"""Venue settings, the Settings dialog, the logo on the board, and page pacing."""
 
 import pytest
 
@@ -23,40 +23,6 @@ def board(qtbot):
     qtbot.addWidget(w)
     w.resize(1920, 1080)
     return w
-
-
-def test_every_sprint_card_shows_for_ten_seconds_then_the_standings_return(board, qtbot):
-    """One time everyone can count on, whatever the card's length."""
-    for places in (1, 4):
-        data = sample.sprint_points(with_result=True)
-        data.sprint_result.placings = data.sprint_result.placings[:places]
-        board.set_layout("sprint_points", data)
-        assert board._overlay.isActive() and board._overlay.interval() == 10000
-    board._overlay.setInterval(10)
-    board._overlay.start()
-    qtbot.waitUntil(lambda: board.pages["sprint_points"].data.sprint_result is None, timeout=1000)
-    board.set_layout("sprint_points", sample.sprint_points())
-    assert not board._overlay.isActive()
-
-
-def test_the_tv_and_the_preview_each_take_the_card_down(board, qtbot, monkeypatch):
-    """The preview's timer clears its own copy of the card, never the TV's."""
-    from madtracker.board.window import BoardCanvas
-
-    preview = BoardCanvas()
-    qtbot.addWidget(preview)
-    data = sample.sprint_points(with_result=True)
-    for canvas in (preview, board):
-        canvas.set_layout("sprint_points", data)
-    painted = []
-    page = board.pages["sprint_points"]
-    monkeypatch.setattr(page, "update", lambda: painted.append(page.data.sprint_result))
-    # The preview's timer fires first; the TV's card must still be its own.
-    preview._clear_overlay()
-    assert preview.pages["sprint_points"].data.sprint_result is None
-    assert data.sprint_result is not None and page.data.sprint_result is not None
-    board._clear_overlay()
-    assert page.data.sprint_result is None and painted == [None], "the TV repaints without it"
 
 
 def test_the_tv_and_the_preview_turn_a_new_races_pages_together(board, qtbot):

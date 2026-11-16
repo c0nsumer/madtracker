@@ -153,8 +153,6 @@ def render_mockups(out_dir: str | Path) -> list[Path]:
         shot_window("window_points_1366", WINDOW_SMALL)
         click("19", "9", "38")
         c.record_sprint()
-        shot_board("board_sprint_result")
-        c.refresh()
         shot_board("board_standings")
 
         select(MADISON)

@@ -1,9 +1,9 @@
-"""The score sequence for the Madison table: when each total changes.
+"""The score sequence for the standings tables: when each total changes.
 
-A play is one sprint's score changes. Each team's points slam onto its
-total, hold, and the new total rises in; a sprint plays one team at a
-time in sprint order, and the rows reorder only after the last total has
-landed. This module is timing only, with no painting, so the rules are
+A play is one sprint's score changes. Each rider's or team's points slam
+onto its total, hold, and the new total rises in; a sprint plays one at
+a time in sprint order, and the rows reorder only after the last total
+has landed. This module is timing only, with no painting, so the rules are
 tested without a display.
 """
 
@@ -23,7 +23,7 @@ RING_MS = 320
 SHEEN_MS = 420
 SWAP_AT_MS = 1160
 SWAP_MS = 380
-# One team's whole step; the next team's step starts when it ends.
+# One rider's or team's whole step; the next step starts when it ends.
 STEP_MS = 1160
 REORDER_MS = 600
 # Queue speed while two or more plays wait behind the one playing, so a

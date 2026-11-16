@@ -110,23 +110,11 @@ class StandingRow:
 
 
 @dataclass
-class SprintResult:
-    """The short overlay shown after a sprint, before the board returns to standings."""
-
-    number: int
-    placings: list[tuple[int, Entry, int]]
-    # The race's sprint count, so the card can say "of 3" or "Final
-    # sprint"; None while a race run with sprints as called has not yet
-    # reached its finish.
-    of: int | None = None
-
-
-@dataclass
 class Scored:
     """New scoring the board plays, in the order it lands."""
 
     kind: str  # "sprint", "lap_gained", "lap_lost", "penalty"
-    keys: list[tuple[str, ...]]  # each team as tuple(Entry.bibs), in play order
+    keys: list[tuple[str, ...]]  # each rider or team as tuple(Entry.bibs), in play order
 
 
 @dataclass
@@ -139,7 +127,6 @@ class Standings:
     # The sprint most recently scored, highlighted so the audience sees
     # which column just changed.
     current_sprint: int | None = None
-    sprint_result: SprintResult | None = None
     scored: Scored | None = None
 
 

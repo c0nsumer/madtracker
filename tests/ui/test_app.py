@@ -3935,7 +3935,6 @@ def test_a_madison_sprint_reaches_the_board_as_scored_and_undo_does_not(make_app
     _play_in_app(c, [("click", "Blue"), ("click", "Red"), ("record", None)])
     layout, payload = next(x for x in reversed(sent) if x[0] == "madison")
     assert payload.scored is not None and payload.scored.kind == "sprint"
-    assert payload.sprint_result is None
     assert [len(k) for k in payload.scored.keys] == [2, 2]
     sent.clear()
     assert c.undo(), c.main.surface.problem.text()
@@ -3977,6 +3976,47 @@ def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_pat
     clock.advance(100)
     c.board.grab()
     assert page.scoring_now() and chips == [f"+{gain}"]
+    assert c.undo(), c.main.surface.problem.text()
+    chips.clear()
+    c.board.grab()
+    assert not page.scoring_now() and not chips
+
+
+def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
+    """Record Sprint on the demo's Points Race: the table plays each
+    rider's points on their total, 1st first, with no card; an Undo stops
+    the play."""
+    from madtracker.board import pages, scorebug
+    from madtracker.board.motion import ManualClock
+
+    chips: list[str] = []
+    chip = pages.score_chip
+    monkeypatch.setattr(
+        pages,
+        "score_chip",
+        lambda p, rect, s, *a, **k: chips.append(s) or chip(p, rect, s, *a, **k),
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[2].race_id)
+    assert c.live.format_key == "points"
+    clock = ManualClock()
+    c.board.set_clock(clock)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append((layout, payload)), draw(layout, payload))
+    _play_in_app(c, [("click", "12"), ("click", "7"), ("record", None)])
+    layout, new = sent[-1]
+    assert layout == "sprint_points" and c.board.layout_name() == "sprint_points"
+    assert new.scored.kind == "sprint" and list(new.scored.keys) == [("12",), ("7",)]
+    totals = {r.entry.bibs[0]: r.total for r in new.rows}
+    page = c.board.pages["sprint_points"]
+    clock.advance(100)
+    c.board.grab()
+    assert page.scoring_now() and chips == [f"+{totals['12']}"]
+    clock.advance(scorebug.STEP_MS)
+    c.board.grab()
+    assert chips[-1] == f"+{totals['7']}"
     assert c.undo(), c.main.surface.problem.text()
     chips.clear()
     c.board.grab()

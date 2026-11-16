@@ -52,9 +52,6 @@ def _layouts() -> list[tuple[str, object]]:
                 sprint_count=1,
                 rows=rows,
                 current_sprint=1,
-                sprint_result=P.SprintResult(
-                    number=1, placings=[(1, ROSTER[0], 3), (2, ROSTER[1], 2)]
-                ),
             ),
         ),
         ("finish", P.Finish(header=HEADER, placings=placings)),
