@@ -106,6 +106,8 @@ class ScoreQueue:
         self._elapsed = 0.0  # queue time into the playing play
         self._synced = 0.0  # real time the state is current to
         self._waiting: deque[Play] = deque()
+        # Real time the last play ended, None while one plays or none has.
+        self._ended: float | None = None
 
     def push(self, play: Play, now: float) -> None:
         self._advance(now)
@@ -113,6 +115,7 @@ class ScoreQueue:
             self._playing = play
             self._elapsed = 0.0
             self._synced = now
+            self._ended = None
         else:
             self._waiting.append(play)
 
@@ -123,6 +126,16 @@ class ScoreQueue:
     def busy(self, now: float) -> bool:
         self._advance(now)
         return self._playing is not None
+
+    def ended_at(self, now: float) -> float | None:
+        """Real time the last play ended, from the plays and not from when it is asked.
+
+        Every board fed the same pushes gets the same answer whenever it
+        asks, so what follows the plays starts at one moment on all of
+        them. None while a play runs or waits, or when none has run.
+        """
+        self._advance(now)
+        return self._ended if self._playing is None else None
 
     def playing(self, now: float) -> Play | None:
         """The play ``frame`` draws from at ``now``, so the caller can tell which one it is."""
@@ -147,6 +160,7 @@ class ScoreQueue:
                     self._elapsed = 0.0
                 else:
                     self._playing = None
+                    self._ended = self._synced
             else:
                 self._elapsed += (now - self._synced) * speed
                 self._synced = now

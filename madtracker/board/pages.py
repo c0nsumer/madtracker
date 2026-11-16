@@ -1396,11 +1396,19 @@ class StandingsPage(Page):
         return self.clock is not None and self._queue.busy(self.clock.now())
 
     def _settle(self, now: float) -> None:
-        """Once the last play ends, the rotation starts over on the names view."""
-        if self._held is not None and not self._queue.busy(now):
-            self._held = None
-            self._scenes.clear()
-            self._rotation_from = now
+        """Once the last play ends, the rotation starts over on the names view.
+
+        It starts over from the moment the queue emptied, not from when
+        this board next looks: the TV and the preview get the same calls
+        but paint at their own times, and one hidden while the queue
+        drains must still turn its views and pages with the other.
+        """
+        if self._held is None or self._queue.busy(now):
+            return
+        ended = self._queue.ended_at(now)
+        self._held = None
+        self._scenes.clear()
+        self._rotation_from = ended if ended is not None else now
 
     @staticmethod
     def _redraw(data: Standings, prev) -> bool:

@@ -1002,7 +1002,7 @@ def test_a_resize_mid_sequence_ends_on_the_new_sizes_end_picture(qtbot, drawn):
 
 
 def test_the_rotation_pauses_during_a_sequence_and_restarts_on_names(qtbot, drawn, monkeypatch):
-    from madtracker.board import rotation
+    from madtracker.board import rotation, scorebug
 
     bands = record_bands(monkeypatch)
     prev = standings(5)
@@ -1017,15 +1017,64 @@ def test_the_rotation_pauses_during_a_sequence_and_restarts_on_names(qtbot, draw
     bands.clear()
     frame(w, clock, drawn, start + 1000)
     assert {s for _r, s, _z in bands} == {0.0}
-    # When the scoring ends the rotation starts over on the names view.
+    # When the scoring ends the rotation starts over on the names view,
+    # from the moment the last total landed, not from the next paint.
+    drained = start + scorebug.SWAP_AT_MS + scorebug.SWAP_MS
     bands.clear()
     frame(w, clock, drawn, start + 2000)
     assert not page.scoring_now()
     assert {s for _r, s, _z in bands} == {0.0}
-    assert page.wake_in() == pytest.approx(rotation.NAMES_MS, abs=1)
+    assert page.since() == pytest.approx(start + 2000 - drained)
+    assert page.wake_in() == pytest.approx(rotation.NAMES_MS - (start + 2000 - drained), abs=1)
     bands.clear()
-    frame(w, clock, drawn, start + 2000 + rotation.NAMES_MS + 330)
+    frame(w, clock, drawn, drained + rotation.NAMES_MS + 330)
     assert max(s for _r, s, _z in bands) > 0
+
+
+def test_a_board_that_paints_nothing_while_the_scoring_ends_keeps_in_step(
+    qtbot, drawn, monkeypatch
+):
+    """The TV hidden while the last total lands, or a minimized operator
+    window's preview, turns its views and pages with the board that
+    painted: both restart the rotation when the queue emptied."""
+    from madtracker.board import rotation, scorebug
+    from madtracker.board.motion import ManualClock
+    from madtracker.board.window import ScoreboardWindow
+
+    bands = record_bands(monkeypatch)
+    # In place order, so Red's points leave the rows where they stand.
+    prev = quiet(scored(standings(12), {}))
+    data = scored(prev, {"Red": 5})
+    clock = ManualClock()
+    boards = []
+    for _ in range(2):
+        w = ScoreboardWindow("Test Velodrome", "Test Event")
+        qtbot.addWidget(w)
+        w.resize(1920, 1080)
+        w.set_clock(clock)
+        boards.append(w)
+    for payload in (prev, data):
+        for w in boards:
+            w.set_layout("madison", payload)
+    painted, idle = boards
+    drained = scorebug.SWAP_AT_MS + scorebug.SWAP_MS
+    for at in (100, 800, drained + 10):
+        clock.advance(at - clock.now())
+        painted.grab()
+    # The idle board first paints mid-change, a whole cycle and more later,
+    # on the second page.
+    clock.advance(drained + rotation.cycle_ms(6) + rotation.NAMES_MS + 300 - clock.now())
+    seen = []
+    for w in boards:
+        bands.clear()
+        drawn.clear()
+        w.grab()
+        page = w.pages["madison"]
+        sweeps = [round(s, 6) for _r, s, _z in bands]
+        seen.append((page.since(), sweeps, sorted(strings(drawn))))
+    assert seen[0] == seen[1]
+    assert 0 < max(seen[0][1]) < 1
+    assert set(seen[0][2]) & {surname(NAMES[b]) for b in key("Brown")}
 
 
 def test_queued_scoring_plays_after_the_play_ahead_from_its_totals(qtbot, drawn):

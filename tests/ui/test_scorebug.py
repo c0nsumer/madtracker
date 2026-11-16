@@ -138,3 +138,17 @@ def test_playing_names_the_play_the_frame_is_from():
     assert q.playing(10) is p1
     assert q.playing(duration(p1) + 10) is p2
     assert q.playing(duration(p1) + duration(p2) + 10) is None
+
+
+def test_ended_at_is_when_the_last_play_ended_whenever_it_is_asked():
+    p1, p2, _ = _plays()
+    end = duration(p1) + duration(p2)
+    early, late = ScoreQueue(), ScoreQueue()
+    for q in (early, late):
+        q.push(p1, now=0)
+        q.push(p2, now=0)
+    assert early.ended_at(end - 1) is None
+    assert early.ended_at(end + 10) == end
+    assert late.ended_at(end + 4000) == end
+    early.push(p1, now=end + 5000)
+    assert early.ended_at(end + 5001) is None
