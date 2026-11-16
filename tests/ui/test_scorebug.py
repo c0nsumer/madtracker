@@ -128,3 +128,13 @@ def test_a_loss_reads_with_the_board_minus():
     assert Step(A, 6, -14, 0, -1).text == "−20"
     assert Step(A, 6, 11, 0, 0).text == "+5"
     assert Step(A, 6, 11, 0, 0).gain and not Step(A, 6, -14, 0, -1).gain
+
+
+def test_playing_names_the_play_the_frame_is_from():
+    p1, p2, _ = _plays()
+    q = ScoreQueue()
+    q.push(p1, now=0)
+    q.push(p2, now=0)
+    assert q.playing(10) is p1
+    assert q.playing(duration(p1) + 10) is p2
+    assert q.playing(duration(p1) + duration(p2) + 10) is None

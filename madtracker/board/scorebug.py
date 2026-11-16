@@ -124,6 +124,11 @@ class ScoreQueue:
         self._advance(now)
         return self._playing is not None
 
+    def playing(self, now: float) -> Play | None:
+        """The play ``frame`` draws from at ``now``, so the caller can tell which one it is."""
+        self._advance(now)
+        return self._playing
+
     def frame(self, now: float) -> Frame | None:
         self._advance(now)
         if self._playing is None:

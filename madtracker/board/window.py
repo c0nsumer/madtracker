@@ -341,7 +341,7 @@ class BoardCanvas(QWidget):
     these, fed the same calls, so the preview cannot drift from what the
     audience sees. Public surface: ``set_layout``, ``set_live``,
     ``set_logo``, ``set_show_bibs``, ``set_event_name``, ``set_venue_name``,
-    ``layout_name`` and ``page_kind``.
+    ``forget_races``, ``layout_name`` and ``page_kind``.
     """
 
     # How long the loud treatments last before the board settles. These are
@@ -395,6 +395,11 @@ class BoardCanvas(QWidget):
         # Per race, the riders out in order as the elimination page last
         # showed them, so a payload says whether a rider was just put out.
         self._out_seen: dict[int, tuple[tuple[str, ...], ...]] = {}
+        # Per race, the payload last shown, so a page can play what changed
+        # from it (a Madison's score changes); and the race on screen, since
+        # a race the board turns to from another plays nothing.
+        self._shown: dict[int, object] = {}
+        self._on_screen: int | None = None
         self._highlight = QTimer(self, singleShot=True, interval=self.ELIMINATION_HIGHLIGHT_MS)
         self._highlight.timeout.connect(self._settle_elimination)
         self._overlay = QTimer(self, singleShot=True, interval=self.SPRINT_OVERLAY_MS)
@@ -453,11 +458,28 @@ class BoardCanvas(QWidget):
             # the other, and the two would show different pages until the
             # next turn.
             self._pager.start()
-        page.set_data(payload)
+        race_id = payload.header.race_id
+        prev = self._shown.get(race_id) if race_id == self._on_screen else None
+        if name != self._layout_name:
+            self.pages[self._layout_name].stop_motion()
+        page.set_data(payload, prev)
+        self._shown[race_id] = payload
+        self._on_screen = race_id
         self.top_bar.header = payload.header
         self.top_bar.update()
         self.stack.setCurrentWidget(page)
         self._layout_name = name
+
+    def forget_races(self) -> None:
+        """Drop what the board has shown per race, as another data file opens.
+
+        Race ids are the file's own, so a race in the next file may carry
+        the id of one shown from this one.
+        """
+        self._shown.clear()
+        self._on_screen = None
+        for page in self.pages.values():
+            page.stop_motion()
 
     def set_venue_name(self, name: str) -> None:
         """The venue's name; the board draws the logo, or the app's wordmark, in its place."""

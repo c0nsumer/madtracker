@@ -1475,6 +1475,8 @@ class AppController:
         self.live = None
         self._known_state = {}
         self._board_actions = {}
+        for b in self.boards:
+            b.forget_races()
         self.settings.remove(EVENT_KEY)
         self.main.set_event("", "")
         self.main.set_races([], None)

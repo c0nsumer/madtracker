@@ -1,5 +1,8 @@
 """The Madison on the board: the start list names its riders, each team a swatch and fade."""
 
+import copy
+from dataclasses import replace
+
 import pytest
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage, QPainter
@@ -760,3 +763,334 @@ def test_between_changes_the_table_waits_with_no_frames(qtbot):
     w.grab()
     assert not page.moving_now()
     assert page.wake_in() == pytest.approx(rotation.COLOR_MS - 100, abs=1)
+
+
+# Score changes -------------------------------------------------------------------
+
+
+def key(color: str) -> tuple[str, ...]:
+    _c, a, b = next(x for x in TEAMS if x[0] == color)
+    return (a, b)
+
+
+def scored(
+    prev: P.Standings,
+    changes: dict[str, int],
+    kind: str = "sprint",
+    laps: dict[str, int] | None = None,
+    status: str | None = None,
+) -> P.Standings:
+    """``prev`` after ``changes`` to the named teams' totals, ranked again, as new scoring."""
+    data = copy.deepcopy(prev)
+    for r in data.rows:
+        r.total += changes.get(r.entry.team, 0)
+        r.laps += (laps or {}).get(r.entry.team, 0)
+    data.rows.sort(key=lambda r: -r.total)
+    for i, r in enumerate(data.rows):
+        r.rank = i + 1
+    if status is not None:
+        data.header.status = status
+    data.scored = P.Scored(kind, [key(c) for c in changes])
+    return data
+
+
+def quiet(data: P.Standings) -> P.Standings:
+    return replace(data, scored=None)
+
+
+def playing(qtbot, prev, layout: str = "madison", size=(1920, 1080)):
+    """A clocked board showing ``prev``, the table a score change plays from."""
+    w = render(qtbot, layout, prev, size=size)
+    return w, clocked(w)
+
+
+def frame(w, clock, drawn, at: float) -> dict[str, tuple[QRectF, int, str]]:
+    """What the board draws ``at`` ms on its clock: each string's rect, size and color."""
+    clock.advance(at - clock.now())
+    drawn.clear()
+    w.grab()
+    return {s: (QRectF(r), px, c) for s, r, px, c in drawn}
+
+
+def record_chips(monkeypatch) -> list[tuple[str, str, str]]:
+    """Every score chip drawn: its text, fill and ink."""
+    from madtracker.board import pages
+
+    chips: list[tuple[str, str, str]] = []
+    chip = pages.score_chip
+
+    def record(p, rect, s, f, fill, ink, *args, **kwargs):
+        chips.append((s, fill.name(), ink.name()))
+        return chip(p, rect, s, f, fill, ink, *args, **kwargs)
+
+    monkeypatch.setattr(pages, "score_chip", record)
+    return chips
+
+
+def order(at: dict, names: list[str]) -> list[str]:
+    """``names`` top to bottom as drawn."""
+    return sorted((n for n in names if n in at), key=lambda n: at[n][0].center().y())
+
+
+RIDERS = ["Okafor", "Delgado", "Kowalczyk", "Whitfield", "Ferreira"]
+# Past the end of a two-team play: both totals landed and the rows moved.
+SETTLED = 2 * 1160 + 380 + 600 + 50
+
+
+def test_a_sprint_slams_each_teams_points_in_order_then_reorders(qtbot, drawn, monkeypatch):
+    from madtracker.board import scorebug
+    from madtracker.board import theme as t
+
+    chips = record_chips(monkeypatch)
+    prev = standings(5)
+    prev.rows[1].total = 12
+    data = scored(prev, {"Red": 5, "Orange": 3}, status="After Sprint 3 of 4")
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    at = frame(w, clock, drawn, 100)
+    assert "+5" in at and "+3" not in at and "33" not in at
+    assert chips == [("+5", t.ACCENT.name(), t.ACCENT_INK.name())]
+    # On Red's row, right-aligned to the total.
+    assert at["+5"][0].center().y() == pytest.approx(at["Okafor"][0].center().y(), abs=1)
+    assert at["+5"][0].right() == pytest.approx(at["TOTAL"][0].right(), abs=1)
+    # Rows hold their old order while the totals play.
+    assert order(at, RIDERS) == RIDERS
+    at = frame(w, clock, drawn, scorebug.STEP_MS + 100)
+    assert "+3" in at and "33" in at
+    # The reorder: Orange slides up past Blue after the last total lands.
+    land = scorebug.STEP_MS + scorebug.SWAP_AT_MS + scorebug.SWAP_MS
+    held = frame(w, clock, drawn, land - 10)["Kowalczyk"][0].center().y()
+    mid = frame(w, clock, drawn, land + scorebug.REORDER_MS / 2)["Kowalczyk"][0].center().y()
+    at = frame(w, clock, drawn, SETTLED)
+    assert at["Kowalczyk"][0].center().y() < mid < held
+    assert "+5" not in at and "+3" not in at
+    assert order(at, RIDERS) == ["Okafor", "Kowalczyk", "Delgado", "Whitfield", "Ferreira"]
+    assert not w.pages["madison"].scoring_now()
+
+
+def test_the_chip_shows_the_change_to_the_total(qtbot, drawn, monkeypatch):
+    from madtracker.board import theme as t
+
+    chips = record_chips(monkeypatch)
+    prev = standings(5)
+    prev.rows[4].laps, prev.rows[4].total = 0, 6
+    data = scored(prev, {"Black": -20}, kind="lap_lost", laps={"Black": -1})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    at = frame(w, clock, drawn, 100)
+    assert chips[-1] == ("−20", t.OUT.name(), t.TEXT.name())
+    # The lap figure changes as the new total rises in.
+    assert "−1" not in at
+    at = frame(w, clock, drawn, SETTLED)
+    # Black's old 6 is gone; Yellow's 6 stays.
+    assert "−14" in at and "−1" in at and strings(drawn).count("6") == 1
+
+
+def test_the_first_sprint_plays_from_a_zero_table_in_start_list_order(qtbot, drawn):
+    prev = start_list(5)
+    rows = [P.StandingRow(rank=i + 1, entry=e, sprints=[]) for i, e in enumerate(prev.roster)]
+    header = replace(HEADER, status="After Sprint 1 of 4")
+    zero = P.Standings(header=header, sprint_count=4, rows=rows, current_sprint=1)
+    data = scored(zero, {"Red": 5, "Orange": 3})
+    w, clock = playing(qtbot, prev, layout="pre_race")
+    w.set_layout("madison", data)
+    clock.advance(100)
+    drawn.clear()
+    w.grab()
+    # Every total reads 0, Red's old one too as it is knocked down.
+    assert strings(drawn).count("0") == 5
+    at = {s: (QRectF(r), px, c) for s, r, px, c in drawn}
+    assert order(at, RIDERS) == ["Delgado", "Okafor", "Kowalczyk", "Whitfield", "Ferreira"]
+    at = frame(w, clock, drawn, SETTLED)
+    assert order(at, RIDERS) == ["Okafor", "Kowalczyk", "Delgado", "Whitfield", "Ferreira"]
+    assert {"5", "3"} <= set(at)
+
+
+def test_an_undo_mid_sequence_shows_the_current_table_at_once(qtbot, drawn):
+    prev = standings(5)
+    data = scored(prev, {"Red": 5, "Orange": 3})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 500)
+    w.set_layout("madison", quiet(standings(5)))
+    at = frame(w, clock, drawn, 600)
+    assert "+5" not in at and "+3" not in at
+    assert {"28", "17", "11", "6", "−14"} <= set(at) and "33" not in at
+    assert not w.pages["madison"].scoring_now()
+
+
+def test_a_redraw_mid_sequence_leaves_it_playing(qtbot, drawn):
+    """A staging click redraws the board with the same table; the sprint keeps playing."""
+    from madtracker.board import scorebug
+
+    prev = standings(5)
+    data = scored(prev, {"Red": 5, "Orange": 3})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 500)
+    w.set_layout("madison", quiet(data))
+    at = frame(w, clock, drawn, 600)
+    assert "+5" in at and w.pages["madison"].scoring_now()
+    assert "+3" in frame(w, clock, drawn, scorebug.STEP_MS + 100)
+
+
+def test_a_race_switch_mid_sequence_plays_nothing(qtbot, drawn):
+    prev = standings(5)
+    data = scored(prev, {"Red": 5, "Orange": 3})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 500)
+    other = scored(standings(5), {"Blue": 4})
+    other.header.race_id = 2
+    w.set_layout("madison", other)
+    at = frame(w, clock, drawn, 600)
+    assert not {"+5", "+3", "+4"} & set(at) and "21" in at
+    # Back to the first race: the board last showed another, so its next sprint lands quietly.
+    w.set_layout("madison", scored(data, {"Yellow": 2}))
+    at = frame(w, clock, drawn, 700)
+    assert "+2" not in at and "8" in at
+    assert not w.pages["madison"].scoring_now()
+
+
+def test_another_data_file_plays_nothing_from_the_last_files_races(qtbot, drawn):
+    """Race ids are a file's own: after another file opens, a race with the
+    same id as one shown before starts with no memory of it."""
+    prev = standings(5)
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", scored(prev, {"Red": 5}))
+    frame(w, clock, drawn, 100)
+    w.forget_races()
+    assert not w.pages["madison"].scoring_now()
+    w.set_layout("madison", scored(prev, {"Orange": 3}))
+    at = frame(w, clock, drawn, 200)
+    assert "+3" not in at and "+5" not in at and "14" in at
+
+
+def test_a_team_scoring_off_the_shown_page_updates_quietly(qtbot, drawn):
+    from madtracker.board import scorebug
+
+    pink = [surname(NAMES[b]) for b in key("Pink")]
+    prev = standings(12)
+    # Pink is on the second page, and its lap takes it to the first.
+    w, clock = playing(qtbot, prev)
+    assert not set(pink) & set(frame(w, clock, drawn, 50))
+    w.set_layout("madison", scored(prev, {"Pink": 20}, kind="lap_gained", laps={"Pink": 1}))
+    at = frame(w, clock, drawn, 100)
+    assert "+20" not in at and set(pink) <= set(at)
+    assert not w.pages["madison"].scoring_now()
+    # A sprint scored on both pages plays only the team in view.
+    w2, clock2 = playing(qtbot, prev)
+    w2.set_layout("madison", scored(prev, {"Red": 5, "Pink": 3}))
+    assert "+5" in frame(w2, clock2, drawn, 100)
+    assert "+3" not in frame(w2, clock2, drawn, scorebug.STEP_MS + 100)
+
+
+def test_a_resize_mid_sequence_ends_on_the_new_sizes_end_picture(qtbot, drawn):
+    prev = standings(5)
+    data = scored(prev, {"Red": 5, "Orange": 13})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", data)
+    frame(w, clock, drawn, 500)
+    w.resize(1280, 720)
+    frame(w, clock, drawn, 900)
+    frame(w, clock, drawn, SETTLED)
+    got = sorted((s, QRectF(r).getRect(), px, c) for s, r, px, c in drawn)
+    drawn.clear()
+    render(qtbot, "madison", quiet(data), size=(1280, 720))
+    want = sorted((s, QRectF(r).getRect(), px, c) for s, r, px, c in drawn)
+    assert got == want
+
+
+def test_the_rotation_pauses_during_a_sequence_and_restarts_on_names(qtbot, drawn, monkeypatch):
+    from madtracker.board import rotation
+
+    bands = record_bands(monkeypatch)
+    prev = standings(5)
+    data = scored(prev, {"Black": 20}, kind="lap_gained", laps={"Black": 1})
+    w, clock = playing(qtbot, prev)
+    page = w.pages["madison"]
+    start = rotation.NAMES_MS - 100
+    frame(w, clock, drawn, start)
+    w.set_layout("madison", data)
+    assert page.scoring_now() and page._ticker._timer.isActive()
+    # The change to color would be under way by now; the names view holds.
+    bands.clear()
+    frame(w, clock, drawn, start + 1000)
+    assert {s for _r, s, _z in bands} == {0.0}
+    # When the scoring ends the rotation starts over on the names view.
+    bands.clear()
+    frame(w, clock, drawn, start + 2000)
+    assert not page.scoring_now()
+    assert {s for _r, s, _z in bands} == {0.0}
+    assert page.wake_in() == pytest.approx(rotation.NAMES_MS, abs=1)
+    bands.clear()
+    frame(w, clock, drawn, start + 2000 + rotation.NAMES_MS + 330)
+    assert max(s for _r, s, _z in bands) > 0
+
+
+def test_queued_scoring_plays_after_the_play_ahead_from_its_totals(qtbot, drawn):
+    from madtracker.board import scorebug
+
+    prev = standings(5)
+    a = scored(prev, {"Red": 5})
+    b = scored(a, {"Blue": 4})
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", a)
+    frame(w, clock, drawn, 100)
+    w.set_layout("madison", b)
+    at = frame(w, clock, drawn, 200)
+    assert "+5" in at and "+4" not in at and "21" not in at
+    at = frame(w, clock, drawn, scorebug.SWAP_AT_MS + scorebug.SWAP_MS + 100)
+    assert "+4" in at and "33" in at and "+5" not in at
+
+
+def test_a_team_whose_total_did_not_change_gets_no_chip(qtbot, drawn, monkeypatch):
+    from madtracker.board import scorebug
+
+    chips = record_chips(monkeypatch)
+    prev = standings(5)
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", scored(prev, {"Red": 5, "Blue": 0}))
+    frame(w, clock, drawn, scorebug.STEP_MS + 100)
+    assert {s for s, *_ in chips} == {"+5"}
+    # Nothing left to play: the table updates quietly.
+    w2, _clock2 = playing(qtbot, prev)
+    w2.set_layout("madison", scored(prev, {"Blue": 0}))
+    assert not w2.pages["madison"].scoring_now()
+
+
+def test_a_headless_board_shows_the_new_table_at_once(qtbot, drawn, monkeypatch):
+    chips = record_chips(monkeypatch)
+    prev = standings(5)
+    w = render(qtbot, "madison", prev)
+    drawn.clear()
+    w.set_layout("madison", scored(prev, {"Red": 5, "Orange": 3}))
+    w.grab()
+    assert not chips and {"33", "14"} <= set(strings(drawn))
+    assert not w.pages["madison"].scoring_now()
+
+
+def test_the_tv_and_the_preview_play_the_same_sequence(qtbot, drawn):
+    from madtracker.board.motion import ManualClock
+    from madtracker.board.window import ScoreboardWindow
+
+    prev = standings(5)
+    data = scored(prev, {"Red": 5, "Orange": 3})
+    clock = ManualClock()
+    boards = []
+    for _ in range(2):
+        w = ScoreboardWindow("Test Velodrome", "Test Event")
+        qtbot.addWidget(w)
+        w.resize(1920, 1080)
+        w.set_clock(clock)
+        boards.append(w)
+    for payload in (prev, data):
+        for w in boards:
+            w.set_layout("madison", payload)
+    clock.advance(300)
+    seen = []
+    for w in boards:
+        drawn.clear()
+        w.grab()
+        seen.append([(s, QRectF(r).getRect(), px, c) for s, r, px, c in drawn])
+    assert seen[0] == seen[1] and any(s == "+5" for s, *_ in seen[0])

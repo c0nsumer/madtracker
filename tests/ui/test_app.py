@@ -3940,3 +3940,39 @@ def test_a_madison_sprint_reaches_the_board_as_scored_and_undo_does_not(make_app
     sent.clear()
     assert c.undo(), c.main.surface.problem.text()
     assert all(getattr(p, "scored", None) is None for _, p in sent)
+
+
+def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
+    """The first scorer's change slams onto its total on the TV; an Undo stops the play."""
+    from madtracker.board import pages
+    from madtracker.board.motion import ManualClock
+
+    chips: list[str] = []
+    chip = pages.score_chip
+    monkeypatch.setattr(
+        pages,
+        "score_chip",
+        lambda p, rect, s, *a, **k: chips.append(s) or chip(p, rect, s, *a, **k),
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[3].race_id)
+    clock = ManualClock()
+    c.board.set_clock(clock)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append(payload), draw(layout, payload))
+    _play_in_app(c, [("click", "Blue"), ("click", "Red"), ("record", None)])
+    page = c.board.pages["madison"]
+    new = sent[-1]
+    first = new.scored.keys[0]
+    before = next(p for p in reversed(sent[:-1]) if p.header.race_id == new.header.race_id)
+    old = {tuple(r.entry.bibs): r.total for r in getattr(before, "rows", [])}
+    gain = next(r.total for r in new.rows if tuple(r.entry.bibs) == first) - old.get(first, 0)
+    clock.advance(100)
+    c.board.grab()
+    assert page.scoring_now() and chips == [f"+{gain}"]
+    assert c.undo(), c.main.surface.problem.text()
+    chips.clear()
+    c.board.grab()
+    assert not page.scoring_now() and not chips
