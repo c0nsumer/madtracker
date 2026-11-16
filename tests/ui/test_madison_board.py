@@ -417,6 +417,27 @@ def test_a_slanted_sweep_ends_along_the_slant_short_of_the_zone(qapp):
     assert ROW.left() + team_rows.SWATCH_W < bottom[-1] < zone - run
 
 
+@pytest.mark.parametrize("height", range(400, 2200, 7))
+def test_the_color_is_the_part_left_of_its_edge_on_every_row_of_every_board(qapp, height):
+    """The solid color always runs from the row's square left end to its
+    slanted edge, never the rest of the row: Qt's path intersection
+    misreads the edges a part shares with the row and once filled one
+    team's figures instead of its name, on one board size only."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    u = height / 1080
+    for n in (2, 3, 5, 8):
+        rh = (height - 188 * u - (n - 1) * team_rows.ROW_GAP * u) / max(n, 2)
+        for i in range(n):
+            row = QRectF(130 * u, 164 * u + i * (rh + team_rows.ROW_GAP * u), 1750 * u, rh)
+            zone = row.right() - 420 * u
+            for sweep in (0.0, 0.5, 1.0):
+                box = team_rows.fill_shape(row, u, sweep, zone, t.SLANT).boundingRect()
+                assert box.left() == pytest.approx(row.left(), abs=0.5), (height, n, i, sweep)
+                assert box.right() <= zone + 0.5, (height, n, i, sweep)
+
+
 # The standings table -----------------------------------------------------------
 
 # The design's example: color word, laps, total, in place order.

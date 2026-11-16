@@ -223,16 +223,22 @@ def fill_shape(
     ``slant``, so the color opens and closes along the swatch's edge.
     """
     lead = _lead(row, u, sweep, zone_right, slant)
-    return _part(band_shape(row, u), upto(row, lead, slant))
+    return _part(row, u, upto(row, lead, slant))
 
 
-def _part(shape: QPainterPath, part: QPolygonF) -> QPainterPath:
-    # The row's own outline cut to the part, so the swatch and the sweep
-    # keep the row's ends, antialiased.
-    box = QPainterPath()
-    box.addPolygon(part)
-    box.closeSubpath()
-    return shape.intersected(box)
+def _part(row: QRectF, u: float, part: QPolygonF) -> QPainterPath:
+    # The part drawn as its own polygon, held short of the row's rounded
+    # right end so it needs no cut against the outline: Qt's path
+    # intersection misreads edges the two shapes share (the row's square
+    # end, its top and bottom) and can return the whole row or the rest
+    # of it instead of the part.
+    r = min(ROW_RADIUS * u, row.height() / 2, row.width() / 2)
+    left, right = row.left(), row.right() - r
+    held = QPolygonF([QPointF(min(max(pt.x(), left), right), pt.y()) for pt in part])
+    path = QPainterPath()
+    path.addPolygon(held)
+    path.closeSubpath()
+    return path
 
 
 def _across(row: QRectF, x: float, length: float, slant: float) -> QLinearGradient:
@@ -289,7 +295,7 @@ def paint_band(
         # As ``fill_shape`` draws it, from the outline already made.
         lead = _lead(row, u, sweep, zone_right, slant)
         p.setBrush(c)
-        p.drawPath(_part(shape, upto(row, lead, slant)))
+        p.drawPath(_part(row, u, upto(row, lead, slant)))
         if 0 < sweep < 1:
             edge = SWEEP_EDGE * u
             light = _across(row, lead - edge, edge, slant)
@@ -297,7 +303,7 @@ def paint_band(
             light.setColorAt(1, QColor(255, 255, 255, SWEEP_EDGE_ALPHA))
             p.setBrush(QBrush(light))
             near = max(start, lead - edge)
-            p.drawPath(_part(shape, between(row, near, lead, slant)))
+            p.drawPath(_part(row, u, between(row, near, lead, slant)))
     p.restore()
 
 
