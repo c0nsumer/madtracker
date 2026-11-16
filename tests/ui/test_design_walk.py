@@ -2838,6 +2838,10 @@ def test_the_points_board_has_a_start_list_then_a_table_that_plays_scoring_not_a
     data = _shown(c)
     awarded = [("12",), ("7",)] if row == POINTS else [("12",)]
     assert data.scored.kind == "sprint" and list(data.scored.keys) == awarded
+    # The chip the table plays reads the rider's sprint points: a Tempo
+    # Race's winner scores +1.
+    winner = next(r for r in data.rows if r.entry.bibs == ["12"])
+    assert [s for s in winner.sprints if s is not None][-1] == (1 if row == TEMPO else 10)
     lap("33")(c)
     data = _shown(c)
     assert data.scored.kind == "lap_gained" and list(data.scored.keys) == [("33",)]
