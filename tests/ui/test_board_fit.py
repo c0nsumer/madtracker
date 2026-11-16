@@ -81,14 +81,42 @@ def finish(n: int = 16) -> P.Finish:
 
 def test_a_race_page_header_holds_the_status_alone_and_not_the_event(qtbot, drawn):
     """The event's name is the logo page's: a race page's header carries the
-    race, its group and format, and the status centered in the bar."""
+    race, its group, and the status centered in the bar."""
     import dataclasses
 
-    header = P.Header(title="8 Mile Madison", group="Group A", detail="Madison", status="Racing")
+    header = P.Header(title="8 Mile Madison", group="Group A", status="Racing")
     w = render(qtbot, "madison", dataclasses.replace(madison(teams=5), header=header))
     assert "Test Event" not in strings(drawn)
     status = next(r for s, r, *_ in drawn if s == "Racing")
     assert status.center().y() == pytest.approx(w.top_bar.height() / 2, abs=1)
+
+
+@pytest.mark.parametrize(
+    "layout", ["pre_race", "elimination", "sprint_points", "madison", "finish"]
+)
+def test_no_race_pages_top_bar_draws_the_format(qtbot, drawn, layout):
+    """Races are named, so the bar carries no format line under the title:
+    the title, its group, and the status, with the title in the middle of
+    the bar. An unnamed race's title is its format, and that is all."""
+    from madtracker.board import sample
+    from madtracker.control import formats
+
+    data = {
+        "pre_race": sample.pre_race,
+        "elimination": sample.elimination,
+        "sprint_points": sample.sprint_points,
+        "madison": lambda: madison(teams=5),
+        "finish": sample.finish,
+    }[layout]()
+    w = render(qtbot, layout, data)
+    drawn.clear()
+    w.top_bar.grab()
+    h = data.header
+    seen = strings(drawn)
+    assert set(seen) <= {h.title, h.group, h.status, h.status.upper()}
+    assert not (set(formats.FORMAT_LABELS.values()) - {h.title}) & set(seen)
+    title = next(r for s, r, *_ in drawn if s == h.title)
+    assert title.center().y() == pytest.approx(w.top_bar.height() / 2, abs=1)
 
 
 # fit_name -----------------------------------------------------------------
@@ -743,11 +771,12 @@ def test_a_black_team_block_keeps_the_light_ring(qapp):
     assert edge <= middle
 
 
-def test_a_team_tables_figures_stand_under_their_headings(qtbot, drawn):
-    """LAPS, then PENALTY while one stands, then TOTAL, each heading over its
-    figures with the right edges together, as every figure column on the
-    board is. The figures sit on the dark row, so the laps and the penalty
-    take the gain and loss colors and the total is white."""
+def test_a_team_tables_figures_stand_in_their_columns(qtbot, drawn):
+    """The laps, then the penalty while one stands, then the total, each
+    column's figures right-aligned to one edge and clear of the next
+    column's, with no heading over them. The figures sit on the dark row,
+    so the laps and the penalty take the gain and loss colors and the
+    total is white."""
     from madtracker.board import theme
 
     data = madison(teams=6)
@@ -755,19 +784,18 @@ def test_a_team_tables_figures_stand_under_their_headings(qtbot, drawn):
         row.total = 40 - 3 * i
     data.rows[1].laps = 1
     data.rows[2].penalty = -20
-    w = render(qtbot, "madison", data)
-    at = {s: r for s, r, *_ in drawn if s in ("LAPS", "PENALTY", "TOTAL", "+1", "−20", "40", "34")}
-    # Headings are drawn right-aligned in wide rects; the words themselves
-    # stand clear of each other, in order.
-    lab = theme.label(w.pages["madison"].u)
-    left = {s: at[s].right() - theme.text_width(s, lab) for s in ("PENALTY", "TOTAL")}
-    assert at["LAPS"].right() < left["PENALTY"] and at["PENALTY"].right() < left["TOTAL"]
-    # Text rects are drawn right-aligned, so each figure's right edge is
-    # its heading's.
-    assert at["+1"].right() == pytest.approx(at["LAPS"].right())
-    assert at["−20"].right() == pytest.approx(at["PENALTY"].right())
-    assert at["40"].right() == pytest.approx(at["TOTAL"].right())
-    assert at["34"].right() == pytest.approx(at["TOTAL"].right())
+    render(qtbot, "madison", data)
+    assert not {"#", "LAPS", "PENALTY", "TOTAL"} & set(strings(drawn))
+    at = {s: (r, px) for s, r, px, _c in drawn if s in ("+1", "−20", "40", "34")}
+
+    def ink_left(s: str, weight) -> float:
+        rect, px = at[s]
+        return rect.right() - theme.text_width(s, theme.font(px, weight, tabular=True))
+
+    # Text rects are drawn right-aligned, so a rect's right edge is its figure's.
+    assert at["+1"][0].right() < ink_left("−20", theme.BOLD)
+    assert at["−20"][0].right() < ink_left("40", theme.HEAVY)
+    assert at["40"][0].right() == pytest.approx(at["34"][0].right())
     color = {s: c for s, _r, _px, c in drawn}
     assert color["+1"] == theme.GAIN.name() and color["−20"] == theme.LOSS.name()
     assert color["40"] == color["34"] == theme.TEXT.name()
@@ -1116,7 +1144,7 @@ def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(qtbot
     """A Madison's result is the table the stands watched while it ran:
     once the header carries the stamp the places read as ordinals, the
     winner alone in the accent as on the podium page, and each team's
-    laps, penalty and total stay under their headings."""
+    laps, penalty and total stay in their columns."""
     from madtracker.board import theme
 
     data = decided_madison(5)
@@ -1128,11 +1156,11 @@ def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(qtbot
     assert not {"1", "2", "3", "4", "5"} & set(seen), "no bare place numbers once decided"
     assert "PROVISIONAL" in seen
     at = {s: r for s, r, *_ in drawn}
-    inks = (("LAPS", "+1", theme.GAIN), ("PENALTY", "−20", theme.LOSS), ("TOTAL", "60", theme.TEXT))
-    for heading, fig, ink in inks:
-        assert at[fig].right() == pytest.approx(at[heading].right()), heading
+    inks = (("+1", theme.GAIN), ("−20", theme.LOSS), ("60", theme.TEXT))
+    assert at["+1"].right() < at["−20"].right() < at["60"].right()
+    for fig, ink in inks:
         assert color[fig] == ink.name(), fig
-    # The riders' surnames still lead, and no lap chips: LAPS carries the laps.
+    # The riders' surnames still lead, and no lap chips: the laps column carries the laps.
     assert {_last(n) for n in data.rows[0].entry.names} <= set(seen)
     assert not any("lap" in s for s in seen)
 

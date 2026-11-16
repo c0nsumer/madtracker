@@ -1038,11 +1038,11 @@ TEAM_FIGURE_SHARE = 0.62
 TEAM_PLACE_SCALE = 0.85
 # The widest the place column grows, as a share of the page's width.
 TEAM_PLACE_SHARE = 0.14
-# LAPS and PENALTY grow with the row, under the total.
+# The laps and the penalty grow with the row, under the total.
 TEAM_LAPS_SHARE = 0.36
-# LAPS and PENALTY stop growing here, as the surnames do: a lone team's or
-# a pair's tall row would otherwise give their columns the width the
-# surnames need, and the total is the figure the riders read.
+# The laps and the penalty stop growing here, as the surnames do: a lone
+# team's or a pair's tall row would otherwise give their columns the width
+# the surnames need, and the total is the figure the riders read.
 TEAM_LAPS_MOST = 96
 # The least the place and the total give way to, so the surnames fit
 # whole beside them; past that a long surname shrinks instead.
@@ -1752,13 +1752,15 @@ class StandingsPage(Page):
         """The Madison page: place, then each team's row, its riders' surnames leading.
 
         The row is the start list's swatch and fade, and the figures sit
-        on its dark right end: LAPS in the gain or loss color, PENALTY
-        while one stands, and TOTAL in white, the row's largest type. On
-        a timer the row turns to its color view, the name area solid in
-        the team's color with the team's name on it, and back (design
-        section 10). ``first`` is the payload index of the page's first row.
-        ``playing`` is a score change's play, its frame now, and its scene,
-        drawn over the same layout (``team_play``).
+        on its dark right end: the laps in the gain or loss color, the
+        penalty while one stands, and the total in white, the row's
+        largest type. There is no heading row: the figures' colors and
+        order say which is which. On a timer the row turns to its color
+        view, the name area solid in the team's color with the team's
+        name on it, and back (design section 10). ``first`` is the
+        payload index of the page's first row. ``playing`` is a score
+        change's play, its frame now, and its scene, drawn over the same
+        layout (``team_play``).
         """
         u = self.u
         key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
@@ -1770,16 +1772,6 @@ class StandingsPage(Page):
             )
         lay = self._layout[1]
         ordinals = self.ordinals(d)
-        lab = t.label(u)
-        head_h = 44 * u
-        reach = 200 * u
-        top = area.y()
-        t.text(p, QRectF(area.x(), top, lay.rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(lay.laps_r - reach, top, reach, head_h), "LAPS", lab, t.MUTED, RIGHT)
-        if lay.penalized:
-            t.text(p, QRectF(lay.pen_r - reach, top, reach, head_h), "PENALTY", lab, t.MUTED, RIGHT)
-        t.text(p, QRectF(lay.total_r - reach, top, reach, head_h), "TOTAL", lab, t.TEXT, RIGHT)
-
         if playing is not None:
             self.team_play(p, area, lay, bottom, *playing)
             return
@@ -1972,10 +1964,10 @@ class StandingsPage(Page):
         surnames down while the riders read them.
         """
         u = self.u
-        rows_top = area.y() + (44 + 10) * u
+        # The rows take the page from its top: there is no heading row.
+        rows_top = area.y()
         gap = team_rows.ROW_GAP * u
         rh = (bottom - rows_top - (n - 1) * gap) / max(n, TEAM_FILL_LEAST)
-        lab = t.label(u)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
         penalized = any(r.penalty for r in d.rows if not r.status)
@@ -2006,20 +1998,15 @@ class StandingsPage(Page):
             laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
             num_px = min(max(min(48 * u, rh * 0.7), laps_px), TEAM_LAPS_MOST * u)
             num = t.font(num_px, t.BOLD, tabular=True)
-            # A column is as wide as its heading or its widest figure, so each
-            # heading sits over its figures, right edges together. The feed
-            # leaves a status row off the board; a page given one keeps the
-            # word clear of the figures beside it.
-            total_col = max(
-                widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f),
-                t.text_width("TOTAL", lab),
-            )
+            # A column is as wide as its widest figure, the samples standing
+            # in for a lap or a penalty not yet given. The feed leaves a
+            # status row off the board; a page given one keeps the word
+            # clear of the figures beside it.
+            total_col = widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f)
             shown_laps = [lap_text(r.laps) for r in d.rows if not r.status]
             shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
-            laps_col = max(widest([*shown_laps, *LAP_SAMPLES], num), t.text_width("LAPS", lab))
-            pen_col = max(
-                widest([*shown_pens, *PENALTY_SAMPLES], num), t.text_width("PENALTY", lab)
-            )
+            laps_col = widest([*shown_laps, *LAP_SAMPLES], num)
+            pen_col = widest([*shown_pens, *PENALTY_SAMPLES], num)
             pen_r = total_r - total_col - fig_gap
             reserve_laps_r = pen_r - pen_col - fig_gap
 

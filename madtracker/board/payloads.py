@@ -72,7 +72,6 @@ class Header:
 
     title: str
     group: str = ""
-    detail: str = ""
     status: str = ""
     race_id: int = 0
 

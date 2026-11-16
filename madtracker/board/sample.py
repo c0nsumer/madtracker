@@ -60,7 +60,6 @@ def pre_race() -> PreRace:
         header=Header(
             title="6 Mile Points",
             group="Group B",
-            detail="Points Race",
             status="Start list",
         ),
         roster=[Entry(bibs=[b], names=[n]) for b, n in GROUP_B],
@@ -74,7 +73,6 @@ def elimination() -> Elimination:
         header=Header(
             title="Elimination",
             group="Group A",
-            detail="Elimination",
             status=f"{len(out_order)} of {len(GROUP_A)} out",
         ),
         remaining=remaining,
@@ -141,7 +139,6 @@ def sprint_points(with_result: bool = False) -> Standings:
         header=Header(
             title="6 Mile Points",
             group="Group B",
-            detail="Points Race",
             status="After Sprint 2 of 3",
         ),
         sprint_count=3,
@@ -166,7 +163,6 @@ def finish() -> Finish:
         header=Header(
             title="2 Mile Chase",
             group="Group B",
-            detail="12 laps",
             status="Final results",
         ),
         placings=[Placing(i + 1, _rider(b, GROUP_B)) for i, b in enumerate(order)],

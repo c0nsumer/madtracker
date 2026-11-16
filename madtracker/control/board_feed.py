@@ -57,7 +57,7 @@ def _entry_for(view: RaceView, entrant_id: int) -> P.Entry:
 
 
 def rules_detail(view: RaceView) -> str:
-    """The line under the race title: the format, so the stands know the kind of race.
+    """The line under the next race's title between races: its format.
 
     Blank when the title is the format already (an unnamed race): the
     line would only say it twice.
@@ -133,7 +133,6 @@ def header(view: RaceView) -> P.Header:
     return P.Header(
         title=view.title,
         group=view.group,
-        detail=rules_detail(view),
         status=status,
         race_id=view.race_id,
     )

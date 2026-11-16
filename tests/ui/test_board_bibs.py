@@ -24,7 +24,7 @@ TEAMS = [
         bibs=["703", "704"], names=ROSTER[2].names + ROSTER[3].names, team="Red", color="#e5323b"
     ),
 ]
-HEADER = P.Header(title="Test Race", group="Cat 3", detail="Rules", status="Racing")
+HEADER = P.Header(title="Test Race", group="Cat 3", status="Racing")
 
 
 def _layouts() -> list[tuple[str, object]]:

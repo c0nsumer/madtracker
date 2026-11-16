@@ -29,7 +29,7 @@ TEAMS = [
     ("Tan", "60", "61"),
 ]
 NAMES |= {"60": "Ines Calloway", "61": "Theo Brandvold"}
-HEADER = P.Header(title="2 Mile Madison", group="Group A", detail="Madison", status="Start list")
+HEADER = P.Header(title="2 Mile Madison", group="Group A", status="Start list")
 
 
 def team(color: str, a: str, b: str) -> P.Entry:
@@ -382,7 +382,7 @@ def standings(teams: int = 5, status: str = "After Sprint 2 of 4") -> P.Standing
         laps, total = figures.get(color, (0, 5 - i))
         entry = team(color, *bibs[color])
         rows.append(P.StandingRow(rank=i + 1, entry=entry, sprints=[], laps=laps, total=total))
-    header = P.Header("2 Mile Madison", "Group A", "Madison", status)
+    header = P.Header("2 Mile Madison", "Group A", status)
     return P.Standings(header=header, sprint_count=4, rows=rows, current_sprint=2)
 
 
@@ -427,29 +427,34 @@ def test_the_madison_table_names_view_shows_surnames_and_no_team_words(qtbot, dr
     render(qtbot, "madison", data)
     s = strings(drawn)
     assert {"Okafor", "Haddad", "Delgado", "Mori"} <= set(s)
-    assert {"#", "LAPS", "TOTAL"} <= set(s)
-    assert "TEAM" not in s and "PENALTY" not in s and "SPRINT PTS" not in s
+    assert "TEAM" not in s and "SPRINT PTS" not in s
     assert not set(s) & set(formats.TEAM_COLORS) and "Stars and Stripes" not in s
     firsts = {n.partition(" ")[0] for r in data.rows for n in r.entry.names}
     assert not set(s) & firsts
 
 
-@pytest.mark.parametrize("teams, total, surname_px", [(5, 97, 75)])
-def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, total, surname_px):
-    """Design section 10: 5 teams give rows of 156 px, totals of 97 px, and
-    surnames of 75 px; the place is 0.85 of the total and LAPS under it."""
+@pytest.mark.parametrize(
+    "teams, row_px, total, surname_px", [(1, 446, 144, 96), (2, 439, 125, 96), (5, 167, 104, 80)]
+)
+def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, row_px, total, surname_px):
+    """Design section 10: 5 teams give rows of 167 px, totals of 104 px,
+    and surnames of 80 px; 2 teams 439, 125 and 96; a lone team 446, 144
+    and 96. The rows start at the page's top, the place is 0.85 of the
+    total, and the laps are under it."""
     from madtracker.board import pages, team_rows
 
     bands = record_bands(monkeypatch)
     data = standings(teams)
-    render(qtbot, "madison", data)
+    w = render(qtbot, "madison", data)
     rows = [r for r, *_ in bands]
-    assert {round(r.height()) for r in rows} == {156}
+    assert {round(r.height()) for r in rows} == {row_px}
+    assert rows[0].top() == pytest.approx(w.pages["madison"].margin_rect().top())
     for a, b in zip(rows, rows[1:], strict=False):
         assert b.top() - a.bottom() == pytest.approx(team_rows.ROW_GAP)
-    assert sizes(drawn, ["28", "17", "11", "6", "−14"]) == {total}
+    assert sizes(drawn, [P.total_text(r.total) for r in data.rows]) == {total}
     assert sizes(drawn, surnames(data)) == {surname_px}
-    assert sizes(drawn, ["1", "2", "3", "4", "5"]) == {round(total * pages.TEAM_PLACE_SCALE)}
+    [place] = sizes(drawn, ["1", "2", "3", "4", "5"])
+    assert place == pytest.approx(total * pages.TEAM_PLACE_SCALE, abs=1)
     [laps] = sizes(drawn, ["+1", "−1"])
     assert laps < total
 
@@ -526,6 +531,24 @@ def test_the_first_lap_penalty_and_stamp_never_step_the_table_down(qtbot, drawn,
     assert all(s == seen[0] for s in seen)
 
 
+HEADINGS = {"#", "LAPS", "PENALTY", "TOTAL"}
+
+
+def test_the_table_draws_no_column_headings(qtbot, drawn):
+    """No heading row: the place, the colors, and the figures' order say
+    which column is which, so the rows take the page from its top. Not
+    while a lap and a penalty stand, not once decided, not in the color view."""
+    for data in race_states(5):
+        drawn.clear()
+        w = render(qtbot, "madison", data)
+        assert not HEADINGS & set(strings(drawn)), data.header.status
+    assert {"+1", "−20", "1st"} <= set(strings(drawn))
+    clocked(w, color_view_ms())
+    drawn.clear()
+    w.grab()
+    assert LONG_TEAM in strings(drawn) and not HEADINGS & set(strings(drawn))
+
+
 @pytest.mark.parametrize("teams", [1, 2, 5])
 def test_the_color_name_and_bib_plates_hold_their_size_through_a_race(
     qtbot, drawn, monkeypatch, teams
@@ -568,8 +591,9 @@ def test_the_wake_timer_is_precise(qtbot):
 
 
 def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, monkeypatch):
-    """The leader's place in the accent; LAPS in the gain or loss color and
-    TOTAL in white on the dark row, each right-aligned under its heading."""
+    """The leader's place in the accent; the laps in the gain or loss color
+    and the total in white on the dark row, each column right-aligned to
+    one edge."""
     from madtracker.board import theme as t
 
     bands = record_bands(monkeypatch)
@@ -578,15 +602,18 @@ def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, m
     assert at["1"][1] == t.ACCENT.name() and at["2"][1] == t.TEXT.name()
     assert at["+1"][1] == t.GAIN.name() and at["−1"][1] == t.LOSS.name()
     assert at["28"][1] == at["−14"][1] == t.TEXT.name()
-    assert at["28"][0].right() == pytest.approx(at["TOTAL"][0].right())
-    assert at["+1"][0].right() == pytest.approx(at["LAPS"][0].right())
+    assert at["28"][0].right() == pytest.approx(at["−14"][0].right())
+    assert at["+1"][0].right() == pytest.approx(at["−1"][0].right())
     assert at["+1"][0].right() < at["28"][0].right()
     # The place left of the row, the names on it, the figures at its right end.
     row = bands[0][0]
     assert row.right() == pytest.approx(w.pages["madison"].margin_rect().right())
     assert at["1"][0].right() <= row.left()
     okafor, haddad = at["Okafor"][0], at["Haddad"][0]
-    assert row.left() < okafor.left() < haddad.left() < at["LAPS"][0].left()
+    laps_ink = at["+1"][0].right() - t.text_width(
+        "+1", t.font(sizes(drawn, ["+1"]).pop(), t.BOLD, tabular=True)
+    )
+    assert row.left() < okafor.left() < haddad.left() and okafor.right() < laps_ink
     assert okafor.center().y() == pytest.approx(row.center().y(), abs=1)
 
 
@@ -650,7 +677,7 @@ def test_totals_and_laps_hold_still_across_the_rotation(qtbot, drawn):
         clock.advance(at - clock.now())
         drawn.clear()
         w.grab()
-        held = ("28", "+1", "1", "LAPS")
+        held = ("28", "+1", "1", "−14")
         frames.append({s: (QRectF(r), px) for s, r, px, _c in drawn if s in held})
     assert all(f == frames[0] for f in frames) and len(frames[0]) == 4
 
@@ -852,7 +879,7 @@ def test_a_sprint_slams_each_teams_points_in_order_then_reorders(qtbot, drawn, m
     assert chips == [("+5", t.ACCENT.name(), t.ACCENT_INK.name())]
     # On Red's row, right-aligned to the total.
     assert at["+5"][0].center().y() == pytest.approx(at["Okafor"][0].center().y(), abs=1)
-    assert at["+5"][0].right() == pytest.approx(at["TOTAL"][0].right(), abs=1)
+    assert at["+5"][0].right() == pytest.approx(at["28"][0].right(), abs=1)
     # Rows hold their old order while the totals play.
     assert order(at, RIDERS) == RIDERS
     at = frame(w, clock, drawn, scorebug.STEP_MS + 100)

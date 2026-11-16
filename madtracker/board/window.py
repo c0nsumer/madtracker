@@ -205,25 +205,14 @@ class TopBar(QWidget):
         chip_h = lap_chip_height(u)
         gap = 24 * u
         chip_w = t.chip_width(chip_h, h.group) + gap if h.group else 0.0
-        # With no format line under it (an unnamed race, whose title is the
-        # format), the title sits in the middle of the bar, not over a gap.
-        title_y = 12 * u if h.detail else (self.height() - 72 * u) / 2
+        # The title sits in the middle of the bar. A race page names no
+        # format under it: races are named, and the stands know the kind.
+        title_y = (self.height() - 72 * u) / 2
         title_line = QRectF(x, title_y, max(0.0, title_w - chip_w), 72 * u)
         used = t.text(p, title_line, h.title, t.font(58 * u, t.HEAVY), t.TEXT, shrink=True)
         if h.group:
             cx = x + (used + gap if h.title else 0.0)
             t.accent_chip(p, cx, title_line.center().y() - chip_h / 2, chip_h, h.group)
-        if h.detail:
-            # The kind of race, muted under the title: the stands know a
-            # madison from a points race without reading the rules.
-            t.text(
-                p,
-                QRectF(x, 86 * u, title_w, 40 * u),
-                h.detail,
-                t.font(t.MIN_PX * u, t.SEMI),
-                t.MUTED,
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            )
 
         right = QRectF(self.width() - m - status_w, 0, status_w, self.height())
         align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter

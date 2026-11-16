@@ -150,7 +150,9 @@ def test_madison_rows_carry_team_and_color(store, make_race, house):
     assert top.entry.team == "Orange" and top.entry.color == "orange"
     assert top.entry.bibs == ["8", "12"]
     assert top.sprints == [5, None, None, None]
-    assert payload.header.detail == "Madison", "the kind of race, not its numbers (2026-10-11)"
+    # A named race's header carries no format: the stands know the kind.
+    h = payload.header
+    assert (h.title, h.group, h.status) == ("Test race", "", "After Sprint 1 of 4")
 
 
 def test_finish_recap_lists_the_placed_and_drops_a_statused_rider(store, make_race, event):
@@ -339,7 +341,8 @@ def test_one_sprint_reads_singular_in_the_rules_line():
     one = R.points_race_rules(sprint_count=1)
     assert rules_line(one).startswith("1 sprint, ")
     assert rules_line(R.points_race_rules(sprint_count=2)).startswith("2 sprints")
-    # The board's line is the format alone; the sheet keeps the numbers.
+    # The between page's line under the next race is the format alone; the
+    # sheet keeps the numbers.
     view = SimpleNamespace(
         rules=one, format_key="points", format_name="Points Race", title="6 Mile Points"
     )
