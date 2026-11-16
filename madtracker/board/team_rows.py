@@ -3,12 +3,22 @@
 The riders' names lead and the team's color only identifies (design
 section 10): a solid swatch at the row's left edge says which jerseys,
 and the fade carries the color under the first rider without putting
-type on a colored ground. Every size is in design units, multiplied by
-the page's ``u``.
+type on a colored ground. On the standings table the row's left end,
+the swatch, and the color's edges lean at the board's slant
+(``theme.SLANT``), the score chip's angle. Every size is in design units,
+multiplied by the page's ``u``.
 """
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFontMetricsF, QLinearGradient, QPainter, QPainterPath
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFontMetricsF,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPolygonF,
+)
 
 from madtracker.board import theme as t
 
@@ -44,6 +54,9 @@ SWEEP_EDGE_ALPHA = 90
 ROW_PAD = 40
 # Between the first rider's half and the second's.
 RIDER_GAP = 40
+# The least air between a slanted swatch and the top of the surnames'
+# capitals, where the swatch leans nearest them.
+SLANT_AIR = 20
 # A rider's bib plate beside the stacked name, as a share of the row's
 # height up to PLATE_MOST, with PLATE_GAP before the name.
 PLATE_SHARE = 0.56
@@ -78,6 +91,124 @@ def _tinted(color: QColor, alpha: float) -> QColor:
     return out
 
 
+def run(row: QRectF, slant: float) -> float:
+    """How far a ``slant`` edge leans across ``row``'s height, its top right of its bottom."""
+    return slant * row.height()
+
+
+def between(row: QRectF, left: float, right: float, slant: float) -> QPolygonF:
+    """The part of ``row`` between two edges leaning at ``slant``.
+
+    Each edge is given by where it crosses the row's middle, so a run
+    shared by both leaves the part's width the same at every height.
+    """
+    half = run(row, slant) / 2
+    top, bottom = row.top(), row.bottom()
+    right = max(left, right)
+    return QPolygonF(
+        [
+            QPointF(left - half, bottom),
+            QPointF(left + half, top),
+            QPointF(right + half, top),
+            QPointF(right - half, bottom),
+        ]
+    )
+
+
+def band_shape(row: QRectF, u: float, slant: float = 0.0) -> QPainterPath:
+    """A team row's outline: its left end cut at ``slant``, its right end rounded.
+
+    The cut's foot is at the row's left edge, so the row never leans
+    left over the place beside it. With no slant both ends are rounded.
+    """
+    r = ROW_RADIUS * u
+    shape = QPainterPath()
+    if not slant:
+        shape.addRoundedRect(row, r, r)
+        return shape
+    # The rounded corners on the left fall outside the cut, so only the
+    # right end keeps them.
+    shape.addRoundedRect(row.adjusted(-r, 0, 0, 0), r, r)
+    cut = QPainterPath()
+    left = row.left() + run(row, slant) / 2
+    cut.addPolygon(between(row, left, row.right() + r + run(row, slant), slant))
+    cut.closeSubpath()
+    return shape.intersected(cut)
+
+
+def slant_shift(rh: float, surname_px: float, u: float) -> float:
+    """How far right of the square swatch's layout the surnames stand beside a slanted one.
+
+    A tall row's swatch leans far enough right at the top of the
+    surnames' capitals to crowd them; the surnames move only as far as
+    keeps SLANT_AIR there, so a short row's names stay where they are.
+    Measured at ``surname_px``, the largest the surnames may be set.
+    """
+    fm = QFontMetricsF(t.font(surname_px, t.HEAVY))
+    # A line set centered on the row puts its capitals' top this far above the middle.
+    caps = fm.capHeight() - (fm.ascent() - fm.descent()) / 2
+    lean = t.SLANT * (rh / 2 + caps)
+    return max(0.0, lean - (ROW_PAD - SLANT_AIR) * u)
+
+
+def swatch_shape(row: QRectF, u: float, slant: float = 0.0) -> QPainterPath:
+    """The swatch: SWATCH_W wide along the row's left end, leaning with it."""
+    return fill_shape(row, u, slant=slant)
+
+
+def _lead(row: QRectF, u: float, sweep: float, zone_right: float | None, slant: float) -> float:
+    """Where the solid color ends across the row's middle: past the swatch by ``sweep``.
+
+    At a full sweep the end's top corner is at ``zone_right``, so the
+    color leans no further right than the zone.
+    """
+    half = run(row, slant) / 2
+    swatch_right = row.left() + half + SWATCH_W * u
+    sweep = min(1.0, max(0.0, sweep))
+    end = (row.right() if zone_right is None else zone_right) - half
+    return swatch_right + (end - swatch_right) * sweep
+
+
+def fill_shape(
+    row: QRectF,
+    u: float,
+    sweep: float = 0.0,
+    zone_right: float | None = None,
+    slant: float = 0.0,
+) -> QPainterPath:
+    """The solid color: the swatch, swept ``sweep`` of the way to ``zone_right``.
+
+    Both its ends lean at ``slant``, so the color opens and closes along
+    the row's cut.
+    """
+    left = row.left() + run(row, slant) / 2
+    lead = _lead(row, u, sweep, zone_right, slant)
+    return _part(band_shape(row, u, slant), row, left, lead, slant)
+
+
+def _part(
+    shape: QPainterPath, row: QRectF, left: float, right: float, slant: float
+) -> QPainterPath:
+    # The row's own outline cut between two slanted edges, so the swatch
+    # and the sweep keep the row's ends, antialiased.
+    box = QPainterPath()
+    box.addPolygon(between(row, left, right, slant))
+    box.closeSubpath()
+    return shape.intersected(box)
+
+
+def _across(row: QRectF, x: float, length: float, slant: float) -> QLinearGradient:
+    """A gradient ``length`` long along the row from ``x`` at its middle, its lines at ``slant``.
+
+    The gradient runs square to the slanted edges, so each of its colors
+    lies along a line parallel to them, and ``length`` is measured along
+    the row.
+    """
+    y = row.center().y()
+    k = length / (1 + slant * slant)
+    return QLinearGradient(x, y, x + k, y + k * slant)
+
+
 def paint_band(
     p: QPainter,
     row: QRectF,
@@ -85,52 +216,46 @@ def paint_band(
     u: float,
     sweep: float = 0.0,
     zone_right: float | None = None,
+    slant: float = 0.0,
 ) -> None:
     """A team's row: the band, the solid swatch, and the fade under the first rider.
 
     ``sweep`` fills the color solid from the swatch toward ``zone_right``
     (the row's right end when None), 0 none and 1 all of it; while it is
-    partway the fill leads with a soft light edge. A dark color has no
-    ring; the riders' names carry a dark team (design section 10).
+    partway the fill leads with a soft light edge. ``slant`` cuts the
+    row's left end, the swatch, the fade's start, the fill's end, and its
+    light edge at one angle, and the fill's end leans no further right
+    than ``zone_right``. A dark color has no ring; the riders' names carry
+    a dark team (design section 10).
     """
-    r = ROW_RADIUS * u
-    shape = QPainterPath()
-    shape.addRoundedRect(row, r, r)
+    shape = band_shape(row, u, slant)
+    sweep = min(1.0, max(0.0, sweep))
     p.save()
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(t.ROW)
     p.drawPath(shape)
     if color:
         c = QColor(color)
-        fade = QLinearGradient(row.left(), 0, row.left() + row.width() * FADE_END_AT, 0)
+        left = row.left() + run(row, slant) / 2
+        fade = _across(row, left, row.width() * FADE_END_AT, slant)
         fade.setColorAt(0, _tinted(c, FADE_EDGE))
         fade.setColorAt(FADE_MID_AT / FADE_END_AT, _tinted(c, FADE_MID))
         fade.setColorAt(1, _tinted(c, 0.0))
         p.setBrush(QBrush(fade))
         p.drawPath(shape)
 
-        def part(left: float, right: float) -> QPainterPath:
-            # The row's own outline cut to [left, right], so the swatch and
-            # the sweep keep the row's rounded corners, antialiased.
-            box = QPainterPath()
-            box.addRect(QRectF(left, row.top(), max(0.0, right - left), row.height()))
-            return shape.intersected(box)
-
-        swatch_right = row.left() + SWATCH_W * u
-        sweep = min(1.0, max(0.0, sweep))
-        lead = swatch_right
-        if sweep > 0:
-            end = row.right() if zone_right is None else zone_right
-            lead = swatch_right + (end - swatch_right) * sweep
+        # As ``fill_shape`` draws it, from the outline already made.
+        lead = _lead(row, u, sweep, zone_right, slant)
         p.setBrush(c)
-        p.drawPath(part(row.left(), lead))
+        p.drawPath(_part(shape, row, left, lead, slant))
         if 0 < sweep < 1:
+            swatch_right = left + SWATCH_W * u
             edge = SWEEP_EDGE * u
-            light = QLinearGradient(lead - edge, 0, lead, 0)
+            light = _across(row, lead - edge, edge, slant)
             light.setColorAt(0, QColor(255, 255, 255, 0))
             light.setColorAt(1, QColor(255, 255, 255, SWEEP_EDGE_ALPHA))
             p.setBrush(QBrush(light))
-            p.drawPath(part(max(swatch_right, lead - edge), lead))
+            p.drawPath(_part(shape, row, max(swatch_right, lead - edge), lead, slant))
     p.restore()
 
 

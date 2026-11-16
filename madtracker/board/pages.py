@@ -1204,9 +1204,9 @@ class TeamTable(NamedTuple):
 CHIP_TYPE = 0.82
 CHIP_PAD = 0.5
 CHIP_HEIGHT = 0.78
-# It drops from this many times its size, slanted, so it lands as a stamp.
+# It drops from this many times its size, slanted at the board's slant
+# (``theme.SLANT``), so it lands as a stamp cut like the rows it lands on.
 CHIP_START = 2.4
-CHIP_SHEAR = -0.18
 # It fades in over its first moments, so its large start reads as a drop
 # and not as a flash over the row above.
 CHIP_IN_MS = 90
@@ -1254,7 +1254,9 @@ def score_chip(
     p.setOpacity(phase(ms, 0, CHIP_IN_MS) * (1 - gone))
     p.translate(c.x(), c.y() - gone * CHIP_LIFT * rh)
     p.scale(scale, scale)
-    p.shear(CHIP_SHEAR, 0)
+    # Qt's shear moves x by its factor times y, and y runs down the
+    # board, so the negative factor leans the top to the right.
+    p.shear(-t.SLANT, 0)
     p.translate(-c.x(), -c.y())
     if scorebug.RING_AT_MS < ms < scorebug.RING_AT_MS + scorebug.RING_MS:
         k = ease_out(phase(ms, scorebug.RING_AT_MS, scorebug.RING_MS))
@@ -1831,13 +1833,14 @@ class StandingsPage(Page):
     ) -> None:
         """The Madison page: place, then each team's row, its riders' surnames leading.
 
-        The row is the start list's swatch and fade, and the figures sit
-        on its dark right end: the laps in the gain or loss color, the
-        penalty while one stands, and the total in white, the row's
-        largest type. There is no heading row: the figures' colors and
-        order say which is which. On a timer the row turns to its color
-        view, the name area solid in the team's color with the team's
-        name on it, and back (design section 10). ``first`` is the
+        The row is the start list's swatch and fade with its left end, the
+        swatch, and the color view's edges cut at the score chip's slant
+        (``theme.SLANT``), and the figures sit on its dark right end: the
+        laps in the gain or loss color, the penalty while one stands, and
+        the total in white, the row's largest type. There is no heading
+        row: the figures' colors and order say which is which. On a timer
+        the row turns to its color view, the name area solid in the team's
+        color with the team's name on it, and back (design section 10). ``first`` is the
         payload index of the page's first row. ``playing`` is a score
         change's play, its frame now, and its scene, drawn over the same
         layout (``team_play``); ``turn`` is the turn from the start list
@@ -1894,7 +1897,9 @@ class StandingsPage(Page):
         u = self.u
         e = row.entry
         band = QRectF(lay.row_x, y, area.right() - lay.row_x, lay.rh)
-        team_rows.paint_band(p, band, e.color, u, sweep=look.sweep, zone_right=lay.zone_r)
+        team_rows.paint_band(
+            p, band, e.color, u, sweep=look.sweep, zone_right=lay.zone_r, slant=t.SLANT
+        )
         # The views' fades scale the painter's opacity, so a row fading in
         # whole (the turn from the start list) keeps its parts in step.
         if look.names > 0:
@@ -1905,7 +1910,9 @@ class StandingsPage(Page):
         if look.label > 0 and label is not None:
             name, f = label
             rise = (1 - look.label) * 12 * u
-            pad = team_rows.ROW_PAD * u
+            # Inside the color's slanted ends where they cross the row's
+            # middle, so the name keeps its air from both at every height.
+            pad = team_rows.ROW_PAD * u + team_rows.run(band, t.SLANT) / 2
             rect = QRectF(band.x() + pad, y + rise, lay.zone_r - band.x() - 2 * pad, lay.rh)
             p.save()
             p.setOpacity(p.opacity() * look.label)
@@ -2145,7 +2152,10 @@ class StandingsPage(Page):
         size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
         fig_gap = FIGURE_GAP * u
         total_r = area.right() - TEAM_FIGURE_PAD * u
-        pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u
+        # The swatch leans right as it rises; a tall row's surnames step
+        # right of it, a short row's stay where they are.
+        shift = team_rows.slant_shift(rh, size, u)
+        pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
 
         def columns(big_px: float) -> dict:
             """The fonts and columns with the total at ``big_px``, and the surnames' room.
@@ -2249,7 +2259,12 @@ class StandingsPage(Page):
         # Like the surnames and the plates, it is sized for the area a
         # penalty and ordinal places would leave, and placed in the area
         # drawn, so neither steps it down when it comes.
-        label_room = cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u
+        # The room is inside the color's slanted ends where they cross the
+        # row's middle, as the name is placed (``team_row``).
+        run = t.SLANT * rh
+        label_room = (
+            cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u - run
+        )
         labels = []
         for r in d.rows:
             name = r.entry.team or ""

@@ -366,6 +366,53 @@ def test_a_dark_team_gets_no_ring(qapp):
     assert light <= max(t.ROW.lightness(), QColor(formats.TEAM_COLORS["Black"]).lightness()) + 4
 
 
+def _corners(path, row: QRectF) -> tuple[list[float], list[float]]:
+    """The x of a path's points on ``row``'s top edge and on its bottom edge."""
+    points = list(path.toFillPolygon())
+    top = sorted({round(q.x(), 3) for q in points if abs(q.y() - row.top()) < 1e-6})
+    bottom = sorted({round(q.x(), 3) for q in points if abs(q.y() - row.bottom()) < 1e-6})
+    return top, bottom
+
+
+def test_a_slanted_band_and_its_swatch_are_parallelograms_at_the_slant(qapp):
+    """The row's left end is cut at the slant, its foot at the row's left
+    edge, and the swatch is a stripe SWATCH_W wide along it; the right
+    end keeps its rounded corners."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    run = t.SLANT * ROW.height()
+    top, bottom = _corners(team_rows.band_shape(ROW, 1.0, t.SLANT), ROW)
+    assert top[0] == pytest.approx(ROW.left() + run) and bottom[0] == pytest.approx(ROW.left())
+    r = team_rows.ROW_RADIUS
+    assert top[-1] == pytest.approx(ROW.right() - r, abs=0.5)
+    top, bottom = _corners(team_rows.swatch_shape(ROW, 1.0, t.SLANT), ROW)
+    w = team_rows.SWATCH_W
+    assert top == pytest.approx([ROW.left() + run, ROW.left() + run + w])
+    assert bottom == pytest.approx([ROW.left(), ROW.left() + w])
+    # Unslanted, as on the start list, both ends are rounded.
+    top, _bottom = _corners(team_rows.band_shape(ROW, 1.0), ROW)
+    assert top[0] == pytest.approx(ROW.left() + r, abs=0.5)
+
+
+def test_a_slanted_sweep_ends_along_the_slant_short_of_the_zone(qapp):
+    """The color's end leans as the swatch does, its top corner at the
+    zone's edge at a full sweep, so the color opens and closes along the
+    slant."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    zone = ROW.left() + 500
+    run = t.SLANT * ROW.height()
+    top, bottom = _corners(team_rows.fill_shape(ROW, 1.0, 1.0, zone, t.SLANT), ROW)
+    assert top == pytest.approx([ROW.left() + run, zone])
+    assert bottom == pytest.approx([ROW.left(), zone - run])
+    # Partway, the leading edge leans the same way.
+    top, bottom = _corners(team_rows.fill_shape(ROW, 1.0, 0.5, zone, t.SLANT), ROW)
+    assert top[-1] - bottom[-1] == pytest.approx(run)
+    assert ROW.left() + team_rows.SWATCH_W < bottom[-1] < zone - run
+
+
 # The standings table -----------------------------------------------------------
 
 # The design's example: color word, laps, total, in place order.
@@ -406,16 +453,21 @@ def color_view_ms(rows: int = 5) -> float:
     return rotation.NAMES_MS + rotation.change_ms(rows) + 10
 
 
-def record_bands(monkeypatch) -> list[tuple[QRectF, float, float | None]]:
-    """Every team row the page paints: its rect, sweep and color zone's right edge."""
+def record_bands(monkeypatch, slants: list[float] | None = None):
+    """Every team row the page paints: its rect, sweep and color zone's right edge.
+
+    ``slants``, when given, collects each row's slant.
+    """
     from madtracker.board import team_rows
 
     bands: list[tuple[QRectF, float, float | None]] = []
     band = team_rows.paint_band
 
-    def record(p, row, color, u, sweep=0.0, zone_right=None):
+    def record(p, row, color, u, sweep=0.0, zone_right=None, slant=0.0):
         bands.append((QRectF(row), sweep, zone_right))
-        return band(p, row, color, u, sweep, zone_right)
+        if slants is not None:
+            slants.append(slant)
+        return band(p, row, color, u, sweep, zone_right, slant)
 
     monkeypatch.setattr(team_rows, "paint_band", record)
     return bands
@@ -434,11 +486,11 @@ def test_the_madison_table_names_view_shows_surnames_and_no_team_words(qtbot, dr
 
 
 @pytest.mark.parametrize(
-    "teams, row_px, total, surname_px", [(1, 446, 133, 96), (2, 439, 120, 96), (5, 167, 104, 80)]
+    "teams, row_px, total, surname_px", [(1, 446, 127, 96), (2, 439, 115, 96), (5, 167, 104, 80)]
 )
 def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, row_px, total, surname_px):
     """Design section 10: 5 teams give rows of 167 px, totals of 104 px,
-    and surnames of 80 px; 2 teams 439, 120 and 96; a lone team 446, 133
+    and surnames of 80 px; 2 teams 439, 115 and 96; a lone team 446, 127
     and 96. The rows start at the page's top, the place is 0.85 of the
     total, and the laps are under it."""
     from madtracker.board import pages, team_rows
@@ -644,6 +696,109 @@ def test_the_color_view_shows_the_team_name_in_its_ink(qtbot, drawn, monkeypatch
     red = next(r for s, r, *_ in drawn if s == "Red")
     assert red.center().x() == pytest.approx((row.left() + zone) / 2, abs=1)
     assert red.center().y() == pytest.approx(row.center().y(), abs=1)
+
+
+def surname_clearance(drawn, bands, data, u: float) -> float:
+    """The least air between a row's slanted swatch and its surnames' capitals."""
+    from PySide6.QtGui import QFontMetricsF
+
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    at = {s: (r, px) for s, r, px, _c in drawn}
+    least = float("inf")
+    for (row, _sweep, _zone), r in zip(bands, data.rows, strict=True):
+        for name in r.entry.names:
+            rect, px = at[surname(name)]
+            fm = QFontMetricsF(t.font(px, t.HEAVY))
+            top = rect.center().y() + (fm.ascent() - fm.descent()) / 2 - fm.capHeight()
+            # The swatch's right edge at the top of the capitals, where it is nearest.
+            edge = row.left() + team_rows.SWATCH_W * u + t.SLANT * (row.bottom() - top)
+            least = min(least, rect.left() - edge)
+    return least
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5, 8])
+def test_the_surnames_stand_clear_of_the_slanted_swatch(qtbot, drawn, monkeypatch, teams):
+    """However tall the row, and so however far the swatch leans, the
+    surnames' capitals keep SLANT_AIR from it, as a race goes on too."""
+    from madtracker.board import team_rows
+
+    slants: list[float] = []
+    bands = record_bands(monkeypatch, slants)
+    for data in race_states(teams):
+        bands.clear()
+        drawn.clear()
+        w = render(qtbot, "madison", data)
+        u = w.pages["madison"].u
+        assert surname_clearance(drawn, bands, data, u) >= team_rows.SLANT_AIR * u - 0.01
+    from madtracker.board import theme as t
+
+    assert set(slants) == {t.SLANT}
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5, 8])
+def test_the_team_name_stands_inside_the_slanted_color(qtbot, drawn, monkeypatch, teams):
+    """The color view's name, as wide as its room, keeps clear of the
+    color's slanted ends at the top and the bottom of its line."""
+    from PySide6.QtGui import QFontMetricsF
+
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    data = race_states(teams)[-1]
+    w = render(qtbot, "madison", data)
+    clocked(w, color_view_ms(teams))
+    bands.clear()
+    drawn.clear()
+    w.grab()
+    row, sweep, zone = bands[0]
+    assert sweep == 1.0
+    rect, px = next((r, px) for s, r, px, _c in drawn if s == LONG_TEAM)
+    h = QFontMetricsF(t.font(px, t.HEAVY)).height()
+    top, bottom = rect.center().y() - h / 2, rect.center().y() + h / 2
+    # The color's left end where it meets the line's top, and its right
+    # end where it meets the line's bottom: the nearest each comes.
+    left = row.left() + t.SLANT * (row.bottom() - top)
+    right = zone - t.SLANT * (bottom - row.top())
+    assert left < rect.left() and rect.right() < right
+
+
+def test_the_chip_and_the_rows_share_one_slant(qtbot, drawn, monkeypatch):
+    """The chip is sheared and the rows are cut by the one slant, leaning
+    the same way: a different slant moves both."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QTransform
+
+    from madtracker.board import theme as t
+
+    monkeypatch.setattr(t, "SLANT", 0.3)
+    shears: list[tuple[float, float]] = []
+    shear = QPainter.shear
+
+    def record(self, sh, sv):
+        shears.append((sh, sv))
+        return shear(self, sh, sv)
+
+    monkeypatch.setattr(QPainter, "shear", record)
+    slants: list[float] = []
+    record_bands(monkeypatch, slants)
+    prev = standings(5)
+    w, clock = playing(qtbot, prev)
+    w.set_layout("madison", scored(prev, {"Red": 5}))
+    frame(w, clock, drawn, 100)
+    assert set(slants) == {0.3} and set(shears) == {(-0.3, 0)}
+    # The chip's sides lean as the row's left end does: the top right of the bottom.
+    tilt = QTransform().shear(*shears[0])
+    top, bottom = tilt.map(QPointF(0, 0)), tilt.map(QPointF(0, 1))
+    assert top.x() - bottom.x() == pytest.approx(0.3)
+
+
+def test_the_start_list_keeps_its_square_swatch(qtbot, monkeypatch):
+    slants: list[float] = []
+    record_bands(monkeypatch, slants)
+    render(qtbot, "pre_race", start_list(5))
+    assert set(slants) == {0.0}
 
 
 def test_a_long_team_name_shrinks_to_the_floor_then_is_cut(qtbot, drawn):
