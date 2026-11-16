@@ -306,6 +306,45 @@ def test_elimination_cards_share_one_size_and_initial_first_names(qtbot, drawn):
     assert not [s for s in seen if s.startswith("Maximiliana") and s.endswith("…")]
 
 
+# The least a card's plate is, in design units, with two to six riders
+# left, on each board shape: a narrow board's cards keep their plates
+# beside the bar.
+LEAST_CARD_PLATES = {
+    (1920, 1080): {2: 170, 3: 170, 4: 170, 5: 115, 6: 115},
+    (1280, 720): {2: 170, 3: 170, 4: 170, 5: 115, 6: 115},
+    (1440, 1080): {2: 170, 3: 115.9, 4: 170, 5: 115, 6: 115},
+    (1024, 768): {2: 170, 3: 115.9, 4: 170, 5: 115, 6: 115},
+    (1000, 900): {2: 115.9, 3: 60.7, 4: 115.9, 5: 115, 6: 115},
+}
+
+
+@pytest.mark.parametrize("size", list(LEAST_CARD_PLATES))
+def test_card_plates_keep_their_size_and_never_shrink_as_riders_go_out(qtbot, monkeypatch, size):
+    """On every board shape the cards' plates hold their least size, and
+    from six left to two a plate is never smaller than the one before it,
+    so the race's climax never steps the bibs down."""
+    from madtracker.board import theme
+
+    plates: list = []
+    plate = theme.plate
+
+    def record(p, rect, bib, out=False):
+        plates.append((rect.height(), bib, out))
+        return plate(p, rect, bib, out)
+
+    monkeypatch.setattr(theme, "plate", record)
+    heights = []
+    for n in range(6, 1, -1):
+        plates.clear()
+        w = render(qtbot, "elimination", elimination(remaining=n), size=size)
+        u = w.pages["elimination"].u
+        still = {round(h / u, 1) for h, bib, out in plates if not out and bib != str(n + 1)}
+        assert len(still) == 1, (n, still)
+        heights.append(still.pop())
+        assert heights[-1] >= LEAST_CARD_PLATES[size][n] - 0.1, (n, heights[-1])
+    assert heights == sorted(heights), heights
+
+
 @pytest.mark.parametrize("size", [(1920, 1080), (1440, 900)])
 @pytest.mark.parametrize("remaining", [1, 2, 3, 4])
 def test_the_last_riders_plates_stay_inside_their_cards(qtbot, monkeypatch, size, remaining):

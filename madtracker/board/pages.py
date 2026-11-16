@@ -962,9 +962,14 @@ PLATE_CAP = 170
 # gap a list's columns have. The last-out card's bar takes the left of
 # the column, so the column is as wide as keeps a 17-letter surname such
 # as Featherstonehaugh whole above the floor beside it, and the riders
-# still in keep their room.
+# still in keep their room. On a board narrower than 16:9 the column
+# takes no more than SIDE_SHARE of the page, so two cards still hold
+# their plates beside their bars.
 SIDE_W = 616
 SIDE_GAP = 48
+SIDE_SHARE = 0.38
+# Between two cards of riders still in.
+CARD_GAP = 24
 # Between a card's content and its rounded right end.
 CARD_PAD = 16
 
@@ -1020,7 +1025,7 @@ class EliminationPage(Page):
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Elimination = self.data
         u = self.u
-        side_w = SIDE_W * u
+        side_w = min(SIDE_W * u, area.width() * SIDE_SHARE)
         gap = SIDE_GAP * u
         grid = QRectF(area.x(), area.y(), area.width() - side_w - gap, area.height())
         side = QRectF(grid.right() + gap, area.y(), side_w, area.height())
@@ -1039,16 +1044,11 @@ class EliminationPage(Page):
             self._rows(p, QRectF(grid.x(), top, grid.width(), grid.bottom() - top))
             self._side(p, side, n)
             return
-        # Four to six left are two columns of cards: three across are too
-        # narrow for a name such as M. Vanderbilt-Rochester at the board's
-        # minimum, and four would leave the fourth alone on a second row.
-        cols = 2 if n >= 4 else max(n, 1)
-        rows = max(1, math.ceil(n / cols))
-        cg = 24 * u
-        cw = (grid.width() - cg * (cols - 1)) / cols
+        room_h = grid.bottom() - top
+        cols, cw, ch = self.cards(grid.width(), room_h, n)
+        cg = CARD_GAP * u
         # The last few riders are the race's climax: their cards grow.
         final = n <= 4
-        ch = min((420 if final else 250) * u, (grid.bottom() - top - cg * (rows - 1)) / rows)
         names = [e.names[0] if e.names and not self.bibs_only else "" for e in d.remaining]
         block_px = min((88 if final else 52) * u, ch * 0.26)
         card_px = min((64 if final else 36) * u, ch * 0.15)
@@ -1064,17 +1064,15 @@ class EliminationPage(Page):
             scale = t.fit_scale(((n, room, f) for n in names), self.name_floor(card_px))
             plate_top = ch * 0.13
             axis = self.card_axis(frame, plate_top, right)
-            # The plate grows with the card, but never past the size a
-            # three-digit bib needs, and never wider than the card less a
-            # margin, or three left on a wide monitor would draw plates
-            # taller than the cards are wide, running into each other; nor
-            # wider than the room the bar leaves it.
-            ph = min(
-                ch * 0.46,
-                PLATE_CAP * u,
-                (cw - 48 * u) / t.plate_width(1.0),
-                (right - team_rows.bar_clear(frame, plate_top, u)) / t.plate_width(1.0),
+            # One plate size from four left to two, the least any of their
+            # layouts holds, and never more for five or six: the plates
+            # never shrink as riders go out. The last rider's card is the
+            # widest, so it keeps its own.
+            least = min(
+                self.card_plate(*self.cards(grid.width(), room_h, k)[1:]) for k in range(2, 5)
             )
+            own = self.card_plate(cw, ch)
+            ph = own if n == 1 else (least if final else min(own, least))
         else:
             inner = QRectF(16 * u, 10 * u, cw - 32 * u, ch - 20 * u)
             scale = self.block_scale(names, inner, block_px, frame)
@@ -1109,6 +1107,45 @@ class EliminationPage(Page):
             shown = t.fit_name(name, self.line_room(line, f, card), f)
             self.card_line(p, line, shown, f, t.TEXT, card, card.x() + axis)
         self._side(p, side, n)
+
+    def cards(self, width: float, height: float, n: int) -> tuple[int, float, float]:
+        """The columns, card width, and card height for ``n`` cards in ``width`` by ``height``.
+
+        Four to six left are two columns of cards: three across are too
+        narrow for a name such as M. Vanderbilt-Rochester at the board's
+        minimum, and four would leave the fourth alone on a second row.
+        Three left go three across while that keeps their plates as large
+        as two across, and otherwise two and one, as four are, so a
+        narrow board's plates do not shrink at the race's climax.
+        """
+        u = self.u
+        cg = CARD_GAP * u
+
+        def layout(cols: int, final: bool) -> tuple[int, float, float]:
+            rows = max(1, math.ceil(n / cols))
+            cw = (width - cg * (cols - 1)) / cols
+            ch = min((420 if final else 250) * u, (height - cg * (rows - 1)) / rows)
+            return cols, cw, ch
+
+        if n == 3:
+            across, two = layout(3, True), layout(2, True)
+            return across if self.card_plate(*across[1:]) >= self.card_plate(*two[1:]) else two
+        return layout(2 if n >= 4 else max(n, 1), n <= 4)
+
+    def card_plate(self, cw: float, ch: float) -> float:
+        """The tallest plate a card ``cw`` by ``ch`` holds.
+
+        The plate grows with the card, but never past the size a
+        three-digit bib needs, and never wider than the card less a
+        margin, or three left on a wide monitor would draw plates taller
+        than the cards are wide, running into each other; nor wider than
+        the room the bar leaves it at the plate's top.
+        """
+        u = self.u
+        top = ch * 0.13
+        room = cw - CARD_PAD * u - team_rows.bar_clear(QRectF(0, 0, cw, ch), top, u)
+        unit = t.plate_width(1.0)
+        return max(0.0, min(ch * 0.46, PLATE_CAP * u, (cw - 48 * u) / unit, room / unit))
 
     def _rows(self, p: QPainter, area: QRectF) -> None:
         """The riders still in as columns of rider rows, for a big field."""
@@ -1171,15 +1208,17 @@ class EliminationPage(Page):
         bibs = self.data.last_eliminated.bibs
         bib = bibs[0] if bibs else ""
         right = card.right() - 24 * u
+        unit = t.plate_width(1.0)
         if not name:
             # Bibs only: the plate alone, larger, in the middle of its card.
-            ph = 200 * u
+            top = card.center().y() - 100 * u
+            ph = min(200 * u, (right - team_rows.bar_clear(card, top, u)) / unit)
             pw = t.plate_width(ph)
             top = card.center().y() - ph / 2
             axis = self.card_axis(card, top, right)
             t.plate(p, QRectF(axis - pw / 2, top, pw, ph), bib)
             return
-        ph = 150 * u
+        ph = min(150 * u, (right - team_rows.bar_clear(card, card.y() + 44 * u, u)) / unit)
         pw = t.plate_width(ph)
         axis = self.card_axis(card, card.y() + 44 * u, right)
         t.plate(p, QRectF(axis - pw / 2, card.y() + 44 * u, pw, ph), bib)
@@ -2918,10 +2957,12 @@ class FinishPage(Page):
     ) -> None:
         u = self.u * self.g
         band = self.rest_band(r)
+        # A rider tied onto the podium below its first three rows is on
+        # the podium, so takes its accent.
         team_rows.paint_band(
             p,
             band,
-            team_rows.RIDER_BAR,
+            t.ACCENT.name() if pl.place <= 3 else team_rows.RIDER_BAR,
             self.u,
             slant=t.SLANT,
             texture=self.texture,

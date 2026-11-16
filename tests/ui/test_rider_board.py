@@ -488,6 +488,12 @@ def test_the_podium_bars_are_the_accent_and_the_rest_neutral(qtbot, monkeypatch)
     bands.clear()
     render(qtbot, "finish", result(24))
     assert len(bands) == 24
+    # A rider tied for 3rd below the podium's rows is on the podium too.
+    tied = result(8)
+    tied.placings[3].place = 3
+    bands.clear()
+    render(qtbot, "finish", tied)
+    assert [b["color"] for b in bands] == [accent] * 4 + [team_rows.RIDER_BAR] * 4
 
 
 def test_the_result_sizes_design_section_10_states_at_1080(qtbot, drawn):
@@ -525,7 +531,7 @@ def test_an_undecided_results_rows_hold_still_as_its_places_are_decided(qtbot, m
 @pytest.mark.parametrize("long", [False, True], ids=["usual", "long"])
 @pytest.mark.parametrize("label", ["bibs_names", "names", "bibs"])
 @pytest.mark.parametrize(("layout", "n"), ROW_PAGES)
-@pytest.mark.parametrize("size", [(1920, 1080), (1000, 900)])
+@pytest.mark.parametrize("size", [(1920, 1080), (1440, 1080), (1000, 900)])
 def test_the_result_and_elimination_names_clear_the_bar(
     qtbot, monkeypatch, layout, n, label, long, size
 ):
