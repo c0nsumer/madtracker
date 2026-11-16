@@ -174,8 +174,15 @@ def text(
     fm = QFontMetricsF(f)
     width = fm.horizontalAdvance(s)
     if shrink and width > rect.width() > 0:
+        least = scaled(f, NAME_FLOOR).pixelSize()
         f = scaled(f, max(NAME_FLOOR, rect.width() / width))
         fm = QFontMetricsF(f)
+        # Hinted advances do not scale in step with the pixel size, so the
+        # scaled line can still be a fraction too wide and lose its last
+        # character to the ellipsis; a pixel at a time brings it inside.
+        while fm.horizontalAdvance(s) > rect.width() and f.pixelSize() > least:
+            f.setPixelSize(f.pixelSize() - 1)
+            fm = QFontMetricsF(f)
     p.setFont(f)
     p.setPen(color)
     shown = fm.elidedText(s, Qt.TextElideMode.ElideRight, rect.width())

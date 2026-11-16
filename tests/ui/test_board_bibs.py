@@ -216,3 +216,64 @@ def test_a_team_rider_without_a_bib_is_named_with_no_plate(board, drawn, monkeyp
     board.grab()
     assert "Nobib" in drawn
     assert plates == ([] if label == "names" else ["701"]), "no empty plate"
+
+
+# Three-digit bibs, the widest a plate holds.
+WIDE_BIBS = ["100", "188", "888", "999"]
+
+
+@pytest.mark.parametrize(
+    "size", [(1366, 768), (1920, 1080), (3840, 2160)], ids=lambda s: f"{s[0]}x{s[1]}"
+)
+@pytest.mark.parametrize("name", ["sprint_points", "pre_race"])
+def test_three_digit_bibs_show_whole_on_their_plates_at_every_field_size(
+    board, monkeypatch, name, size
+):
+    """Every plate reads its whole bib, never "1…", from 2 riders to 24."""
+    from PySide6.QtGui import QPainter
+
+    from madtracker.board import theme
+    from madtracker.board.pages import page_rows
+
+    shown: list[tuple[str, str]] = []
+    inside: list[str] = []
+    draw, plate = QPainter.drawText, theme.plate
+
+    def record_draw(self, *args):
+        if inside and len(args) == 3 and isinstance(args[2], str):
+            shown.append((inside[-1], args[2]))
+        return draw(self, *args)
+
+    def record_plate(p, rect, bib, out=False):
+        inside.append(bib)
+        try:
+            return plate(p, rect, bib, out)
+        finally:
+            inside.pop()
+
+    monkeypatch.setattr(QPainter, "drawText", record_draw)
+    monkeypatch.setattr(theme, "plate", record_plate)
+    board.resize(*size)
+    cut: dict[int, list[str]] = {}
+    for n in range(2, 25):
+        roster = [
+            P.Entry(bibs=[WIDE_BIBS[i % 4]], names=[f"Rider {chr(65 + i)} Quillfeather"])
+            for i in range(n)
+        ]
+        if name == "pre_race":
+            data = P.PreRace(header=HEADER, roster=roster)
+        else:
+            rows = [
+                P.StandingRow(rank=i + 1, entry=e, sprints=[n - i, None, None], total=n - i)
+                for i, e in enumerate(roster)
+            ]
+            data = P.Standings(header=HEADER, sprint_count=3, rows=rows, current_sprint=1)
+        shown.clear()
+        board.set_layout(name, data)
+        board.grab()
+        # A points table longer than a page shows its first page.
+        assert len(shown) == (n if name == "pre_race" else page_rows(n)), (n, shown)
+        wrong = [s for bib, s in shown if bib != s]
+        if wrong:
+            cut[n] = wrong
+    assert not cut, f"bibs cut at {sorted(cut)} riders"
