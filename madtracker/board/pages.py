@@ -12,7 +12,16 @@ from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QWidget
 
 from madtracker.board import rotation, scorebug, team_rows
@@ -472,29 +481,88 @@ class Page(QWidget):
         """One scale for a list of single-line names drawn bold at ``px``."""
         return t.fit_scale((n, width, t.font(px, t.BOLD)) for n in names)
 
-    def block_scale(self, names: list[str], width: float, px: float) -> float:
+    def line_start(self, line: QRectF, f: QFont, card: QRectF | None) -> float:
+        """Where a line of ``f`` set in ``line`` may start: on ``card``, clear of its bar.
+
+        The bar leans nearest the line at its capitals' top
+        (``team_rows.bar_clear``).
+        """
+        if card is None:
+            return line.left()
+        return max(line.left(), team_rows.bar_clear(card, caps_top(line, f), self.u))
+
+    def line_room(self, line: QRectF, f: QFont, card: QRectF | None) -> float:
+        """How wide a line of ``f`` set in ``line`` may be: on ``card``, what its bar leaves."""
+        return max(0.0, line.right() - self.line_start(line, f, card))
+
+    def card_axis(self, card: QRectF, top: float, right: float) -> float:
+        """The axis a card's content is centered on: the middle of what the card's bar leaves.
+
+        ``top`` is the content's highest point at its largest, where the
+        bar leans nearest it, and ``right`` its right limit; the content
+        reads centered in the card's open room rather than under the bar.
+        """
+        return (team_rows.bar_clear(card, top, self.u) + right) / 2
+
+    def card_line(
+        self,
+        p: QPainter,
+        line: QRectF,
+        s: str,
+        f: QFont,
+        color: QColor,
+        card: QRectF | None = None,
+        axis: float | None = None,
+    ) -> None:
+        """One line centered in ``line``; on ``card``, centered on ``axis`` and clear of its bar.
+
+        A line too wide to center there keeps to the bar's clearance on
+        the left and ``line``'s right edge, so it has the whole room the
+        bar leaves rather than a centered share of it.
+        """
+        if card is None:
+            t.text(p, line, s, f, color, CENTER)
+            return
+        start = self.line_start(line, f, card)
+        w = t.text_width(s, f)
+        x = max(start, min((line.center().x() if axis is None else axis) - w / 2, line.right() - w))
+        t.text(p, QRectF(x, line.y(), line.right() - x, line.height()), s, f, color, LEFT)
+
+    def block_scale(
+        self, names: list[str], rect: QRectF, px: float, card: QRectF | None = None
+    ) -> float:
         """One scale for a grid of ``name_block`` cards.
 
         Each name may use one line or two (first name over the rest), so
         its own best scale is the better of the two; the grid takes the
-        smallest of those so every card matches.
+        smallest of those so every card matches. On ``card`` each line
+        has the room the bar leaves it (``line_room``).
         """
         f = t.font(px, t.BOLD)
+
+        def rooms(g: QFont) -> tuple[float, list[float]]:
+            one = self.line_room(t.stacked_lines(rect, g, 1)[0], g, card)
+            return one, [self.line_room(r, g, card) for r in t.stacked_lines(rect, g, 2)]
+
+        one_w, two_w = rooms(f)
         scale = 1.0
         for name in names:
-            one = t.fit_scale([(name, width, f)], floor=0.0)
+            one = t.fit_scale([(name, one_w, f)], floor=0.0)
             first, sep, rest = name.strip().partition(" ")
-            two = t.fit_scale([(first, width, f), (rest, width, f)], floor=0.0) if sep else 0.0
+            two = (
+                t.fit_scale([(first, two_w[0], f), (rest, two_w[1], f)], floor=0.0) if sep else 0.0
+            )
             scale = min(scale, max(one, two))
         scale = max(t.NAME_FLOOR, scale)
 
         def fits(scale: float) -> bool:
             g = t.scaled(f, scale)
+            one_w, two_w = rooms(g)
             for name in names:
                 first, sep, rest = name.strip().partition(" ")
-                if t.text_width(name.strip(), g) <= width:
+                if t.text_width(name.strip(), g) <= one_w:
                     continue
-                if sep and t.text_width(first, g) <= width and t.text_width(rest, g) <= width:
+                if sep and t.text_width(first, g) <= two_w[0] and t.text_width(rest, g) <= two_w[1]:
                     continue
                 return False
             return True
@@ -506,7 +574,15 @@ class Page(QWidget):
         return scale
 
     def name_block(
-        self, p: QPainter, rect: QRectF, name: str, px: float, color=t.TEXT, scale: float = 1.0
+        self,
+        p: QPainter,
+        rect: QRectF,
+        name: str,
+        px: float,
+        color=t.TEXT,
+        scale: float = 1.0,
+        card: QRectF | None = None,
+        axis: float | None = None,
     ) -> None:
         """A name centered in ``rect``, on two lines when one would not fit.
 
@@ -514,32 +590,35 @@ class Page(QWidget):
         better as two big lines than as one line squeezed to fit. The
         first word goes on top so a multi-word last name stays together.
         Two lines are set as one block (``t.stacked_lines``) so they read
-        as one name, centered in the card.
+        as one name, centered in the card. On a rider row's ``card`` the
+        lines center on ``axis`` and each keeps clear of the bar
+        (``card_line``).
         """
         f = t.scaled(t.font(px, t.BOLD), scale)
-        w = rect.width()
         name = name.strip()
         first, sep, rest = name.partition(" ")
         rest = rest.strip()
+        w = self.line_room(t.stacked_lines(rect, f, 1)[0], f, card)
+        w1, w2 = (self.line_room(r, f, card) for r in t.stacked_lines(rect, f, 2))
 
-        def fits(s: str) -> bool:
-            return t.text_width(s, f) <= w
+        def fits(s: str, width: float = w) -> bool:
+            return t.text_width(s, f) <= width
 
         # The steps run in the order of ``fit_name``: the first name gives
         # way to its initial before the last name is ever cut.
         short = t.initialed(name)
         if fits(name) or not short:
             lines = [t.fit_name(name, w, f)]
-        elif fits(first) and fits(rest):
+        elif fits(first, w1) and fits(rest, w2):
             lines = [first, rest]
         elif fits(short):
             lines = [short]
         else:
             # The initial keeps a line of its own so the last name gets
             # the whole width before it is elided.
-            lines = [f"{first[0]}.", t.elide(rest, w, f)]
+            lines = [f"{first[0]}.", t.elide(rest, w2, f)]
         for r, s in zip(t.stacked_lines(rect, f, len(lines)), lines, strict=True):
-            t.text(p, r, s, f, color, CENTER)
+            self.card_line(p, r, s, f, color, card, axis)
 
     def section_label(
         self, p: QPainter, x: float, y: float, s: str, color: QColor = t.MUTED
@@ -556,7 +635,7 @@ class Page(QWidget):
         fit = max(1, int(height // (LIST_MIN_PITCH * self.u)))
         return max(1, min(most, -(-count // fit)))
 
-    def bar_lead(self, band_h: float, h: float, size: float) -> float:
+    def bar_lead(self, band_h: float, h: float, size: float, teams: bool = False) -> float:
         """How far a rider row's plate, or its name without one, stands from the row's left end.
 
         Past the bar and ROW_PAD, and as much further as keeps the plate's
@@ -564,7 +643,8 @@ class Page(QWidget):
         (``team_rows.clearance``), as the Madison start list's riders are:
         ``band_h`` is the row's height, ``h`` the entry's that the plate
         is sized in, and ``size`` the name's largest, so a list set
-        smaller never moves its plates or names.
+        smaller never moves its plates or names. ``teams`` is a list that
+        holds a team, whose block is the entry's whole height.
         """
         u = self.u
         shift = team_rows.slant_shift(band_h, size, u)
@@ -573,6 +653,8 @@ class Page(QWidget):
             # The name stands a plate's width and its gap further right.
             beside = shift - t.plate_width(ph) - PLATE_NAME_GAP * u
             shift = max(team_rows.clearance(band_h, ph / 2, u), beside)
+        if teams:
+            shift = max(shift, team_rows.clearance(band_h, h / 2, u))
         return (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
 
     def rows_geometry(
@@ -876,6 +958,21 @@ ROW_NAME_PX = 50
 # The tallest bib plate on a remaining-rider card: the plate grid's own
 # largest, which a three-digit bib fills from the far end of the stands.
 PLATE_CAP = 170
+# Elimination's side column and its gap from the riders still in, the
+# gap a list's columns have. The last-out card's bar takes the left of
+# the column, so the column is as wide as keeps a 17-letter surname such
+# as Featherstonehaugh whole above the floor beside it, and the riders
+# still in keep their room.
+SIDE_W = 616
+SIDE_GAP = 48
+# Between a card's content and its rounded right end.
+CARD_PAD = 16
+
+
+def caps_top(line: QRectF, f: QFont) -> float:
+    """Where the capitals of a line of ``f`` set centered in ``line`` start."""
+    fm = QFontMetricsF(f)
+    return line.center().y() + (fm.ascent() - fm.descent()) / 2 - fm.capHeight()
 
 
 def plate_grid(p: QPainter, area: QRectF, bibs: list[str], u: float) -> None:
@@ -912,7 +1009,10 @@ class EliminationPage(Page):
 
     ``fresh`` is set by the window for a few seconds after an elimination
     and drives the red treatment; afterwards the card stays, quieter, so a
-    spectator who looked away can still see who went.
+    spectator who looked away can still see who went. Every card and row
+    is a rider row (design section 10): the riders still in have the
+    neutral bar, since an elimination has no leader, and the last-out
+    card's bar is the out color.
     """
 
     fresh = True
@@ -920,8 +1020,8 @@ class EliminationPage(Page):
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Elimination = self.data
         u = self.u
-        side_w = 600 * u
-        gap = 64 * u
+        side_w = SIDE_W * u
+        gap = SIDE_GAP * u
         grid = QRectF(area.x(), area.y(), area.width() - side_w - gap, area.height())
         side = QRectF(grid.right() + gap, area.y(), side_w, area.height())
 
@@ -952,40 +1052,71 @@ class EliminationPage(Page):
         names = [e.names[0] if e.names and not self.bibs_only else "" for e in d.remaining]
         block_px = min((88 if final else 52) * u, ch * 0.26)
         card_px = min((64 if final else 36) * u, ch * 0.15)
+        # Every card has one geometry, worked out on one card at the
+        # origin: the content centers on the room the bar leaves at the
+        # content's top, at its largest, so every card reads the same.
+        frame = QRectF(0, 0, cw, ch)
+        right = cw - CARD_PAD * u
         if self.show_bibs:
+            name_rect = QRectF(16 * u, ch * 0.64, cw - 32 * u, ch * 0.28)
             f = t.font(card_px, t.SEMI)
-            scale = t.fit_scale(((n, cw - 32 * u, f) for n in names), self.name_floor(card_px))
+            room = self.line_room(name_rect, f, frame)
+            scale = t.fit_scale(((n, room, f) for n in names), self.name_floor(card_px))
+            plate_top = ch * 0.13
+            axis = self.card_axis(frame, plate_top, right)
+            # The plate grows with the card, but never past the size a
+            # three-digit bib needs, and never wider than the card less a
+            # margin, or three left on a wide monitor would draw plates
+            # taller than the cards are wide, running into each other; nor
+            # wider than the room the bar leaves it.
+            ph = min(
+                ch * 0.46,
+                PLATE_CAP * u,
+                (cw - 48 * u) / t.plate_width(1.0),
+                (right - team_rows.bar_clear(frame, plate_top, u)) / t.plate_width(1.0),
+            )
         else:
-            scale = self.block_scale(names, cw - 32 * u, block_px)
+            inner = QRectF(16 * u, 10 * u, cw - 32 * u, ch - 20 * u)
+            scale = self.block_scale(names, inner, block_px, frame)
+            # A name on two lines stands highest.
+            f = t.font(block_px, t.BOLD)
+            axis = self.card_axis(frame, caps_top(t.stacked_lines(inner, f, 2)[0], f), right)
+        dpr = self.devicePixelRatioF()
         for i, entry in enumerate(d.remaining):
             r, c = divmod(i, cols)
             card = QRectF(grid.x() + c * (cw + cg), top + r * (ch + cg), cw, ch)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.CARD)
-            p.drawRoundedRect(card, 14 * u, 14 * u)
+            team_rows.paint_band(
+                p, card, team_rows.RIDER_BAR, u, slant=t.SLANT, texture=self.texture, dpr=dpr
+            )
+            at = card.topLeft()
             name = names[i]
             if not self.show_bibs:
-                inner = card.adjusted(16 * u, 10 * u, -16 * u, -10 * u)
-                self.name_block(p, inner, name, block_px, scale=scale)
+                self.name_block(
+                    p,
+                    inner.translated(at),
+                    name,
+                    block_px,
+                    scale=scale,
+                    card=card,
+                    axis=card.x() + axis,
+                )
                 continue
-            # The plate grows with the card, but never past the size a
-            # three-digit bib needs, and never wider than the card less a
-            # margin, or three left on a wide monitor would draw plates taller
-            # than the cards are wide, running into each other.
-            ph = min(ch * 0.46, PLATE_CAP * u, (cw - 48 * u) / t.plate_width(1.0))
             pw = t.plate_width(ph)
             bib = entry.bibs[0] if entry.bibs else ""
-            t.plate(p, QRectF(card.center().x() - pw / 2, card.y() + ch * 0.13, pw, ph), bib)
-            name_rect = QRectF(card.x() + 16 * u, card.y() + ch * 0.64, cw - 32 * u, ch * 0.28)
+            t.plate(p, QRectF(card.x() + axis - pw / 2, card.y() + plate_top, pw, ph), bib)
+            line = name_rect.translated(at)
             f = t.scaled(t.font(card_px, t.SEMI), scale)
-            t.text(p, name_rect, t.fit_name(name, name_rect.width(), f), f, t.TEXT, CENTER)
+            shown = t.fit_name(name, self.line_room(line, f, card), f)
+            self.card_line(p, line, shown, f, t.TEXT, card, card.x() + axis)
         self._side(p, side, n)
 
     def _rows(self, p: QPainter, area: QRectF) -> None:
-        """The riders still in as columns of start-list rows, for a big field."""
+        """The riders still in as columns of rider rows, for a big field."""
         d: Elimination = self.data
         cols = max(2, self.list_columns(len(d.remaining), area.height()))
-        self.entry_rows(p, area, d.remaining, cols, t.CARD, name_cap=ROW_NAME_PX)
+        self.entry_rows(
+            p, area, d.remaining, cols, t.CARD, name_cap=ROW_NAME_PX, bar=team_rows.RIDER_BAR
+        )
 
     def _side(self, p: QPainter, side: QRectF, n: int) -> None:
         """The side column: who just went, how many are left, who went before."""
@@ -999,22 +1130,39 @@ class EliminationPage(Page):
                 p, side.x(), y, "Eliminated" if fresh else "Last out", t.OUT if fresh else t.MUTED
             )
             card = QRectF(side.x(), y + 56 * u, side_w, 330 * u)
-            p.setBrush(t.OUT_SOFT if fresh else t.CARD)
-            p.setPen(QPen(t.OUT, 4 * u) if fresh else Qt.PenStyle.NoPen)
-            p.drawRoundedRect(card.adjusted(2 * u, 2 * u, -2 * u, -2 * u), 16 * u, 16 * u)
+            team_rows.paint_band(
+                p,
+                card,
+                t.OUT.name(),
+                u,
+                slant=t.SLANT,
+                texture=self.texture,
+                dpr=self.devicePixelRatioF(),
+            )
+            if fresh:
+                # The bell's news: the card washed and edged in the out
+                # color for a few seconds.
+                p.save()
+                p.setBrush(t.OUT_SOFT)
+                p.setPen(QPen(t.OUT, 4 * u))
+                p.drawPath(team_rows.band_shape(card.adjusted(2 * u, 2 * u, -2 * u, -2 * u), u))
+                p.restore()
             out_name = d.last_eliminated.names[0] if d.last_eliminated.names else ""
             if self.bibs_only:
                 out_name = ""
             if self.show_bibs:
                 self._last_out_plate(p, card, out_name)
             else:
-                inner = card.adjusted(32 * u, 40 * u, -32 * u, -40 * u)
+                inner = card.adjusted(32 * u, 40 * u, -CARD_PAD * u, -40 * u)
                 # 76 px of Inter has the capitals of the 84 px this card was
                 # designed at, and lets a 17-letter last name such as
-                # Featherstonehaugh stay whole above the floor.
+                # Featherstonehaugh stay whole above the floor beside the bar.
                 out_px = 76 * u
-                scale = self.block_scale([out_name], inner.width(), out_px)
-                self.name_block(p, inner, out_name, out_px, scale=scale)
+                f = t.font(out_px, t.BOLD)
+                first = t.stacked_lines(inner, f, 2)[0]
+                axis = self.card_axis(card, caps_top(first, f), inner.right())
+                scale = self.block_scale([out_name], inner, out_px, card)
+                self.name_block(p, inner, out_name, out_px, scale=scale, card=card, axis=axis)
             y = card.bottom() + 56 * u
         self._remaining(p, side, y, n)
 
@@ -1022,18 +1170,24 @@ class EliminationPage(Page):
         u = self.u
         bibs = self.data.last_eliminated.bibs
         bib = bibs[0] if bibs else ""
+        right = card.right() - 24 * u
         if not name:
             # Bibs only: the plate alone, larger, in the middle of its card.
             ph = 200 * u
             pw = t.plate_width(ph)
-            t.plate(p, QRectF(card.center().x() - pw / 2, card.center().y() - ph / 2, pw, ph), bib)
+            top = card.center().y() - ph / 2
+            axis = self.card_axis(card, top, right)
+            t.plate(p, QRectF(axis - pw / 2, top, pw, ph), bib)
             return
         ph = 150 * u
         pw = t.plate_width(ph)
-        t.plate(p, QRectF(card.center().x() - pw / 2, card.y() + 44 * u, pw, ph), bib)
+        axis = self.card_axis(card, card.y() + 44 * u, right)
+        t.plate(p, QRectF(axis - pw / 2, card.y() + 44 * u, pw, ph), bib)
         rect = QRectF(card.x() + 24 * u, card.y() + 220 * u, card.width() - 48 * u, 80 * u)
-        f = t.scaled(t.font(50 * u, t.BOLD), self.names_scale([name], rect.width(), 50 * u))
-        t.text(p, rect, t.fit_name(name, rect.width(), f), f, t.TEXT, CENTER)
+        f = t.font(50 * u, t.BOLD)
+        f = t.scaled(f, self.names_scale([name], self.line_room(rect, f, card), 50 * u))
+        shown = t.fit_name(name, self.line_room(rect, f, card), f)
+        self.card_line(p, rect, shown, f, t.TEXT, card, axis)
 
     def _remaining(self, p: QPainter, side: QRectF, y: float, n: int) -> None:
         """How many are left, then who went before the last one out."""
@@ -2522,13 +2676,27 @@ FINISH_PLANS = ((136, 2), (112, 2), (112, 3))
 # The least result whose rows share the page: a smaller one is set as
 # this many places would be, so a podium of three is not one huge band.
 FINISH_FILL_LEAST = 5
+# Between a place and its row on the result, as the table's place stands
+# left of its row.
+PLACE_GAP = 20
+# The places the rows below the podium may show (FINISH_PLANS' last plan
+# holds 27). Until a result is decided its place column is as wide as the
+# widest of them, so the rows hold still while a Win-and-Out's bells
+# decide its places; a decided result's places stand, so its column is as
+# wide as they need.
+REST_PLACES = range(4, 28)
+# Between an entry and its row's rounded right end, as on a list's rows.
+ROW_END_PAD = 18
 
 
 class FinishPage(Page):
     """The result of a race placed by its finish: a podium of three, the rest in columns.
 
-    A points race never comes here: its standings table stays up to the
-    end and reads as the result once stamped (``StandingsPage.ordinals``).
+    Every place is a rider row (design section 10), its place standing
+    left of it as on the table: the podium's bars are the accent, as
+    1st is, and the rest are neutral. A points race never comes here:
+    its standings table stays up to the end and reads as the result
+    once stamped (``StandingsPage.ordinals``).
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -2539,6 +2707,8 @@ class FinishPage(Page):
         self.g = 1.0
         # The last growth and what it was worked out for, as on the start list.
         self._growth: tuple[tuple, float] | None = None
+        # The places the rows below the podium measure their column by.
+        self.rest_places: list[int] | range = REST_PLACES
 
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Finish = self.data
@@ -2557,40 +2727,41 @@ class FinishPage(Page):
             if math.ceil(len(rest) / cols) <= per_col:
                 break
         rest = rest[: cols * per_col]
+        decided = d.header.status in DECIDED
+        self.rest_places = [pl.place for pl in rest] if decided and rest else REST_PLACES
         key = (area.width(), area.height(), u, self.rider_label, d)
         if self._growth is None or self._growth[0] != key:
             g = self.growth(area, d, podium, rest, big, cols)
             self._growth = ((*key[:-1], copy.deepcopy(d)), g)
         self.g = g = self._growth[1]
         big_h = big * u * g
-        name_x = area.x() + 230 * u * g
-        podium_rect = QRectF(name_x, y, area.right() - name_x, big_h - 28 * u * g)
+        teams = any(pl.entry.color for pl in podium)
+        entry = self.podium_rect(area, y, big, g, teams)
         self.team_fill = TEAM_FILL
         podium_scale = self.entry_scale(
             [pl.entry for pl in podium],
-            podium_rect,
+            entry,
             64 * u * g,
             False,
             laps=[pl.laps for pl in podium],
         )
+        place_f = t.font(72 * u * g, t.HEAVY, tabular=True)
+        dpr = self.devicePixelRatioF()
         for pl in podium:
-            row = QRectF(area.x() - 20 * u, y, area.width() + 40 * u, big_h - 14 * u * g)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.CARD)
-            p.drawRoundedRect(row, 14 * u, 14 * u)
+            band = self.podium_band(area, y, big, g)
+            bar = t.ACCENT.name()
+            team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
             color = t.ACCENT if pl.place == 1 else t.TEXT
             t.text(
                 p,
-                QRectF(area.x() + 8 * u, y, 200 * u * g, big_h - 14 * u * g),
+                QRectF(area.x(), y, band.x() - area.x(), band.height()),
                 ordinal(pl.place),
-                t.font(72 * u * g, t.HEAVY, tabular=True),
+                place_f,
                 color,
             )
             self.entry_line(
                 p,
-                # The entry fills its band less a margin, so the podium's plates
-                # are a size with the names beside them.
-                QRectF(name_x, y + 7 * u * g, area.right() - name_x, big_h - 28 * u * g),
+                entry.translated(0, y - area.y()),
                 pl.entry,
                 64 * u * g,
                 two_line_names=False,
@@ -2606,12 +2777,13 @@ class FinishPage(Page):
         col_w = (area.width() - gap * (cols - 1)) / cols
         rh = min(84 * u * g, (area.bottom() - y) / per_col)
         rest = self.blocks_alone(rest)
+        teams = any(pl.entry.color for pl in rest)
         # Blocks alone in two columns: at their names, so the lap chips
         # sit beside them rather than at the far end of a bar.
         self.team_fill = 0.0
         scale = self.entry_scale(
             [pl.entry for pl in rest],
-            self._small_name_rect(QRectF(0, y, col_w, rh)),
+            self._small_name_rect(QRectF(0, y, col_w, rh), teams),
             38 * u * g,
             False,
             laps=[pl.laps for pl in rest],
@@ -2620,7 +2792,29 @@ class FinishPage(Page):
             c, r = divmod(i, per_col)
             x = area.x() + c * (col_w + gap)
             ry = y + r * rh
-            self.small_placing(p, QRectF(x, ry, col_w, rh), pl, scale)
+            self.small_placing(p, QRectF(x, ry, col_w, rh), pl, scale, teams)
+
+    def podium_band(self, area: QRectF, y: float, big: float, g: float) -> QRectF:
+        """A podium row at growth ``g``: from just past the widest podium place to the page's edge."""
+        u = self.u
+        f = t.font(72 * u * g, t.HEAVY, tabular=True)
+        left = area.x() + max(t.text_width(ordinal(k), f) for k in (1, 2, 3)) + PLACE_GAP * u * g
+        return QRectF(left, y, area.right() - left, (big - 14) * u * g)
+
+    def podium_rect(
+        self, area: QRectF, y: float, big: float, g: float, teams: bool = False
+    ) -> QRectF:
+        """A podium entry at growth ``g``: its row less a margin, clear of the bar at its largest.
+
+        The entry fills its row less a margin, so the podium's plates are
+        a size with the names beside them.
+        """
+        u = self.u
+        band = self.podium_band(area, y, big, g)
+        h = (big - 28) * u * g
+        lead = self.bar_lead(band.height(), h, 64 * u * g, teams)
+        x = band.x() + lead
+        return QRectF(x, y + 7 * u * g, max(0.0, band.right() - ROW_END_PAD * u - x), h)
 
     def growth(
         self,
@@ -2652,6 +2846,8 @@ class FinishPage(Page):
         col_w = (area.width() - gap * (cols - 1)) / cols
         alone = self.blocks_alone(rest)
         per_col = max(1, math.ceil(len(rest) / cols))
+        teams = any(pl.entry.color for pl in podium)
+        rest_teams = any(pl.entry.color for pl in alone)
 
         def rest_h(g: float) -> float:
             below = area.bottom() - area.y() - (3 * big + 30) * u * g
@@ -2662,13 +2858,11 @@ class FinishPage(Page):
             if alone and rest_h(g) - 12 * u * g < rest_h(1.0) - 12 * u:
                 g = max(1.0, g * 0.96)
                 continue
-            name_x = area.x() + 230 * u * g
-            podium_rect = QRectF(name_x, 0, area.right() - name_x, (big - 28) * u * g)
             self.team_fill = TEAM_FILL
             whole = (
                 self.entry_scale(
                     [pl.entry for pl in podium],
-                    podium_rect,
+                    self.podium_rect(area, 0, big, g, teams),
                     64 * u * g,
                     False,
                     laps=[pl.laps for pl in podium],
@@ -2678,7 +2872,7 @@ class FinishPage(Page):
             if whole and alone:
                 self.g = g
                 self.team_fill = 0.0
-                rest_rect = self._small_name_rect(QRectF(0, 0, col_w, rest_h(g)))
+                rest_rect = self._small_name_rect(QRectF(0, 0, col_w, rest_h(g)), rest_teams)
                 whole = (
                     self.entry_scale(
                         [pl.entry for pl in alone],
@@ -2701,22 +2895,48 @@ class FinishPage(Page):
             replace(pl, entry=replace(pl.entry, names=[])) if pl.entry.color else pl for pl in rest
         ]
 
-    def _small_name_rect(self, r: QRectF) -> QRectF:
-        u = self.u * self.g
-        return QRectF(r.x() + 120 * u, r.y() + 6 * u, r.width() - 120 * u, r.height() - 12 * u)
+    def _rest_place_font(self) -> QFont:
+        return t.font(38 * self.u * self.g, t.BOLD, tabular=True)
 
-    def small_placing(self, p: QPainter, r: QRectF, pl: Placing, scale: float) -> None:
+    def rest_band(self, r: QRectF) -> QRectF:
+        """The row below the podium in the slot ``r``: past the widest place, to the column's end."""
+        f = self._rest_place_font()
+        place_w = max(t.text_width(ordinal(k), f) for k in self.rest_places)
+        left = r.x() + place_w + PLACE_GAP * self.u * self.g
+        gap = band_gap(r.height(), self.u)
+        return QRectF(left, r.y() + gap / 2, r.right() - left, r.height() - gap)
+
+    def _small_name_rect(self, r: QRectF, teams: bool = False) -> QRectF:
         u = self.u * self.g
+        band = self.rest_band(r)
+        h = r.height() - 12 * u
+        x = band.x() + self.bar_lead(band.height(), h, 38 * u, teams)
+        return QRectF(x, r.y() + 6 * u, max(0.0, band.right() - ROW_END_PAD * self.u - x), h)
+
+    def small_placing(
+        self, p: QPainter, r: QRectF, pl: Placing, scale: float, teams: bool = False
+    ) -> None:
+        u = self.u * self.g
+        band = self.rest_band(r)
+        team_rows.paint_band(
+            p,
+            band,
+            team_rows.RIDER_BAR,
+            self.u,
+            slant=t.SLANT,
+            texture=self.texture,
+            dpr=self.devicePixelRatioF(),
+        )
         t.text(
             p,
-            QRectF(r.x(), r.y(), 110 * u, r.height()),
+            QRectF(r.x(), r.y(), band.x() - r.x(), r.height()),
             ordinal(pl.place),
-            t.font(38 * u, t.BOLD, tabular=True),
+            self._rest_place_font(),
             t.MUTED,
         )
         self.entry_line(
             p,
-            self._small_name_rect(r),
+            self._small_name_rect(r, teams),
             pl.entry,
             38 * u,
             two_line_names=False,

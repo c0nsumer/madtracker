@@ -1222,9 +1222,11 @@ def test_the_result_stamp_is_at_the_floor(qtbot, drawn, status):
 
 
 def _podium_width(page) -> float:
-    """The width of the result's podium rows beside their places, at the page's growth."""
-    area = page.margin_rect()
-    return area.right() - (area.x() + 230 * page.u * page.g)
+    """The width of a podium entry of teams, inside its row, at the page's growth."""
+    from madtracker.board import pages
+
+    big = pages.FINISH_PLANS[0][0]
+    return page.podium_rect(page.margin_rect(), 0, big, page.g, teams=True).width()
 
 
 def test_one_long_team_name_does_not_widen_every_block(qtbot, monkeypatch, painted):

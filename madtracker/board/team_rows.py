@@ -190,6 +190,17 @@ def clearance(rh: float, rise: float, u: float) -> float:
     return max(0.0, lean - (ROW_PAD - SLANT_AIR) * u)
 
 
+def bar_clear(row: QRectF, top: float, u: float) -> float:
+    """The least x a plate or a line of type whose top is at ``top`` starts at on ``row``.
+
+    SLANT_AIR right of the swatch's slanted edge at that height, where it
+    leans nearest. A card's content is set centered, not after ROW_PAD,
+    so a short name stays on the card's axis and only a long one keeps
+    to this edge.
+    """
+    return row.left() + (SWATCH_W + SLANT_AIR) * u + t.SLANT * (row.bottom() - top)
+
+
 def slant_shift(rh: float, surname_px: float, u: float) -> float:
     """How far right the surnames stand to keep their capitals clear of the swatch.
 

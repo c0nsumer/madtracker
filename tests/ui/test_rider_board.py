@@ -341,3 +341,229 @@ def test_the_rider_sizes_design_section_10_states_at_1080(qtbot, drawn):
         totals = {px for s, _r, px, _c in drawn if s in {str(r.total) for r in rows}}
         assert totals == {total_px}, n
         assert {px for s, _r, px, _c in drawn if s in SHORT} == {name_px}, n
+
+
+# Elimination and the result -------------------------------------------------
+
+ELIM = P.Header(title="Elimination", group="Cat 1/2", status="3 of 12 out")
+FINAL = P.Header(title="Scratch Race", group="Cat 1/2", status="Final")
+
+
+def elimination(n: int, long: bool = False, out_before: int = 2) -> P.Elimination:
+    es = [rider(i, long) for i in range(n + 1 + out_before)]
+    return P.Elimination(
+        header=ELIM, remaining=es[:n], last_eliminated=es[n], eliminated=es[n + 1 :]
+    )
+
+
+def result(n: int, long: bool = False, header: P.Header = FINAL) -> P.Finish:
+    return P.Finish(header=header, placings=[P.Placing(i + 1, rider(i, long)) for i in range(n)])
+
+
+def record_texts(monkeypatch) -> list[tuple]:
+    """Every line of text: its ink's box from its capitals' top, its size, color and device.
+
+    The ink's left edge follows the line's alignment, so a centered name
+    is measured where it is drawn, not where its rect starts.
+    """
+    from PySide6.QtCore import Qt
+
+    from madtracker.board import theme as t
+
+    seen: list[tuple] = []
+    text = t.text
+    left_v = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+    def record(p, rect, s, f, color, align=left_v, *a, **k):
+        used = text(p, rect, s, f, color, align, *a, **k)
+        fm = QFontMetricsF(f)
+        if align & Qt.AlignmentFlag.AlignHCenter:
+            left = rect.center().x() - used / 2
+        elif align & Qt.AlignmentFlag.AlignRight:
+            left = rect.right() - used
+        else:
+            left = rect.left()
+        top = rect.center().y() + (fm.ascent() - fm.descent()) / 2 - fm.capHeight()
+        ink = QRectF(left, top, used, fm.capHeight())
+        seen.append((s, ink, f.pixelSize(), QColor(color).name(), p.device()))
+        return used
+
+    monkeypatch.setattr(t, "text", record)
+    return seen
+
+
+ROW_PAGES = [("elimination", n) for n in (1, 3, 4, 6, 8, 14)] + [
+    ("finish", n) for n in (3, 8, 16, 24)
+]
+
+
+def _row_data(layout: str, n: int, long: bool = False):
+    return elimination(n, long) if layout == "elimination" else result(n, long)
+
+
+@pytest.mark.parametrize("n", [1, 3, 4, 6, 8, 14])
+def test_elimination_rows_and_cards_take_the_row_shape(qtbot, monkeypatch, n):
+    """The riders still in, as cards or as rows, and the last-out card are
+    each painted by the Madison's band: square left end, rounded right end,
+    the bar flush left at the board's slant, the fade and the texture. A
+    rider still in has the neutral bar: an elimination has no leader."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "elimination", elimination(n))
+    page = w.pages["elimination"]
+    u = page.u
+    assert len(bands) == n + 1
+    assert {b["slant"] for b in bands} == {t.SLANT}
+    assert all(b["texture"] is page.texture for b in bands)
+    assert [b["color"] for b in bands[:n]] == [team_rows.RIDER_BAR] * n
+    bands.clear()
+    page.fresh = False
+    img = page.grab().toImage()
+    bar = QColor(team_rows.RIDER_BAR)
+    for b in bands[:n]:
+        row = b["row"]
+        foot = img.pixelColor(int(row.left() + team_rows.SWATCH_W * u / 2), int(row.bottom() - 3))
+        assert _close(foot, bar, 24), foot.name()
+        corner = img.pixelColor(int(row.left() + 1), int(row.top() + 1))
+        assert _close(corner, bar, 24), corner.name()
+        past = img.pixelColor(
+            int(row.left() + team_rows.SWATCH_W * u + 6 * u), int(row.bottom() - 3)
+        )
+        assert not _close(past, bar, 24)
+        right = img.pixelColor(int(row.right() - 1), int(row.top() + 1))
+        assert _close(right, t.BG, 6), right.name()
+
+
+@pytest.mark.parametrize("fresh", [True, False], ids=["eliminated", "last-out"])
+def test_the_eliminated_card_bar_is_the_out_color(qtbot, monkeypatch, drawn, fresh):
+    """The last-out card is a rider row whose bar is the out color. While
+    the bell's news is fresh the card keeps its red treatment, the red
+    edge and the Eliminated label; settled, it reads Last out without
+    the edge."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "elimination", elimination(4))
+    page = w.pages["elimination"]
+    page.fresh = fresh
+    bands.clear()
+    drawn.clear()
+    img = page.grab().toImage()
+    u = page.u
+    card = bands[-1]
+    assert card["color"] == t.OUT.name()
+    assert card["slant"] == t.SLANT and card["texture"] is page.texture
+    row = card["row"]
+    foot = img.pixelColor(int(row.left() + team_rows.SWATCH_W * u / 2), int(row.bottom() - 4 * u))
+    assert _close(foot, t.OUT, 24), foot.name()
+    edge = img.pixelColor(int(row.right() - 3 * u), int(row.center().y()))
+    assert _close(edge, t.OUT, 40) == fresh, edge.name()
+    label = "ELIMINATED" if fresh else "LAST OUT"
+    assert [c for s, _r, _px, c in drawn if s == label] == [(t.OUT if fresh else t.MUTED).name()]
+
+
+def test_the_podium_bars_are_the_accent_and_the_rest_neutral(qtbot, monkeypatch):
+    """Every place is a rider row; the podium's three bars are the accent,
+    as 1st is, and the rest neutral. A venue's accent follows."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "finish", result(8))
+    page = w.pages["finish"]
+    accent = t.ACCENT.name()
+    assert [b["color"] for b in bands] == [accent] * 3 + [team_rows.RIDER_BAR] * 5
+    assert {b["slant"] for b in bands} == {t.SLANT}
+    assert all(b["texture"] is page.texture for b in bands)
+    bands.clear()
+    w.set_accent("#3d8bff")
+    try:
+        w.grab()
+        assert [b["color"] for b in bands[:3]] == [t.ACCENT.name()] * 3 != [accent] * 3
+    finally:
+        w.set_accent(None)
+    bands.clear()
+    render(qtbot, "finish", result(24))
+    assert len(bands) == 24
+
+
+def test_the_result_sizes_design_section_10_states_at_1080(qtbot, drawn):
+    """Three places of a usual length set their names at 112 px against
+    the base 64, and six places at 98 and 58 against 64 and 38."""
+    names = [*USUAL, "Fenna Tamsk"]
+    for n, podium_px, rest_px in ((3, 112, None), (6, 98, 58)):
+        data = P.Finish(
+            header=FINAL,
+            placings=[
+                P.Placing(i + 1, P.Entry(bibs=[str(i + 1)], names=[names[i]])) for i in range(n)
+            ],
+        )
+        drawn.clear()
+        render(qtbot, "finish", data)
+        assert {px for s, _r, px, _c in drawn if s in names[:3]} == {podium_px}, n
+        if rest_px:
+            assert {px for s, _r, px, _c in drawn if s in names[3:n]} == {rest_px}, n
+
+
+def test_an_undecided_results_rows_hold_still_as_its_places_are_decided(qtbot, monkeypatch):
+    """A Win-and-Out shows its places as the bells decide them: the rows
+    below the podium keep one place column, so a tenth place decided
+    never moves the rows before it."""
+    bands = record_bands(monkeypatch)
+    lefts = set()
+    for n in range(4, 13):
+        header = P.Header(title="Win-and-Out", group="Cat 1/2", status=f"{n} of 12 places")
+        bands.clear()
+        render(qtbot, "finish", result(n, header=header))
+        lefts.add(round(bands[3]["row"].left(), 3))
+    assert len(lefts) == 1
+
+
+@pytest.mark.parametrize("long", [False, True], ids=["usual", "long"])
+@pytest.mark.parametrize("label", ["bibs_names", "names", "bibs"])
+@pytest.mark.parametrize(("layout", "n"), ROW_PAGES)
+@pytest.mark.parametrize("size", [(1920, 1080), (1000, 900)])
+def test_the_result_and_elimination_names_clear_the_bar(
+    qtbot, monkeypatch, layout, n, label, long, size
+):
+    """However tall the row or card, every plate, name, and lap chip on it
+    keeps SLANT_AIR from the bar's slanted edge where it leans nearest,
+    and stays inside it; a place stands left of its row, as on the table."""
+    from madtracker.board import team_rows
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    plates = record_plates(monkeypatch)
+    chips = record_chips(monkeypatch)
+    texts = record_texts(monkeypatch)
+    w = render(qtbot, layout, _row_data(layout, n, long), size=size, label=label)
+    page = w.pages[layout]
+    u = page.u
+    air = team_rows.SLANT_AIR * u - 0.01
+    rows = [b["row"] for b in bands]
+    assert rows
+    digits = {t.PLATE_TEXT.name(), t.PLATE_OUT_TEXT.name()}
+    mine = [(s, ink) for s, ink, _px, c, dev in texts if dev is page and c not in digits]
+    ordinals = {P.ordinal(i) for i in range(1, n + 1)}
+    for row in rows:
+        for s, ink in mine:
+            if s in ordinals:
+                # Its own row's, not the next column's.
+                if row.top() <= ink.center().y() <= row.bottom() and ink.center().x() < row.right():
+                    assert ink.right() <= row.left(), s
+                continue
+            if not row.contains(ink.center()):
+                continue
+            assert swatch_air(row, ink.left(), ink.top(), u) >= air, s
+            assert ink.right() <= row.right(), s
+        for pl in [pl for pl in plates if row.contains(pl.center())]:
+            assert swatch_air(row, pl.left(), pl.top(), u) >= air
+            assert row.top() <= pl.top() and pl.bottom() <= row.bottom()
+            assert pl.right() <= row.right()
+        for c, dev in chips:
+            if dev is page and row.contains(c.center()):
+                assert swatch_air(row, c.left(), c.top(), u) >= air
+                assert c.right() <= row.right()
