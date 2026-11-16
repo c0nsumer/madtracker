@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from madtracker.board import theme as t
+from madtracker.board.motion import Clock
 from madtracker.board.payloads import (
     Between,
     Elimination,
@@ -140,6 +141,8 @@ class Page(QWidget):
         super().__init__(parent)
         self.data = None
         self.u = 1.0
+        # The canvas sets the time source; None leaves the page at rest.
+        self.clock: Clock | None = None
         self.rider_label = "bibs_names"
         # The team column of the list being drawn and how its riders are
         # set beside it (``entry_scale`` sets both, see ``team_layout``).

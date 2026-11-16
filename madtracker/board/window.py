@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 from madtracker import APP_NAME
 from madtracker.board import theme as t
 from madtracker.board import wordmark
+from madtracker.board.motion import Clock, default_clock
 from madtracker.board.pages import PAGES, EliminationPage, Page, lap_chip_height
 from madtracker.board.payloads import LAYOUT_PAYLOADS, Header, coerce
 from madtracker.displays import ScreenInfo, friendly_label
@@ -368,6 +369,8 @@ class BoardCanvas(QWidget):
             page = cls(self.stack)
             self.pages[name] = page
             self.stack.addWidget(page)
+        self.clock: Clock | None = None
+        self.set_clock(default_clock())
 
         # The live board (top bar over a layout) and the logo page are two
         # faces of one window, so flipping between them never moves or
@@ -403,6 +406,12 @@ class BoardCanvas(QWidget):
         self._apply_scale()
 
     # Content -----------------------------------------------------------
+
+    def set_clock(self, clock: Clock | None) -> None:
+        """Sets the time source the pages animate by; None draws them at rest."""
+        self.clock = clock
+        for page in self.pages.values():
+            page.clock = clock
 
     def layout_name(self) -> str:
         return self._layout_name
