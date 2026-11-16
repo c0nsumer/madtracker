@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from madtracker.board import payloads as P
 from madtracker.board import sample
 from madtracker.control import formats
-from ui.board_helpers import render, strings
+from ui.board_helpers import record_looks, render, strings
 
 NAMES = dict(sample.GROUP_A + sample.GROUP_B)
 # Color word, then the two riders' bibs, as the demo pairs them.
@@ -1377,21 +1377,6 @@ def test_the_start_list_and_the_table_stand_their_rows_on_the_same_bands(
     w.grab()
     assert [(r.top(), r.bottom()) for r, _s, _z in bands] == start
     assert len(start) == teams
-
-
-def record_looks(monkeypatch) -> list[tuple[str, float, float]]:
-    """Every string the board paints, with the painter's opacity and its shift right."""
-    from madtracker.board import theme
-
-    looks: list[tuple[str, float, float]] = []
-    text = theme.text
-
-    def record(p, rect, s, *args, **kwargs):
-        looks.append((s, p.opacity(), p.transform().dx()))
-        return text(p, rect, s, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "text", record)
-    return looks
 
 
 def turning(qtbot, teams: int = 5):

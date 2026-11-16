@@ -31,9 +31,10 @@ REORDER_MS = 600
 RUSH = 2.0
 # The first score of a race turns the start list into the table before it
 # plays: row by row, top to bottom, as the rotation's changes move, each
-# row's start list fading out as it drifts INTRO_DRIFT units left while
-# the table's row fades in from as far right. The zero table then holds
-# for INTRO_HOLD_MS, so the turn and the first chip read as two moves.
+# table row fading in from INTRO_DRIFT units right while the start list
+# under it fades out (a Madison's drifting as far left). The zero table
+# then holds for INTRO_HOLD_MS, so the turn and the first chip read as
+# two moves.
 INTRO_STAGGER_MS = ROW_STAGGER_MS
 INTRO_FADE_MS = 500
 INTRO_DRIFT = 30

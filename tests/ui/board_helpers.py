@@ -23,3 +23,18 @@ def render(qtbot, layout, data, size=(1920, 1080), bibs=True, label=None):
 
 def strings(drawn) -> list[str]:
     return [s for s, *_ in drawn]
+
+
+def record_looks(monkeypatch) -> list[tuple[str, float, float]]:
+    """Every string the board paints, with the painter's opacity and its shift right."""
+    from madtracker.board import theme
+
+    looks: list[tuple[str, float, float]] = []
+    text = theme.text
+
+    def record(p, rect, s, *args, **kwargs):
+        looks.append((s, p.opacity(), p.transform().dx()))
+        return text(p, rect, s, *args, **kwargs)
+
+    monkeypatch.setattr(theme, "text", record)
+    return looks

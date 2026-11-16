@@ -8,7 +8,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QFontMetricsF
 
 from madtracker.board import payloads as P
-from ui.board_helpers import render, strings
+from ui.board_helpers import record_looks, render, strings
 
 # Invented riders: thirty distinct names of usual lengths, one surname long.
 FIRSTS = ["Arlo", "Bexa", "Corin", "Dalia", "Emrys", "Fenna"]
@@ -842,3 +842,179 @@ def test_no_layout_shows_a_sprint_card(qtbot, drawn, monkeypatch):
     drawn.clear()
     rest.grab()
     assert not chips and "61" in strings(drawn) and "+5" not in strings(drawn)
+
+
+# The start list dissolving into the table ------------------------------------
+
+
+def zero_table(n: int) -> P.Standings:
+    """The table a rider start list dissolves into: every rider at 0, in start-list order."""
+    rows = [
+        P.StandingRow(rank=i + 1, entry=e, sprints=[]) for i, e in enumerate(start_list(n).roster)
+    ]
+    header = replace(RUNNING, status="After Sprint 1 of 8")
+    return P.Standings(header=header, sprint_count=8, rows=rows, current_sprint=1)
+
+
+def dissolving(qtbot, n: int = 9, changes: dict[int, int] | None = None):
+    """A clocked board on a rider start list, and the first sprint's payload."""
+    from madtracker.board.motion import ManualClock
+
+    w = render(qtbot, "pre_race", start_list(n))
+    clock = ManualClock(0.0)
+    w.set_clock(clock)
+    return w, clock, scored(zero_table(n), changes or {2: 5, 4: 3})
+
+
+def intro_end(rows: int = 9) -> float:
+    """When the dissolve and its hold end and the first score plays."""
+    from madtracker.board import scorebug
+
+    return scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS
+
+
+def test_the_rider_start_list_dissolves_into_the_table_before_the_first_chip(
+    qtbot, drawn, monkeypatch
+):
+    from madtracker.board import scorebug
+    from madtracker.board import theme as t
+
+    chips = record_score_chips(monkeypatch)
+    looks = record_looks(monkeypatch)
+    bands = record_bands(monkeypatch)
+    w, clock, data = dissolving(qtbot)
+    picture = w.pages["pre_race"].grab().toImage()
+    w.set_layout("sprint_points", data)
+    page = w.pages["sprint_points"]
+    # At once the page is still the start list, all of it, and no table.
+    clock.advance(0)
+    looks.clear()
+    assert page.grab().toImage() == picture
+    assert not looks and not chips and page.scoring_now()
+    # Partway, the rows come in top to bottom from the right, the
+    # headings with the first; the last row has not begun.
+    looks.clear()
+    frame(w, clock, drawn, 4 * scorebug.INTRO_STAGGER_MS + 80)
+    seen = {s: (op, dx) for s, op, dx in looks}
+    first, last = seen[name(0)], seen[name(4)]
+    assert first[0] > last[0] > 0
+    assert 0 <= first[1] < last[1] <= scorebug.INTRO_DRIFT * page.u
+    assert seen["TOTAL"] == pytest.approx(first)
+    assert name(8) not in seen
+    # The zero table holds in start-list order, no leader and no chip,
+    # until the dissolve and the hold end.
+    looks.clear()
+    bands.clear()
+    at = frame(w, clock, drawn, intro_end() - 1)
+    assert not chips and order(at, list(range(9))) == list(range(9))
+    assert strings(drawn).count("0") == 9
+    assert {(op, dx) for _s, op, dx in looks} == {(1.0, 0.0)}
+    assert len(bands) == 9 and t.ACCENT.name() not in {b["color"] for b in bands}
+    frame(w, clock, drawn, intro_end() + 50)
+    assert [c[0] for c in chips] == ["+5"]
+
+
+def test_the_rider_transition_cancels_on_undo_and_survives_a_redraw(qtbot, drawn, monkeypatch):
+    from madtracker.board import scorebug
+
+    chips = record_score_chips(monkeypatch)
+    # A redraw leaves it dissolving.
+    w, clock, data = dissolving(qtbot)
+    page = w.pages["sprint_points"]
+    w.set_layout("sprint_points", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("sprint_points", replace(data, scored=None))
+    frame(w, clock, drawn, 400)
+    assert page.scoring_now() and not chips
+    frame(w, clock, drawn, intro_end() + 50)
+    assert [c[0] for c in chips] == ["+5"]
+    # A second score waits behind it and the first.
+    chips.clear()
+    w, clock, data = dissolving(qtbot)
+    w.set_layout("sprint_points", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("sprint_points", scored(data, {6: 2}))
+    for ms in (50, scorebug.STEP_MS + 100, SETTLED):
+        frame(w, clock, drawn, intro_end() + ms)
+    assert list(dict.fromkeys(c[0] for c in chips)) == ["+5", "+3", "+2"]
+    # Undo back to the start list.
+    chips.clear()
+    w, clock, data = dissolving(qtbot)
+    page = w.pages["sprint_points"]
+    w.set_layout("sprint_points", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("pre_race", start_list(9))
+    at = frame(w, clock, drawn, 310)
+    assert w.layout_name() == "pre_race" and "0" not in at and name(8) in at
+    assert not page.scoring_now()
+    # A switch to another race shows its table whole, with nothing to play.
+    w, clock, data = dissolving(qtbot)
+    page = w.pages["sprint_points"]
+    w.set_layout("sprint_points", data)
+    frame(w, clock, drawn, 300)
+    w.set_layout("sprint_points", table(9, header=replace(RUNNING, race_id=2)))
+    looks = record_looks(monkeypatch)
+    at = frame(w, clock, drawn, 310)
+    assert "60" in at and {op for _s, op, _dx in looks} == {1.0}
+    assert not page.scoring_now()
+    frame(w, clock, drawn, intro_end() + 50)
+    assert not chips
+
+
+def test_the_rider_transition_keeps_the_tv_and_preview_in_step(qtbot):
+    from madtracker.board.motion import ManualClock
+    from madtracker.board.window import ScoreboardWindow
+
+    data = scored(zero_table(9), {2: 5, 4: 3})
+    clock = ManualClock()
+    boards = []
+    for _ in range(2):
+        w = ScoreboardWindow("Test Velodrome", "Test Event")
+        qtbot.addWidget(w)
+        w.resize(1920, 1080)
+        w.set_clock(clock)
+        w.set_layout("pre_race", start_list(9))
+        w.grab()
+        boards.append(w)
+    for w in boards:
+        w.set_layout("sprint_points", data)
+    tv, preview = boards
+    # The TV paints every step; the preview first paints partway.
+    for at in (100, 200, 300, 450):
+        clock.advance(at - clock.now())
+        if at < 450:
+            tv.grab()
+    assert tv.grab().toImage() == preview.grab().toImage()
+    clock.advance(intro_end() + 300 - clock.now())
+    assert tv.grab().toImage() == preview.grab().toImage()
+
+
+def test_headless_rider_boards_show_the_table_at_once(qtbot, drawn, monkeypatch):
+    chips = record_score_chips(monkeypatch)
+    w = render(qtbot, "pre_race", start_list(9))
+    drawn.clear()
+    w.set_layout("sprint_points", scored(zero_table(9), {2: 5, 4: 3}))
+    w.grab()
+    assert not chips and {"5", "3"} <= set(strings(drawn))
+    assert not w.pages["sprint_points"].scoring_now()
+
+
+def test_a_long_field_dissolves_into_the_page_that_holds_the_first_scorers(
+    qtbot, drawn, monkeypatch
+):
+    """Eighteen riders are two pages of nine; the first sprint's two
+    scorers from the start list's second half bring the table in on its
+    second page, so the stands see their chips."""
+    from madtracker.board import scorebug
+
+    chips = record_score_chips(monkeypatch)
+    w, clock, data = dissolving(qtbot, 18, {12: 5, 14: 3, 1: 2})
+    w.set_layout("sprint_points", data)
+    page = w.pages["sprint_points"]
+    at = frame(w, clock, drawn, intro_end(9) - 1)
+    assert order(at, list(range(18))) == list(range(9, 18))
+    assert {"10", "18"} <= set(at)
+    for ms in (50, scorebug.STEP_MS + 100, SETTLED):
+        frame(w, clock, drawn, intro_end(9) + ms)
+    assert list(dict.fromkeys(c[0] for c in chips)) == ["+5", "+3"]
+    assert not page.scoring_now()
