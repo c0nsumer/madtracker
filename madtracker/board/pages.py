@@ -738,7 +738,15 @@ class PreRacePage(Page):
         )
         for i, e in enumerate(rows):
             row = QRectF(area.x(), area.y() + i * (rh + gap), area.width(), rh)
-            team_rows.paint_band(p, row, e.color, u, slant=t.SLANT)
+            team_rows.paint_band(
+                p,
+                row,
+                e.color,
+                u,
+                slant=t.SLANT,
+                texture=self.texture,
+                dpr=self.devicePixelRatioF(),
+            )
             team_rows.paint_start_riders(
                 p, row, e.bibs, e.names, first_px, last_px, u, self.rider_label
             )
@@ -1905,7 +1913,15 @@ class StandingsPage(Page):
         e = row.entry
         band = QRectF(lay.row_x, y, area.right() - lay.row_x, lay.rh)
         team_rows.paint_band(
-            p, band, e.color, u, sweep=look.sweep, zone_right=lay.zone_r, slant=t.SLANT
+            p,
+            band,
+            e.color,
+            u,
+            sweep=look.sweep,
+            zone_right=lay.zone_r,
+            slant=t.SLANT,
+            texture=self.texture,
+            dpr=self.devicePixelRatioF(),
         )
         # The views' fades scale the painter's opacity, so a row fading in
         # whole (the turn from the start list) keeps its parts in step.

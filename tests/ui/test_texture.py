@@ -136,6 +136,26 @@ def test_the_brush_keeps_its_pattern_fixed_to_the_origin(qapp):
     assert all(c.alpha() <= 90 and c.red() > 0 and c.green() == 0 for c in ink)
 
 
+def test_the_brush_paints_the_cell_pixel_for_pixel_at_any_pixel_ratio(qapp):
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainter
+
+    tex = texture.Texture(None)
+    for dpr in (1.0, 1.5, 2.0):
+        img = QImage(round(300 * dpr), round(150 * dpr), QImage.Format.Format_ARGB32_Premultiplied)
+        img.setDevicePixelRatio(dpr)
+        img.fill(Qt.GlobalColor.black)
+        p = QPainter(img)
+        p.fillRect(QRectF(0, 0, 300, 150), tex.brush(1.0, dpr, QColor("white"), QPointF(0, 0)))
+        p.end()
+        cell = tex.cell(1.0, dpr)
+        for y in range(0, img.height(), 2):
+            for x in range(0, img.width(), 2):
+                a = _alpha(cell, x, y)
+                if a in (0, 255):
+                    assert abs(img.pixelColor(x, y).red() - a) <= 8, (dpr, x, y)
+
+
 def test_cells_and_brushes_are_cached(qapp, monkeypatch):
     tex = texture.Texture(None)
     built = []

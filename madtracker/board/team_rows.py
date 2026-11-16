@@ -6,21 +6,28 @@ and the fade carries the color under the first rider without putting
 type on a colored ground. The row's left end is square; the swatch's
 right edge, the fade's start, and the color view's moving edge lean at
 the board's slant (``theme.SLANT``), the score chip's angle, on the
-start list and the standings table alike. Every size is in design
-units, multiplied by the page's ``u``.
+start list and the standings table alike. The venue's texture lies
+faint on the fade and tone on tone on the solid color, fixed to the
+row's top left (design section 10). Every size is in design units,
+multiplied by the page's ``u``.
 """
+
+import math
+import weakref
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFontMetricsF,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPolygonF,
 )
 
+from madtracker.board import texture as tx
 from madtracker.board import theme as t
 
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -72,6 +79,13 @@ BIBS_ONLY_PLATE_MOST = 170
 # the first name: clear of the first name's descenders, close enough that
 # the two lines read as one rider.
 STACK_GAP = 0.30
+# The fade's textured layers a texture keeps: every team of a page in
+# both the start list's and the table's row size, with room for a resize.
+FADE_LAYERS_KEPT = 48
+
+# Each texture's fade layers, keyed by row size, color, scale and slant;
+# a venue's new texture starts with none.
+_fade_layers: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def split_name(full: str) -> tuple[str, str]:
@@ -253,6 +267,63 @@ def _across(row: QRectF, x: float, length: float, slant: float) -> QLinearGradie
     return QLinearGradient(x, y, x + k, y + k * slant)
 
 
+def _fade(
+    row: QRectF, color: QColor, u: float, slant: float, share: float = 1.0
+) -> QLinearGradient:
+    """The fade from the swatch's edge, its alphas scaled by ``share``.
+
+    It starts at the swatch's edge and is gone FADE_END_AT of the row's
+    width from its left end, measured across its middle.
+    """
+    start = swatch_edge(row, u, slant)
+    length = max(1.0, row.width() * FADE_END_AT - (start - row.left()))
+    mid = (row.width() * FADE_MID_AT - (start - row.left())) / length
+    fade = _across(row, start, length, slant)
+    fade.setColorAt(0, _tinted(color, FADE_EDGE * share))
+    fade.setColorAt(min(max(mid, 0.0), 1.0), _tinted(color, FADE_MID * share))
+    fade.setColorAt(1, _tinted(color, 0.0))
+    return fade
+
+
+def _build_fade_layer(
+    texture: tx.Texture, w: float, h: float, color: QColor, u: float, dpr: float, slant: float
+) -> QImage:
+    """The texture in ``color`` over a ``w`` by ``h`` row's fade, at FADE_SHARE of its alpha.
+
+    The layer's top left is the row's, and it reaches as far right as the
+    fade does at the row's top.
+    """
+    row = QRectF(0, 0, w, h)
+    reach = QRectF(0, 0, min(w, w * FADE_END_AT + run(row, slant) / 2), h)
+    image = QImage(
+        max(1, math.ceil(reach.width() * dpr)),
+        max(1, math.ceil(h * dpr)),
+        QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    image.setDevicePixelRatio(dpr)
+    image.fill(Qt.GlobalColor.transparent)
+    p = QPainter(image)
+    p.fillRect(reach, texture.brush(u, dpr, color, QPointF(0, 0)))
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+    p.fillRect(reach, QBrush(_fade(row, color, u, slant, tx.FADE_SHARE)))
+    p.end()
+    return image
+
+
+def _fade_layer(
+    texture: tx.Texture, row: QRectF, color: QColor, u: float, dpr: float, slant: float
+) -> QImage:
+    layers = _fade_layers.setdefault(texture, {})
+    key = (row.width(), row.height(), color.rgba(), u, dpr, slant)
+    layer = layers.get(key)
+    if layer is None:
+        if len(layers) >= FADE_LAYERS_KEPT:
+            del layers[next(iter(layers))]
+        layer = _build_fade_layer(texture, row.width(), row.height(), color, u, dpr, slant)
+        layers[key] = layer
+    return layer
+
+
 def paint_band(
     p: QPainter,
     row: QRectF,
@@ -261,6 +332,8 @@ def paint_band(
     sweep: float = 0.0,
     zone_right: float | None = None,
     slant: float = 0.0,
+    texture: tx.Texture | None = None,
+    dpr: float = 1.0,
 ) -> None:
     """A team's row: the band, the solid swatch, and the fade under the first rider.
 
@@ -271,6 +344,12 @@ def paint_band(
     the fill's end, and its light edge at one angle, and the fill's end
     leans no further right than ``zone_right``. A dark color has no ring;
     the riders' names carry a dark team (design section 10).
+
+    ``texture`` lies on the fade in the row's color, as strong as the
+    fade times FADE_SHARE, and on the solid color one tone darker; it is
+    fixed to the row's top left, so a sweep reveals it and never moves
+    it. ``dpr`` is the display's pixel ratio, so it draws pixel for pixel.
+    Neither the fade nor the fill reaches the figures, so neither does it.
     """
     shape = band_shape(row, u)
     sweep = min(1.0, max(0.0, sweep))
@@ -280,22 +359,22 @@ def paint_band(
     p.drawPath(shape)
     if color:
         c = QColor(color)
-        # The fade starts at the swatch's edge and is gone FADE_END_AT of
-        # the row's width from its left end, measured across its middle.
         start = swatch_edge(row, u, slant)
-        length = max(1.0, row.width() * FADE_END_AT - (start - row.left()))
-        mid = (row.width() * FADE_MID_AT - (start - row.left())) / length
-        fade = _across(row, start, length, slant)
-        fade.setColorAt(0, _tinted(c, FADE_EDGE))
-        fade.setColorAt(min(max(mid, 0.0), 1.0), _tinted(c, FADE_MID))
-        fade.setColorAt(1, _tinted(c, 0.0))
-        p.setBrush(QBrush(fade))
+        p.setBrush(QBrush(_fade(row, c, u, slant)))
         p.drawPath(shape)
+        if texture is not None:
+            p.drawImage(row.topLeft(), _fade_layer(texture, row, c, u, dpr, slant))
 
         # As ``fill_shape`` draws it, from the outline already made.
         lead = _lead(row, u, sweep, zone_right, slant)
+        fill = _part(row, u, upto(row, lead, slant))
         p.setBrush(c)
-        p.drawPath(_part(row, u, upto(row, lead, slant)))
+        p.drawPath(fill)
+        if texture is not None:
+            tone = c.darker(tx.SOLID_DARKER)
+            tone.setAlphaF(tx.SOLID_ALPHA)
+            p.setBrush(texture.brush(u, dpr, tone, row.topLeft()))
+            p.drawPath(fill)
         if 0 < sweep < 1:
             edge = SWEEP_EDGE * u
             light = _across(row, lead - edge, edge, slant)

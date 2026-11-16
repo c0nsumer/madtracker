@@ -438,6 +438,154 @@ def test_the_color_is_the_part_left_of_its_edge_on_every_row_of_every_board(qapp
                 assert box.right() <= zone + 0.5, (height, n, i, sweep)
 
 
+# The texture -------------------------------------------------------------------
+
+
+def _diff(a: QImage, b: QImage, x0: float, x1: float, rows: QRectF = ROW) -> list[int]:
+    """How far apart two renders are at each pixel of columns ``x0`` to ``x1`` of ``rows``."""
+    return [
+        sum(
+            abs(p - q)
+            for p, q in zip(
+                a.pixelColor(x, y).getRgb()[:3], b.pixelColor(x, y).getRgb()[:3], strict=True
+            )
+        )
+        for x in range(int(x0), int(x1))
+        for y in range(int(rows.top()), int(rows.bottom()))
+    ]
+
+
+def _follows(img: QImage, tex, x0: float, x1: float, color: QColor) -> int:
+    """How many pixels of the fill, columns ``x0`` to ``x1``, show ``tex``'s shapes.
+
+    Asserts the shapes are darker than ``color``, the bare fill is
+    ``color``, and both fall where the texture's cell, anchored at the
+    row's top left, puts them.
+    """
+    cell = tex.cell(1.0, 1.0)
+    dark = 0
+    for x in range(int(x0), int(x1)):
+        for y in range(int(ROW.top()) + 1, int(ROW.bottom()) - 1):
+            a = cell.pixelColor(
+                int(x - ROW.left()) % cell.width(), int(y - ROW.top()) % cell.height()
+            )
+            c = img.pixelColor(x, y)
+            if a.alpha() == 0:
+                assert _close(c, color, 1), (x, y)
+            elif a.alpha() == 255:
+                assert c.lightness() < color.lightness(), (x, y)
+                dark += 1
+    return dark
+
+
+def test_the_texture_shows_on_the_fade_and_fades_with_it(qapp):
+    from madtracker.board import team_rows, texture
+    from madtracker.board import theme as t
+
+    plain = _band(slant=t.SLANT)
+    tex = texture.Texture(None)
+    img = _band(slant=t.SLANT, texture=tex)
+    run = t.SLANT * ROW.height()
+    span = tex.cell(1.0, 1.0).width() * 2
+    near_x = ROW.left() + team_rows.SWATCH_W + run + 2
+    near = _diff(img, plain, near_x, near_x + span)
+    half_x = ROW.left() + ROW.width() * 0.5
+    half = _diff(img, plain, half_x, half_x + span)
+    # Shapes, not a tint: between them the fade is as it was.
+    assert max(near) > max(half) > 0 and min(near) == 0
+    past = ROW.left() + ROW.width() * team_rows.FADE_END_AT + run / 2 + 1
+    assert max(_diff(img, plain, past, ROW.right())) == 0
+
+
+def test_the_texture_shows_tone_on_tone_on_solid_color(qapp):
+    from madtracker.board import team_rows, texture
+    from madtracker.board import theme as t
+
+    tex = texture.Texture(None)
+    zone = ROW.left() + 600
+    img = _band(sweep=1.0, zone_right=zone, slant=t.SLANT, texture=tex)
+    # The swatch, then the color view's fill, short of its slanted end.
+    x0 = ROW.left() + 1
+    x1 = zone - t.SLANT * ROW.height() - team_rows.SWEEP_EDGE
+    assert _follows(img, tex, x0, x1, QColor(RED)) > 200
+
+
+def test_the_texture_stays_fixed_while_the_color_sweeps(qapp):
+    from madtracker.board import team_rows, texture
+    from madtracker.board import theme as t
+
+    tex = texture.Texture(None)
+    zone = ROW.left() + 700
+    part = _band(sweep=0.5, zone_right=zone, slant=t.SLANT, texture=tex)
+    more = _band(sweep=0.9, zone_right=zone, slant=t.SLANT, texture=tex)
+    start = ROW.left() + team_rows.SWATCH_W
+    lead = start + (zone - start) * 0.5
+    x1 = lead - t.SLANT * ROW.height() - team_rows.SWEEP_EDGE
+    # Covered at both sweeps: the same shapes at the same places.
+    assert _follows(part, tex, start, x1, QColor(RED)) > 100
+    assert max(_diff(part, more, start, x1)) == 0
+
+
+def test_a_venue_shape_replaces_the_builtin_stroke(qtbot):
+    from madtracker.board import texture
+    from madtracker.board import theme as t
+    from ui.test_texture import CHEVRON
+
+    w = render(qtbot, "madison", standings(5))
+    clocked(w, color_view_ms())
+    builtin = w.grab().toImage()
+    w.set_texture(texture.first_shape_svg(CHEVRON))
+    page = w.pages["madison"]
+    assert not page.texture.builtin
+    venue = w.grab().toImage()
+    assert builtin != venue
+    zone = 400
+    img = _band(sweep=1.0, zone_right=ROW.left() + zone, slant=t.SLANT, texture=page.texture)
+    assert _follows(img, page.texture, ROW.left() + 1, ROW.left() + zone / 2, QColor(RED)) > 200
+
+
+@pytest.mark.parametrize("view", ["names", "color"])
+def test_no_texture_behind_the_figures(qtbot, view):
+    """The place, laps, penalty, and total read on the bare row."""
+    from PySide6.QtCore import QPoint
+
+    data = standings(5)
+    data.rows[0].penalty = -2
+    w = render(qtbot, "madison", data)
+    clocked(w, color_view_ms() if view == "color" else 0)
+    page = w.pages["madison"]
+    on = w.grab().toImage()
+    page.texture = None
+    off = w.grab().toImage()
+    lay = page._layout[1]
+    at = page.mapTo(w, QPoint(0, 0))
+    rows = QRectF(0, at.y() + lay.rows_top, w.width(), 5 * (lay.rh + lay.gap))
+    assert max(_diff(on, off, 0, at.x() + lay.row_x, rows)) == 0
+    assert max(_diff(on, off, at.x() + lay.zone_r + 1, w.width(), rows)) == 0
+    # The texture is there to be missed.
+    assert max(_diff(on, off, at.x() + lay.row_x, at.x() + lay.zone_r, rows)) > 0
+
+
+def test_texture_layers_are_built_once_per_row_size_and_color(qtbot, monkeypatch):
+    from madtracker.board import rotation, team_rows
+
+    built: list[tuple] = []
+    build = team_rows._build_fade_layer
+
+    def record(texture, w, h, color, u, dpr, slant):
+        built.append((round(w, 3), round(h, 3), QColor(color).name()))
+        return build(texture, w, h, color, u, dpr, slant)
+
+    monkeypatch.setattr(team_rows, "_build_fade_layer", record)
+    w = render(qtbot, "madison", standings(5))
+    clock = clocked(w)
+    step = rotation.cycle_ms(5) / 30
+    for _ in range(30):
+        clock.advance(step)
+        w.grab()
+    assert built and len(built) == len(set(built)) <= 5
+
+
 # The standings table -----------------------------------------------------------
 
 # The design's example: color word, laps, total, in place order.
@@ -488,11 +636,11 @@ def record_bands(monkeypatch, slants: list[float] | None = None):
     bands: list[tuple[QRectF, float, float | None]] = []
     band = team_rows.paint_band
 
-    def record(p, row, color, u, sweep=0.0, zone_right=None, slant=0.0):
+    def record(p, row, color, u, sweep=0.0, zone_right=None, slant=0.0, **kwargs):
         bands.append((QRectF(row), sweep, zone_right))
         if slants is not None:
             slants.append(slant)
-        return band(p, row, color, u, sweep, zone_right, slant)
+        return band(p, row, color, u, sweep, zone_right, slant, **kwargs)
 
     monkeypatch.setattr(team_rows, "paint_band", record)
     return bands

@@ -226,11 +226,10 @@ class Texture:
         key = (u, dpr, color.rgba())
         tinted_brush = self._brushes.get(key)
         if tinted_brush is None:
-            mask = self.cell(u, dpr)
-            tinted = QImage(mask.size(), QImage.Format.Format_ARGB32_Premultiplied)
-            tinted.fill(Qt.GlobalColor.transparent)
+            # A copy of the mask, pixel for pixel: drawing the mask onto a
+            # fresh image would scale it by its pixel ratio.
+            tinted = self.cell(u, dpr).copy()
             p = QPainter(tinted)
-            p.drawImage(0, 0, mask)
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
             p.fillRect(tinted.rect(), color)
             p.end()
