@@ -8,8 +8,10 @@ right edge, the fade's start, and the color view's moving edge lean at
 the board's slant (``theme.SLANT``), the score chip's angle, on the
 start list and the standings table alike. The venue's texture lies
 faint on the fade and tone on tone on the solid color, fixed to the
-row's top left (design section 10). Every size is in design units,
-multiplied by the page's ``u``.
+row's top left (design section 10). A rider's row is the same row with a
+bar for the swatch, in the accent for the leader and neutral for the
+rest (``rider_bar``). Every size is in design units, multiplied by the
+page's ``u``.
 """
 
 import math
@@ -79,6 +81,10 @@ BIBS_ONLY_PLATE_MOST = 170
 # the first name: clear of the first name's descenders, close enough that
 # the two lines read as one rider.
 STACK_GAP = 0.30
+# A rider row's bar: riders have no team colors, so the bar says rank. Every
+# rider's but the leader's is this neutral light gray (the board's muted
+# text), at the strength a team color's fade has.
+RIDER_BAR = "#8f9aab"
 # The fade's textured layers a texture keeps: every team of a page in
 # both the start list's and the table's row size, with room for a resize.
 FADE_LAYERS_KEPT = 48
@@ -105,6 +111,11 @@ def _tinted(color: QColor, alpha: float) -> QColor:
     out = QColor(color)
     out.setAlphaF(alpha)
     return out
+
+
+def rider_bar(rank_or_place: int, accent: QColor) -> str:
+    """A rider row's bar: the accent for the leader, as the leader's place is, else RIDER_BAR."""
+    return accent.name() if rank_or_place == 1 else RIDER_BAR
 
 
 def run(row: QRectF, slant: float) -> float:

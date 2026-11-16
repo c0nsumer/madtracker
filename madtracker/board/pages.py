@@ -90,6 +90,15 @@ def lap_chip_height(u: float) -> float:
     return t.MIN_PX * u / t.CHIP_TYPE
 
 
+def band_gap(pitch: float, u: float) -> float:
+    """The space between two rows of a list ``pitch`` apart.
+
+    It gives way in a dense list, so the plate keeps its size rather than
+    the air around it.
+    """
+    return min(12 * u, pitch * 0.12)
+
+
 class Page(QWidget):
     """Base for one layout: holds the payload, the size unit and how riders are named.
 
@@ -210,7 +219,7 @@ class Page(QWidget):
             # Without the plate the name is the whole row, so it takes the
             # weight the plate had.
             return [(rect, name, t.font(k, t.BOLD), "name")]
-        x = rect.x() + t.plate_width(self.plate_height(h)) + 26 * u
+        x = rect.x() + t.plate_width(self.plate_height(h)) + PLATE_NAME_GAP * u
         return [(QRectF(x, rect.y(), rect.right() - x, h), name, t.font(k, t.SEMI), "name")]
 
     def team_px(self, k: float, size: float, h: float) -> float:
@@ -547,22 +556,49 @@ class Page(QWidget):
         fit = max(1, int(height // (LIST_MIN_PITCH * self.u)))
         return max(1, min(most, -(-count // fit)))
 
+    def bar_lead(self, band_h: float, h: float, size: float) -> float:
+        """How far a rider row's plate, or its name without one, stands from the row's left end.
+
+        Past the bar and ROW_PAD, and as much further as keeps the plate's
+        top and the name's capitals SLANT_AIR from the bar's slanted edge
+        (``team_rows.clearance``), as the Madison start list's riders are:
+        ``band_h`` is the row's height, ``h`` the entry's that the plate
+        is sized in, and ``size`` the name's largest, so a list set
+        smaller never moves its plates or names.
+        """
+        u = self.u
+        shift = team_rows.slant_shift(band_h, size, u)
+        if self.show_bibs:
+            ph = self.plate_height(h)
+            # The name stands a plate's width and its gap further right.
+            beside = shift - t.plate_width(ph) - PLATE_NAME_GAP * u
+            shift = max(team_rows.clearance(band_h, ph / 2, u), beside)
+        return (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
+
     def rows_geometry(
-        self, area: QRectF, count: int, cols: int, pitch_cap: float = 112, name_cap: float = 46
+        self,
+        area: QRectF,
+        count: int,
+        cols: int,
+        pitch_cap: float = 112,
+        name_cap: float = 46,
+        barred: bool = False,
     ) -> tuple[int, float, float, QRectF, tuple[float, float, float, float]]:
-        """``entry_rows``' layout: rows a column, pitch, name size, first entry rect, padding."""
+        """``entry_rows``' layout: rows a column, pitch, name size, first entry rect, padding.
+
+        ``barred`` lays out rider rows, whose entries stand clear of the bar.
+        """
         u = self.u
         col_w = (area.width() - LIST_COL_GAP * u * (cols - 1)) / cols
         fit = max(1, int(area.height() // (LIST_MIN_PITCH * u)))
         per_col = min(fit, math.ceil(count / cols))
         pitch = min(pitch_cap * u, area.height() / per_col)
         size = min(name_cap * u, pitch * LIST_NAME_SHARE)
-        # The band and its padding give way in a dense list, so the plate
-        # keeps its size rather than the air around it.
-        band_gap = min(12 * u, pitch * 0.12)
+        band_h = pitch - band_gap(pitch, u)
         vpad = min(8 * u, pitch * 0.07)
-        pad = (18 * u, vpad, -18 * u, -vpad)
-        inner = QRectF(area.x(), area.y(), col_w, pitch - band_gap).adjusted(*pad)
+        left = self.bar_lead(band_h, band_h - 2 * vpad, size) if barred else 18 * u
+        pad = (left, vpad, -18 * u, -vpad)
+        inner = QRectF(area.x(), area.y(), col_w, band_h).adjusted(*pad)
         return per_col, pitch, size, inner, pad
 
     def team_fit(
@@ -596,6 +632,7 @@ class Page(QWidget):
         pitch_cap: float = 112,
         name_cap: float = 46,
         laps: list[int] | None = None,
+        bar: str | None = None,
     ) -> None:
         """Entries as banded rows in ``cols`` columns, filled top to bottom.
 
@@ -603,14 +640,16 @@ class Page(QWidget):
         a long list sets smaller type in shorter rows; at 24 riders a
         fixed 46 px name would lose its descenders to the next row. Rows never
         go tighter than LIST_MIN_PITCH: what still does not fit is left off,
-        never drawn over itself.
+        never drawn over itself. With ``bar`` the rows are rider rows, the
+        Madison's row with a bar of that color (``team_rows.paint_band``);
+        without it each is a rounded band of ``fill``.
         """
         u = self.u
         if not entries:
             return
         gap = LIST_COL_GAP * u
         per_col, pitch, size, inner, pad = self.rows_geometry(
-            area, len(entries), cols, pitch_cap, name_cap
+            area, len(entries), cols, pitch_cap, name_cap, barred=bar is not None
         )
         col_w = (area.width() - gap * (cols - 1)) / cols
         band_h = inner.height() + pad[1] - pad[3]
@@ -619,15 +658,28 @@ class Page(QWidget):
         for i, entry in enumerate(entries):
             c, r = divmod(i, per_col)
             row = QRectF(area.x() + c * (col_w + gap), area.y() + r * pitch, col_w, band_h)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(fill)
-            p.drawRoundedRect(row, 10 * u, 10 * u)
+            if bar is None:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(fill)
+                p.drawRoundedRect(row, 10 * u, 10 * u)
+            else:
+                team_rows.paint_band(
+                    p,
+                    row,
+                    bar,
+                    u,
+                    slant=t.SLANT,
+                    texture=self.texture,
+                    dpr=self.devicePixelRatioF(),
+                )
             lap = laps[i] if laps and i < len(laps) else 0
             self.entry_line(p, row.adjusted(*pad), entry, size, scale=scale, laps=lap)
 
 
 # Between a team block and its riders' names.
 TEAM_GAP = 28
+# Between a rider's bib plate and the name beside it.
+PLATE_NAME_GAP = 26
 # Between the columns of a list of entries.
 LIST_COL_GAP = 48
 # The most of an entry's width a team block takes for its name at full
@@ -708,7 +760,9 @@ class PreRacePage(Page):
             # A copy, so a payload changed where it stands is not taken for the one measured.
             self._layout = ((*key[:-1], copy.deepcopy(d)), self.list_layout(room, d))
         cols, pitch_cap, name_cap = self._layout[1]
-        self.entry_rows(p, room, d.roster, cols, t.ROW, pitch_cap, name_cap, d.laps)
+        # Rider rows, every bar neutral: a start list has no leader.
+        bar = team_rows.RIDER_BAR
+        self.entry_rows(p, room, d.roster, cols, t.ROW, pitch_cap, name_cap, d.laps, bar)
 
     def team_list(self, p: QPainter, area: QRectF, d: PreRace) -> None:
         """A Madison's teams, one row each: the riders' names lead and the color identifies.
@@ -770,7 +824,9 @@ class PreRacePage(Page):
         best = None
         for cols, pitch_cap, name_cap in plans:
             caps = self.grown_caps(room, d.roster, cols, pitch_cap, name_cap)
-            _per, pitch, size, _inner, _pad = self.rows_geometry(room, count, cols, *caps)
+            _per, pitch, size, _inner, _pad = self.rows_geometry(
+                room, count, cols, *caps, barred=True
+            )
             if best is None:
                 best, least_pitch = (size, cols, caps), pitch
             elif size > best[0] * ONE_COLUMN_GAIN and pitch >= least_pitch:
@@ -804,7 +860,9 @@ class PreRacePage(Page):
             # The rows never come out shorter than the base list's, which
             # would cost the plates what the names gain.
             caps = (max(size / LIST_NAME_SHARE / u, pitch_cap), size / u)
-            _per, _pitch, got, inner, _pad = self.rows_geometry(room, len(roster), cols, *caps)
+            _per, _pitch, got, inner, _pad = self.rows_geometry(
+                room, len(roster), cols, *caps, barred=True
+            )
             if self.entry_scale(roster, inner, got, True, laps) >= 1.0:
                 return caps
             size *= 0.96
@@ -1680,19 +1738,17 @@ class StandingsPage(Page):
             self.paint_overlay(p, area, d)
         self._schedule()
 
-    def row_band(self, p: QPainter, area: QRectF, i: int, y: float, rh: float) -> None:
-        """Every other row on a faint band, so a row reads across the page."""
-        if i % 2:
-            return
-        u = self.u
-        band = QRectF(area.x() - 20 * u, y + 3 * u, area.width() + 40 * u, rh - 6 * u)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(255, 255, 255, 10))
-        p.drawRoundedRect(band, 10 * u, 10 * u)
-
     def rider_table(
         self, p: QPainter, area: QRectF, d: Standings, rows: list, n: int, bottom: float
     ) -> None:
+        """The Points Race and Tempo Race page: a heading row, then a rider row per rider.
+
+        The place stands left of the row, as on the Madison's table. The
+        row is the Madison's, its bar the accent for the leader and
+        neutral for the rest (``team_rows.rider_bar``); the plate and the
+        name stand clear of the bar at their largest (``bar_lead``), and
+        RIDER stands over them.
+        """
         u = self.u
         head_h = 44 * u
         top = area.y()
@@ -1704,14 +1760,18 @@ class StandingsPage(Page):
         entries = [r.entry for r in d.rows]
         fill = (bottom - rows_top) / max(n, RIDER_FILL_LEAST)
         # The entry takes nearly the whole row, so the bib plate keeps its
-        # size in a dense table; the row bands carry the separation.
+        # size in a dense table; the gaps between the rows carry the
+        # separation.
         inset = 0.05
 
         def layout(g: float, reserve: bool = False):
             rh = min(fill, RIDER_ROW_FULL * g)
             cols = rider_columns(area, g, 24 * u, penalized or reserve)
-            rect = QRectF(cols.name_x, rows_top + rh * inset, cols.name_w, rh * (1 - 2 * inset))
-            return rh, cols, rect, min(46 * g, rh * STANDINGS_NAME_SHARE)
+            size = min(46 * g, rh * STANDINGS_NAME_SHARE)
+            h = rh * (1 - 2 * inset)
+            lead = self.bar_lead(rh - band_gap(rh, u), h, size)
+            name_w = max(0.0, cols.name_w - lead)
+            return rh, cols, QRectF(cols.name_x + lead, rows_top + rh * inset, name_w, h), size
 
         # The figures' unit: the page's for nine riders or more; for fewer,
         # as large as the rows allow while every name still fits whole, so
@@ -1745,7 +1805,7 @@ class StandingsPage(Page):
         reach = 120 * u
 
         t.text(p, QRectF(area.x(), top, rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(name_x, top, name_w, head_h), "RIDER", lab, t.MUTED)
+        t.text(p, QRectF(name_rect.x(), top, name_rect.width(), head_h), "RIDER", lab, t.MUTED)
         t.text(
             p,
             QRectF(sprints_x - reach, top, sprints_w - pad + reach, head_h),
@@ -1771,11 +1831,16 @@ class StandingsPage(Page):
         num = t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True)
         self.team_fill = 0.0
         # Measured over every row, not the page's, as the rank and total
-        # columns are, so the names hold still as the page turns.
-        scale = self.entry_scale(entries, name_rect, name_size, True)
+        # columns are, so the names hold still as the page turns, and
+        # beside a PENALTY column, so the first penalty never shrinks them.
+        scale = self.entry_scale(entries, layout(g, reserve=True)[2], name_size, True)
+        band_h = rh - band_gap(rh, u)
+        dpr = self.devicePixelRatioF()
         for i, row in enumerate(rows):
             y = rows_top + i * rh
-            self.row_band(p, area, i, y, rh)
+            band = QRectF(name_x, y + (rh - band_h) / 2, right - name_x, band_h)
+            bar = team_rows.rider_bar(row.rank, t.ACCENT)
+            team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
             cell = QRectF(0, y, 0, rh)
             t.text(
                 p,
@@ -1788,7 +1853,7 @@ class StandingsPage(Page):
             )
             self.entry_line(
                 p,
-                QRectF(name_x, y + rh * inset, name_w, rh * (1 - 2 * inset)),
+                name_rect.translated(0, y - rows_top),
                 row.entry,
                 name_size,
                 two_line_names=True,
