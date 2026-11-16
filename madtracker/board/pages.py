@@ -1058,7 +1058,12 @@ class EliminationPage(Page):
         dpr = self.devicePixelRatioF()
         for i, entry in enumerate(d.remaining):
             r, c = divmod(i, cols)
-            card = QRectF(grid.x() + c * (cw + cg), top + r * (ch + cg), cw, ch)
+            x = grid.x() + c * (cw + cg)
+            if n == 3 and cols == 2 and i == 2:
+                # The third card alone on its row sits under the gap
+                # between the two, so the three read as one group.
+                x = grid.x() + (grid.width() - cw) / 2
+            card = QRectF(x, top + r * (ch + cg), cw, ch)
             team_rows.paint_band(
                 p, card, team_rows.RIDER_BAR, u, slant=t.SLANT, texture=self.texture, dpr=dpr
             )
@@ -1090,9 +1095,10 @@ class EliminationPage(Page):
         Four to six left are two columns of cards: three across are too
         narrow for a name such as M. Vanderbilt-Rochester at the board's
         minimum, and four would leave the fourth alone on a second row.
-        Three left go three across while that keeps their plates as large
-        as two across, and otherwise two and one, as four are, so a
-        narrow board's plates do not shrink at the race's climax.
+        Three left keep four's two columns, two and one with the third
+        centered under the two, unless three across hold a larger plate:
+        the plates are one size from four left to two, so three narrower
+        cards across would gain no plate and cost the names their size.
         """
         u = self.u
         cg = CARD_GAP * u
@@ -1105,7 +1111,7 @@ class EliminationPage(Page):
 
         if n == 3:
             across, two = layout(3, True), layout(2, True)
-            return across if self.card_plate(*across[1:]) >= self.card_plate(*two[1:]) else two
+            return across if self.card_plate(*across[1:]) > self.card_plate(*two[1:]) else two
         return layout(2 if n >= 4 else max(n, 1), n <= 4)
 
     def card_plate(self, cw: float, ch: float) -> float:

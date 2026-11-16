@@ -345,6 +345,76 @@ def test_card_plates_keep_their_size_and_never_shrink_as_riders_go_out(qtbot, mo
     assert heights == sorted(heights), heights
 
 
+def _mid_elimination(remaining: int) -> P.Elimination:
+    """Riders with names of a usual length, which shrink only when their cards narrow."""
+    es = [P.Entry(bibs=[str(i + 1)], names=[MID[i]]) for i in range(remaining + 1)]
+    return P.Elimination(header=HEADER, remaining=es[:remaining], last_eliminated=es[remaining])
+
+
+def _still_racing(drawn, names: list[str]) -> list[tuple[str, QRectF, int]]:
+    """The strings a page drew for the riders still in: their names, whole or in part."""
+    from madtracker.board import theme
+
+    whole = names + [theme.initialed(n) or n for n in names]
+    return [
+        (s, r, px)
+        for s, r, px, _c in drawn
+        if s.rstrip("…") and any(s.rstrip("…") in n for n in whole)
+    ]
+
+
+@pytest.mark.parametrize("bibs", [True, False], ids=["bibs_and_names", "names_only"])
+@pytest.mark.parametrize("size", [(1920, 1080), (3840, 2160), (1440, 1080), (1024, 768)])
+def test_elimination_names_and_plates_never_shrink_as_riders_go_out(
+    qtbot, monkeypatch, drawn, size, bibs
+):
+    """From six left to the winner the names and the plates of the riders
+    still in only ever grow: three left keep four's two columns, two and
+    one, rather than three narrower cards across."""
+    from madtracker.board import theme
+
+    plates: list = []
+    plate = theme.plate
+
+    def record(p, rect, bib, out=False):
+        plates.append((rect.height(), bib, out))
+        return plate(p, rect, bib, out)
+
+    monkeypatch.setattr(theme, "plate", record)
+    names, heights = [], []
+    for n in range(6, 0, -1):
+        plates.clear()
+        drawn.clear()
+        render(qtbot, "elimination", _mid_elimination(n), size=size, bibs=bibs)
+        still = _still_racing(drawn, MID[:n])
+        assert still, n
+        names.append(min(px for _s, _r, px in still))
+        if bibs:
+            heights.append(min(h for h, bib, out in plates if not out and bib != str(n + 1)))
+    assert names == sorted(names), names
+    assert heights == sorted(heights), heights
+
+
+@pytest.mark.parametrize("bibs", [True, False], ids=["bibs_and_names", "names_only"])
+@pytest.mark.parametrize("size", [(1920, 1080), (3840, 2160), (1440, 1080), (1024, 768)])
+def test_three_left_center_the_third_card_under_the_two(qtbot, monkeypatch, size, bibs):
+    from madtracker.board import team_rows
+
+    cards: list[QRectF] = []
+    band = team_rows.paint_band
+
+    def record(p, card, color, *args, **kwargs):
+        if color == team_rows.RIDER_BAR:
+            cards.append(QRectF(card))
+        return band(p, card, color, *args, **kwargs)
+
+    monkeypatch.setattr(team_rows, "paint_band", record)
+    render(qtbot, "elimination", _mid_elimination(3), size=size, bibs=bibs)
+    a, b, c = cards
+    assert abs(a.y() - b.y()) < 0.5 and c.y() >= a.bottom(), "two over one"
+    assert abs(c.center().x() - (a.left() + b.right()) / 2) < 0.5
+
+
 @pytest.mark.parametrize("size", [(1920, 1080), (1440, 900)])
 @pytest.mark.parametrize("remaining", [1, 2, 3, 4])
 def test_the_last_riders_plates_stay_inside_their_cards(qtbot, monkeypatch, size, remaining):
