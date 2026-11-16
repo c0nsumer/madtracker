@@ -451,28 +451,69 @@ def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, total, su
     assert laps < total
 
 
-@pytest.mark.parametrize("teams", [1, 2])
-def test_a_small_tables_totals_keep_their_share_and_its_surnames_stop_at_96(
-    qtbot, drawn, monkeypatch, teams
-):
-    """One or two teams keep the totals at their share of the tall row, as
-    the riders asked; the surnames stop at the start list's largest and
-    fit whole."""
-    from madtracker.board import pages, team_rows
-
-    bands = record_bands(monkeypatch)
-    data = standings(teams)
-    w = render(qtbot, "madison", data)
-    u = w.pages["madison"].u
-    rh = bands[0][0].height()
-    totals = [P.total_text(r.total) for r in data.rows]
-    assert sizes(drawn, totals) == {round(rh * pages.TEAM_FIGURE_SHARE)}
-    places = [str(r.rank) for r in data.rows]
-    assert sizes(drawn, places) == {round(rh * pages.TEAM_FIGURE_SHARE * pages.TEAM_PLACE_SCALE)}
+def table_sizes(qtbot, drawn, data: P.Standings) -> tuple[int, int]:
+    """The total's and the surnames' pixel sizes on a 1080p board showing ``data``."""
+    drawn.clear()
+    render(qtbot, "madison", data)
+    totals = [P.total_text(r.total) for r in data.rows if not r.status]
+    [total] = sizes(drawn, totals)
     [surname_px] = sizes(drawn, surnames(data))
-    assert surname_px <= round(team_rows.START_SURNAME_MOST * u)
-    # Whole: drawn as given, never cut.
+    return total, surname_px
+
+
+@pytest.mark.parametrize("teams", [1, 2])
+def test_a_small_table_never_sets_its_totals_or_surnames_smaller_than_five_teams(
+    qtbot, drawn, teams
+):
+    """Fewer rows get larger type: the totals give way to the surnames in a
+    tall row, but never below the five-team table's, and the usual
+    surnames stand whole at the start list's largest."""
+    from madtracker.board import team_rows
+
+    five = table_sizes(qtbot, drawn, standings(5))
+    data = standings(teams)
+    total, surname_px = table_sizes(qtbot, drawn, data)
+    assert total >= five[0] and surname_px >= five[1]
+    assert surname_px == team_rows.START_SURNAME_MOST
     assert set(surnames(data)) <= set(strings(drawn))
+    # LAPS stops at its cap, under the total.
+    [laps] = sizes(drawn, ["+1"])
+    assert laps <= 96 and laps < total
+
+
+def test_long_surnames_drive_the_figures_to_84_before_they_shrink(qtbot, drawn):
+    from madtracker.board import pages
+
+    data = standings(2)
+    data.rows[0].entry.names = ["Ada Featherstonehaugh-Rochester", "Bo Montgomery-Blackwood"]
+    total, surname_px = table_sizes(qtbot, drawn, data)
+    assert total == pages.TEAM_FIGURE_LEAST
+    assert pages.TEAM_PLACE_SCALE * total == pytest.approx(
+        next(iter(sizes(drawn, ["1", "2"]))), abs=1
+    )
+    # The figures went as far as they go; only then did the surnames shrink.
+    assert surname_px < 96
+    # A short pair's surnames give the figures no reason to give way.
+    total, surname_px = table_sizes(qtbot, drawn, standings(2))
+    assert total > pages.TEAM_FIGURE_LEAST and surname_px == 96
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5])
+def test_the_first_lap_penalty_and_stamp_never_step_the_table_down(qtbot, drawn, teams):
+    """The sizes are decided as though a lap, a penalty, and ordinal places
+    stood, so none of them steps the totals or the surnames down."""
+
+    def data(laps=0, penalty=0, status="After Sprint 2 of 4"):
+        d = standings(teams, status=status)
+        for r in d.rows:
+            r.laps = 0
+        d.rows[0].laps, d.rows[-1].penalty = laps, penalty
+        return d
+
+    start = table_sizes(qtbot, drawn, data())
+    assert table_sizes(qtbot, drawn, data(laps=1)) == start
+    assert table_sizes(qtbot, drawn, data(laps=1, penalty=-20)) == start
+    assert table_sizes(qtbot, drawn, data(laps=1, penalty=-20, status="Final")) == start
 
 
 def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, monkeypatch):

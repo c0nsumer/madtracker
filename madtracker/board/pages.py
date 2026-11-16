@@ -1034,6 +1034,13 @@ TEAM_PLACE_SCALE = 0.85
 TEAM_PLACE_SHARE = 0.14
 # LAPS and PENALTY grow with the row, under the total.
 TEAM_LAPS_SHARE = 0.36
+# LAPS and PENALTY stop growing here, as the surnames do: a lone team's or
+# a pair's tall row would otherwise give their columns the width the
+# surnames need, and the total is the figure the riders read.
+TEAM_LAPS_MOST = 96
+# The least the place and the total give way to, so the surnames fit
+# whole beside them; past that a long surname shrinks instead.
+TEAM_FIGURE_LEAST = 84
 # The riders' surnames, side by side on the row, as a share of its height.
 # They stop growing at the start list's largest surname
 # (``team_rows.START_SURNAME_MOST``): a lone team's or a pair's totals keep
@@ -1585,57 +1592,100 @@ class StandingsPage(Page):
         places = [ordinal(r.rank) if ordinals else str(r.rank) for r in d.rows]
         decided = [ordinal(r.rank) for r in d.rows]
         totals = [total_text(r.total) for r in d.rows if not r.status]
-        big_px = rh * TEAM_FIGURE_SHARE
-        total_f = t.font(big_px, t.HEAVY, tabular=True)
-        # The laps and penalty keep pace with the total, never under the floor.
-        laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
-        num = t.font(max(min(48 * u, rh * 0.7), laps_px), t.BOLD, tabular=True)
-        # A column is as wide as its heading or its widest figure, so each
-        # heading sits over its figures, right edges together. The feed
-        # leaves a status row off the board; a page given one keeps the
-        # word clear of the figures beside it.
-        total_col = max(
-            widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f),
-            t.text_width("TOTAL", lab),
-        )
-        shown_laps = [lap_text(r.laps) for r in d.rows if not r.status]
-        shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
-        laps_col = max(widest([*shown_laps, *LAP_SAMPLES], num), t.text_width("LAPS", lab))
-        pen_col = max(widest([*shown_pens, *PENALTY_SAMPLES], num), t.text_width("PENALTY", lab))
+        lasts = [team_rows.split_name(n)[1] for r in d.rows for n in r.entry.names[:2]]
+        size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
         fig_gap = FIGURE_GAP * u
         total_r = area.right() - TEAM_FIGURE_PAD * u
-        pen_r = total_r - total_col - fig_gap
-        reserve_laps_r = pen_r - pen_col - fig_gap
-        laps_r = reserve_laps_r if penalized else pen_r
-
-        def place_column(shown: list[str]) -> tuple[QFont, float]:
-            # The place matches the total's scale until its column would
-            # pass TEAM_PLACE_SHARE of the page: a decided two-team field
-            # sets "2nd" at a row's height, which would take the names' room.
-            f = t.font(big_px * TEAM_PLACE_SCALE, t.HEAVY, tabular=True)
-            most = area.width() * TEAM_PLACE_SHARE - 32 * u
-            if widest(shown, f) > most:
-                f = t.font(f.pixelSize() * most / widest(shown, f), t.HEAVY, tabular=True)
-            return f, max(80 * u, widest(shown, f) + 32 * u)
-
-        place_f, rank_w = place_column(places)
-        _f, reserve_rank_w = place_column([*places, *decided])
-        row_x = area.x() + rank_w
         pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u
 
-        def name_room(x: float, laps_right: float) -> tuple[float, float, float]:
-            zone_r = laps_right - laps_col - COLOR_ZONE_GAP * u
-            half = max(0.0, (zone_r - x - pad) / 2)
-            return zone_r, x + pad, half
+        def columns(big_px: float) -> dict:
+            """The fonts and columns with the total at ``big_px``, and the surnames' room.
 
-        zone_r, names_x, half = name_room(row_x, laps_r)
-        # The surnames are measured in the room a penalty and ordinal places
-        # would leave, so neither steps them down when it comes.
-        _z, _x, least_half = name_room(area.x() + reserve_rank_w, reserve_laps_r)
-        room = max(0.0, least_half - team_rows.RIDER_GAP * u)
-        size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
+            The room is what a penalty and ordinal places would leave, so
+            neither steps the surnames down when it comes.
+            """
+            total_f = t.font(big_px, t.HEAVY, tabular=True)
+            # The laps and penalty keep pace with the total, never under the
+            # floor and never past TEAM_LAPS_MOST; their reserved columns are
+            # measured at that size, so the cap gives the surnames the width.
+            laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
+            num_px = min(max(min(48 * u, rh * 0.7), laps_px), TEAM_LAPS_MOST * u)
+            num = t.font(num_px, t.BOLD, tabular=True)
+            # A column is as wide as its heading or its widest figure, so each
+            # heading sits over its figures, right edges together. The feed
+            # leaves a status row off the board; a page given one keeps the
+            # word clear of the figures beside it.
+            total_col = max(
+                widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f),
+                t.text_width("TOTAL", lab),
+            )
+            shown_laps = [lap_text(r.laps) for r in d.rows if not r.status]
+            shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
+            laps_col = max(widest([*shown_laps, *LAP_SAMPLES], num), t.text_width("LAPS", lab))
+            pen_col = max(
+                widest([*shown_pens, *PENALTY_SAMPLES], num), t.text_width("PENALTY", lab)
+            )
+            pen_r = total_r - total_col - fig_gap
+            reserve_laps_r = pen_r - pen_col - fig_gap
+
+            def place_column(shown: list[str]) -> tuple[QFont, float]:
+                # The place matches the total's scale until its column would
+                # pass TEAM_PLACE_SHARE of the page: a decided two-team field
+                # sets "2nd" at a row's height, which would take the names' room.
+                f = t.font(big_px * TEAM_PLACE_SCALE, t.HEAVY, tabular=True)
+                most = area.width() * TEAM_PLACE_SHARE - 32 * u
+                if widest(shown, f) > most:
+                    f = t.font(f.pixelSize() * most / widest(shown, f), t.HEAVY, tabular=True)
+                return f, max(80 * u, widest(shown, f) + 32 * u)
+
+            place_f, rank_w = place_column(places)
+            _f, reserve_rank_w = place_column([*places, *decided])
+            zone_l = area.x() + reserve_rank_w + pad
+            zone_r = reserve_laps_r - laps_col - COLOR_ZONE_GAP * u
+            half = max(0.0, (zone_r - zone_l) / 2)
+            return {
+                "total_f": total_f,
+                "num": num,
+                "total_col": total_col,
+                "laps_col": laps_col,
+                "pen_col": pen_col,
+                "pen_r": pen_r,
+                "reserve_laps_r": reserve_laps_r,
+                "place_f": place_f,
+                "rank_w": rank_w,
+                "room": max(0.0, half - team_rows.RIDER_GAP * u),
+            }
+
+        # The place and the total give way to the surnames: they step down
+        # from their share of the row, never under TEAM_FIGURE_LEAST, until
+        # the widest surname fits whole at its size. Only then does the
+        # surnames' shared size shrink. The surnames are what the stands
+        # match to the jerseys, and a small field's growth is for both.
+        big_px = rh * TEAM_FIGURE_SHARE
+        least = min(big_px, TEAM_FIGURE_LEAST * u)
         surname_f = t.font(size, t.HEAVY)
-        lasts = [team_rows.split_name(n)[1] for r in d.rows for n in r.entry.names[:2]]
+        cols = columns(big_px)
+        while big_px > least and widest(lasts, surname_f) > cols["room"]:
+            big_px = max(least, big_px * 0.96)
+            cols = columns(big_px)
+        total_f, num, place_f, rank_w = (
+            cols["total_f"],
+            cols["num"],
+            cols["place_f"],
+            cols["rank_w"],
+        )
+        total_col, laps_col, pen_col, pen_r = (
+            cols["total_col"],
+            cols["laps_col"],
+            cols["pen_col"],
+            cols["pen_r"],
+        )
+        room = cols["room"]
+        laps_r = cols["reserve_laps_r"] if penalized else pen_r
+        row_x = area.x() + rank_w
+        zone_r = laps_r - laps_col - COLOR_ZONE_GAP * u
+        names_x = row_x + pad
+        half = max(0.0, (zone_r - names_x) / 2)
         floor_px = round(t.MIN_PX * u)
         scale = t.fit_scale([(s, room, surname_f) for s in lasts], floor=t.MIN_PX * u / size)
         surname_f = t.font(max(math.floor(size * scale), floor_px), t.HEAVY)

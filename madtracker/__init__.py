@@ -6,4 +6,4 @@ package name ``madtracker`` is the stable identifier for paths and files.
 """
 
 APP_NAME = "MadTracker"
-__version__ = "1.2.0rc5"
+__version__ = "1.2.0rc6"
