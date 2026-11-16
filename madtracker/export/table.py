@@ -94,9 +94,8 @@ RIDER_LEADING = 1.15
 # or is cut: much smaller reads as a different kind of row.
 NAME_SHRINK = 0.85
 # A team's riders stand beside its name, one per line, one GAP after the
-# table's widest team name, as the board's sprint card sets them: the
-# block is as tall as the taller of the two, not the name's line plus
-# a line per rider. A table where any rider's name would wrap there
+# table's widest team name: the block is as tall as the taller of the
+# two, not the name's line plus a line per rider. A table where any rider's name would wrap there
 # puts every team's riders under its name instead, since a wrapped rider
 # beside a name reads as a third rider.
 HEADER_PT = 8.0

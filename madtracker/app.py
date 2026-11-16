@@ -2514,6 +2514,18 @@ def _say(lines: list[str]) -> None:
         pass
 
 
+# The largest glyph, in pixels, Qt's raster engine keeps as a bitmap. Above
+# Qt's own 64 it draws a glyph as a path on every paint, and the board's
+# totals, places and names at 4K are larger than that, so a slam would
+# spend most of each frame filling outlines.
+GLYPH_CACHE_PX = 256
+
+
+def cache_board_glyphs() -> None:
+    """Raise the glyph cache's size limit; Qt reads it once, at the first text it draws."""
+    os.environ.setdefault("QT_MAX_CACHED_GLYPH_SIZE", str(GLYPH_CACHE_PX))
+
+
 def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
@@ -2548,6 +2560,7 @@ def main(argv: list[str] | None = None) -> int:
         _say(lines)
         return 1 if failures else 0
 
+    cache_board_glyphs()
     app = QApplication.instance() or QApplication([sys.argv[0], *qt_args])
     app.setApplicationName(APP_NAME)
     from madtracker.assets import app_icon, sets_window_icon
