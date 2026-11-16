@@ -716,3 +716,35 @@ def test_the_board_gives_every_page_the_texture(board):
     assert len(shared) == 1 and not next(iter(board.pages.values())).texture.builtin
     board.set_texture(None)
     assert all(isinstance(p.texture, Texture) and p.texture.builtin for p in board.pages.values())
+
+
+def test_a_refused_file_keeps_the_previous_choice(store, qtbot, tmp_path):
+    good = tmp_path / "bolt.svg"
+    good.write_bytes(CHEVRON)
+    bad = tmp_path / "empty.svg"
+    bad.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    d = _settings(store, tmp_path, qtbot)
+    assert d.choose_texture(good)
+    kept = d.texture_data
+    assert not d.choose_texture(bad)
+    assert d.texture_name.text() == "bolt.svg" and d.texture_data == kept and kept is not None
+    assert d.save()
+    assert venue.texture_name(store) == "bolt.svg" and venue.texture_setting(store) == kept
+
+
+def test_choosing_a_texture_then_cancelling_saves_nothing(store, qtbot, tmp_path):
+    path = tmp_path / "bolt.svg"
+    path.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    assert d.choose_texture(path)
+    d.reject()
+    assert store.get_setting(venue.TEXTURE_KEY) is None
+    assert store.get_setting(venue.TEXTURE_NAME_KEY) is None
+    # A texture already kept stays as it was through a cancelled change.
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="old.svg", keep_texture=False
+    )
+    d = _settings(store, tmp_path, qtbot)
+    d.set_texture(None)
+    d.reject()
+    assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == "old.svg"

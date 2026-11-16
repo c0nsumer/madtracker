@@ -3998,3 +3998,23 @@ def test_the_app_gives_every_canvas_the_venues_texture(make_app, tmp_path):
     c.apply_venue()
     assert len(c.boards) == 2
     assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
+
+
+def test_a_file_with_no_texture_puts_the_built_in_one_back(make_app, tmp_path):
+    from madtracker.control import venue
+
+    shape = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    venue.save(
+        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+    )
+    c.apply_venue()
+    assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
+    # The next file has no texture key at all.
+    venue.save(c.store, name="R", backup="", texture=None, keep_texture=False)
+    assert c.store.get_setting(venue.TEXTURE_KEY) is None
+    c.apply_venue()
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
