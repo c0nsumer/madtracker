@@ -2776,6 +2776,51 @@ def test_a_chase_lap_before_the_finish_is_on_the_card_then_in_a_laps_column(app)
     assert t.item(row, laps).textAlignment() & Qt.AlignmentFlag.AlignRight
 
 
+def _shown(c):
+    """The standings or start-list payload the board last took for the race on screen."""
+    return c.board._shown[c.live.race_id]
+
+
+def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_a_sprint_card(app):
+    c = app
+    c.set_board_live(True)
+    select(c, MADISON)
+    # The start list is the layout before any score, with nothing scored.
+    assert c.board.layout_name() == "pre_race"
+    assert getattr(_shown(c), "scored", None) is None
+
+    click("Blue", "Red")(c)
+    record(c)
+    # Record Sprint turns the board to the table: no sprint card, and the
+    # sprint is what the table plays.
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.sprint_result is None
+    assert data.scored.kind == "sprint"
+    assert list(data.scored.keys) == [
+        tuple(str(b) for b in c.live.roster.get(c.live.roster.resolve(t)).bibs)
+        for t in ("Blue", "Red")
+    ]
+
+    lap("Orange")(c)
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.sprint_result is None
+    assert data.scored.kind == "lap_gained"
+
+    c.rider_action(c.live.roster.resolve("Yellow"), "lap_lost")
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.sprint_result is None
+    assert data.scored.kind == "lap_lost"
+
+    # Undo takes the score back and the board keeps the table, with
+    # nothing new to play.
+    assert c.undo()
+    assert c.board.layout_name() == "madison"
+    assert _shown(c).scored is None
+
+
 def test_a_madison_team_card_has_the_lap_buttons_and_an_elimination_card_does_not(app):
     c = app
     select(c, MADISON)
