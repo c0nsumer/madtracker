@@ -2077,6 +2077,7 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     assert form_labels(d) == [
         "Venue name",
         "Scoreboard logo",
+        "Scoreboard texture",
         "Riders on the scoreboard",
         "Accent color",
         "Backup folder",
@@ -2085,6 +2086,7 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     ]
     rows = button_rows(d)
     assert rows[0] == ["Choose...", "Use Default"]
+    assert rows[1] == ["Choose...", "Use Built-In"]
     assert ["Rulesets..."] in rows
     assert rows[-1] == ["Cancel", "Save"]
     d.close()

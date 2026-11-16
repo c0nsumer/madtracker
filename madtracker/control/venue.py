@@ -23,6 +23,10 @@ from madtracker.store.paths import BACKUP_DIR_NAME
 
 LOGO_KEY = "venue/logo_png"
 NAME_KEY = "venue/name"
+# The venue's scoreboard texture: an SVG file kept as the file itself, base64
+# like the logo, with the name it was chosen under. None means the built-in.
+TEXTURE_KEY = "board/texture_svg"
+TEXTURE_NAME_KEY = "board/texture_name"
 BACKUP_KEY = "backup/dir"
 # Where the exports are offered to be saved; Documents until the venue
 # chooses.
@@ -77,6 +81,23 @@ def logo_setting(store: Store) -> bytes | None:
         return base64.b64decode(value)
     except ValueError:
         return None
+
+
+def texture_setting(store: Store) -> bytes | None:
+    """The venue's texture SVG as stored, or None for the built-in one."""
+    value = store.get_setting(TEXTURE_KEY)
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return base64.b64decode(value, validate=True) or None
+    except ValueError:
+        return None
+
+
+def texture_name(store: Store) -> str:
+    """The file name the texture was chosen under; empty with none chosen."""
+    value = store.get_setting(TEXTURE_NAME_KEY)
+    return value if isinstance(value, str) else ""
 
 
 def logo_bytes(store: Store) -> bytes | None:
@@ -161,6 +182,9 @@ def save(
     backup: str,
     logo: bytes | None = None,
     keep_logo: bool = False,
+    texture: bytes | None = None,
+    texture_name: str = "",
+    keep_texture: bool = True,
     rider_label: str | None = None,
     accent: str | None = None,
     exports: str | None = None,
@@ -171,7 +195,9 @@ def save(
     placeholder) unless ``keep_logo`` is set. ``rider_label`` is one of
     RIDER_LABELS; left None it stays as it was, as do ``accent`` and
     ``exports`` (the folder the exports are offered in; blank means
-    Documents) when None.
+    Documents) when None. ``texture`` replaces the stored texture (None
+    clears it to the built-in one) only when ``keep_texture`` is off, so a
+    caller that does not mention it leaves it alone.
     """
     if rider_label is not None and rider_label not in RIDER_LABELS:
         raise ValueError(f"rider_label must be one of {RIDER_LABELS}, not {rider_label!r}")
@@ -182,6 +208,12 @@ def save(
             values[LOGO_KEY] = base64.b64encode(bytes(logo)).decode("ascii")
         else:
             delete.append(LOGO_KEY)
+    if not keep_texture:
+        if texture:
+            values[TEXTURE_KEY] = base64.b64encode(bytes(texture)).decode("ascii")
+            values[TEXTURE_NAME_KEY] = clean_line(texture_name)
+        else:
+            delete.extend((TEXTURE_KEY, TEXTURE_NAME_KEY))
     if rider_label is not None:
         values[RIDER_LABEL_KEY] = rider_label
     if exports is not None:
@@ -202,5 +234,7 @@ SETTING_KEYS = (
     EXPORT_KEY,
     RIDER_LABEL_KEY,
     ACCENT_KEY,
+    TEXTURE_KEY,
+    TEXTURE_NAME_KEY,
     "rules/default_ruleset",
 )

@@ -34,6 +34,7 @@ from madtracker.board.payloads import (
     total_text,
 )
 from madtracker.board.scorebug import Frame, Key, Play, ScoreQueue, Step
+from madtracker.board.texture import Texture
 
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -104,6 +105,8 @@ class Page(QWidget):
         # The canvas sets the time source; None leaves the page at rest.
         self.clock: Clock | None = None
         self.rider_label = "bibs_names"
+        # The venue's texture, shared by every page of one board.
+        self.texture = Texture(None)
         # The team column of the list being drawn and how its riders are
         # set beside it (``entry_scale`` sets both, see ``team_layout``).
         self.team_w = 0.0

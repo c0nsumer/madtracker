@@ -3981,3 +3981,20 @@ def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_pat
     chips.clear()
     c.board.grab()
     assert not page.scoring_now() and not chips
+
+
+def test_the_app_gives_every_canvas_the_venues_texture(make_app, tmp_path):
+    from madtracker.control import venue
+
+    shape = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
+    venue.save(
+        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+    )
+    c.apply_venue()
+    assert len(c.boards) == 2
+    assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())

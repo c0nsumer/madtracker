@@ -595,3 +595,124 @@ def test_settings_save_refuses_a_folder_too_long_to_look_up(store, qtbot, tmp_pa
     d.backup.setText(str(tmp_path))
     d.exports.setText(str(tmp_path / ("y" * 5000)))
     assert not d.save() and d.error.text() == "The exports folder does not exist."
+
+
+# An invented shape: the venue's own mark never enters the repository.
+CHEVRON = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+)
+
+
+def _settings(store, tmp_path, qtbot):
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(store, tmp_path)
+    qtbot.addWidget(d)
+    return d
+
+
+def test_the_texture_row_reads_as_approved(store, qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QPushButton
+
+    d = _settings(store, tmp_path, qtbot)
+    assert d.texture_label.text() == "Scoreboard texture"
+    assert d.texture_name.text() == "Built-in"
+    tip = (
+        "A shape tiled faintly across the scoreboard's rows. An SVG file; its first shape is used."
+    )
+    assert d.texture_label.toolTip() == tip and d.texture_name.toolTip() == tip
+    row = next(lay for lay in d.findChildren(QHBoxLayout) if lay.indexOf(d.texture_name) >= 0)
+    buttons = [
+        row.itemAt(i).widget()
+        for i in range(row.count())
+        if isinstance(row.itemAt(i).widget(), QPushButton)
+    ]
+    assert [b.text() for b in buttons] == ["Choose...", "Use Built-In"]
+    assert buttons[0].toolTip() == tip
+    seen = {}
+
+    def fake(parent, title, start, flt):
+        seen["args"] = (title, flt)
+        return "", ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", fake)
+    buttons[0].click()
+    assert seen["args"] == ("Choose Scoreboard Texture", "SVG Images (*.svg)")
+
+
+def test_choosing_a_texture_names_it_and_saves_it_in_the_file(store, qtbot, tmp_path):
+    path = tmp_path / "bolt.svg"
+    path.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    assert d.choose_texture(path)
+    assert d.texture_name.text() == "bolt.svg" and d.error.text() == ""
+    assert d.save()
+    kept = venue.texture_setting(store)
+    assert kept is not None and b"<path" in kept
+    assert venue.texture_name(store) == "bolt.svg"
+    again = _settings(store, tmp_path, qtbot)
+    assert again.texture_name.text() == "bolt.svg"
+
+
+def test_use_built_in_clears_it(store, qtbot, tmp_path):
+    path = tmp_path / "bolt.svg"
+    path.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    d.choose_texture(path)
+    d.save()
+    d = _settings(store, tmp_path, qtbot)
+    d.set_texture(None)
+    assert d.texture_name.text() == "Built-in"
+    d.save()
+    assert venue.texture_setting(store) is None and venue.texture_name(store) == ""
+    assert store.get_setting(venue.TEXTURE_KEY) is None
+
+
+def test_a_bad_texture_file_is_refused_with_the_red_line(store, qtbot, tmp_path):
+    d = _settings(store, tmp_path, qtbot)
+    refusal = "That file has no shape to tile. Choose an SVG file with a filled shape."
+    empty = tmp_path / "empty.svg"
+    empty.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    junk = tmp_path / "junk.svg"
+    junk.write_bytes(b"not xml")
+    for bad in (empty, junk, tmp_path / "missing.svg"):
+        assert not d.choose_texture(bad)
+        assert d.error.text() == refusal
+    assert d.texture_name.text() == "Built-in"
+    d.save()
+    assert venue.texture_setting(store) is None
+
+
+def test_the_texture_travels_with_the_file_and_into_a_new_file(store, tmp_path):
+    from madtracker.control.copying import CopyChoice, copy_venue
+
+    assert venue.TEXTURE_KEY == "board/texture_svg"
+    assert venue.TEXTURE_KEY in venue.SETTING_KEYS and venue.TEXTURE_NAME_KEY in venue.SETTING_KEYS
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+    )
+    with Store.open(tmp_path / "new.sqlite") as new:
+        copy_venue(store, new, CopyChoice())
+        assert venue.texture_setting(new) == CHEVRON
+        assert venue.texture_name(new) == "bolt.svg"
+
+
+def test_saving_other_settings_keeps_the_texture(store):
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+    )
+    venue.save(store, name="Riverside", backup="")
+    assert venue.texture_setting(store) == CHEVRON
+    assert venue.texture_name(store) == "bolt.svg"
+
+
+def test_the_board_gives_every_page_the_texture(board):
+    from madtracker.board.texture import Texture
+
+    assert all(p.texture.builtin for p in board.pages.values())
+    board.set_texture(CHEVRON)
+    shared = {id(p.texture) for p in board.pages.values()}
+    assert len(shared) == 1 and not next(iter(board.pages.values())).texture.builtin
+    board.set_texture(None)
+    assert all(isinstance(p.texture, Texture) and p.texture.builtin for p in board.pages.values())

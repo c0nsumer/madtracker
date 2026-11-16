@@ -30,10 +30,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from madtracker.board import theme
+from madtracker.board import texture, theme
 from madtracker.control import venue
 from madtracker.control.exports import documents_dir
 from madtracker.store import Store, StoreError
+from madtracker.ui import style
 from madtracker.ui.icons import mdi
 from madtracker.ui.widgets import (
     Form,
@@ -49,7 +50,9 @@ from madtracker.ui.widgets import (
     show_message,
 )
 
-PREVIEW_W, PREVIEW_H = 520, 64
+PREVIEW_W, PREVIEW_H = 520, 48
+# The preview box's padding around the logo, both axes together.
+PREVIEW_PAD = 12
 # The most pixels a logo file may declare. Qt decodes the whole image
 # before it scales, so this bounds the memory one pick can take on a
 # venue laptop; it still admits a 50-megapixel phone photo or an
@@ -59,6 +62,10 @@ LOGO_MAX_PIXELS = 64 * 1024 * 1024
 # PNG decodes to 64-bit color. Qt's own default (256) would refuse a
 # 16-bit print wordmark well inside the pixel cap.
 LOGO_DECODE_LIMIT_MB = LOGO_MAX_PIXELS * 8 // (1024 * 1024)
+TEXTURE_TIP = (
+    "A shape tiled faintly across the scoreboard's rows. An SVG file; its first shape is used."
+)
+TEXTURE_REFUSAL = "That file has no shape to tile. Choose an SVG file with a filled shape."
 LOGO_TIP = "A PNG with a transparent background and light artwork; it is scaled to the scoreboard."
 # An invented venue, as every other field shows an example value.
 NAME_PLACEHOLDER = "Lakeside Track Cycling"
@@ -168,8 +175,27 @@ class SettingsDialog(QDialog):
         logo_row.addWidget(browse)
         logo_row.addWidget(default)
 
+        # The bytes to save: the stored SVG, or None for the built-in texture.
+        self.texture_data: bytes | None = venue.texture_setting(store)
+        self.texture_file = venue.texture_name(store)
+        self.texture_name = QLabel("")
+        texture_pick = QPushButton("Choose...")
+        texture_pick.clicked.connect(self._pick_texture)
+        texture_default = QPushButton("Use Built-In")
+        texture_default.clicked.connect(lambda: self.set_texture(None))
+        texture_row = QHBoxLayout()
+        texture_row.addWidget(self.texture_name, 1)
+        texture_row.addWidget(texture_pick)
+        texture_row.addWidget(texture_default)
+        self.texture_label = QLabel("Scoreboard texture")
+        for w in (self.texture_label, self.texture_name, texture_pick):
+            w.setToolTip(TEXTURE_TIP)
+        self.texture_name.setText(
+            (self.texture_file or "Built-in") if self.texture_data else "Built-in"
+        )
+
         self.preview = QLabel()
-        self.preview.setFixedSize(PREVIEW_W + 24, PREVIEW_H + 24)
+        self.preview.setFixedSize(PREVIEW_W + PREVIEW_PAD, PREVIEW_H + PREVIEW_PAD)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # With no logo it shows the venue's name, which may be long.
         self.preview.setWordWrap(True)
@@ -238,9 +264,12 @@ class SettingsDialog(QDialog):
         self.rulesets_button.clicked.connect(self.open_rulesets)
 
         form = Form()
+        # Ten rows must fit a 1366 by 768 screen at 125%.
+        form.setVerticalSpacing(style.XS)
         form.addRow("Venue name", self.venue_name)
         form.addRow("Scoreboard logo", logo_row)
         form.addRow("", self.preview)
+        form.addRow(self.texture_label, texture_row)
         form.addRow("Riders on the scoreboard", self.rider_label)
         form.addRow("Accent color", accent_row)
         form.addRow("Backup folder", backup_row)
@@ -283,6 +312,33 @@ class SettingsDialog(QDialog):
         show_message(self.error, "")
         self.logo_name.setText(name if data else "Default logo")
         self._preview()
+
+    def _pick_texture(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose Scoreboard Texture", "", "SVG Images (*.svg)"
+        )
+        if path:
+            self.choose_texture(path)
+
+    def choose_texture(self, path: str | Path) -> bool:
+        """Read the file into the texture; False, with the red line, when it has no shape to tile."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(texture.MAX_SVG_BYTES + 1)
+        except OSError:
+            raw = b""
+        data = texture.first_shape_svg(raw) if raw else None
+        if data is None:
+            show_message(self.error, TEXTURE_REFUSAL)
+            return False
+        self.set_texture(data, Path(path).name)
+        return True
+
+    def set_texture(self, data: bytes | None, name: str = "") -> None:
+        self.texture_data = data
+        self.texture_file = name if data else ""
+        show_message(self.error, "")
+        self.texture_name.setText(name if data else "Built-in")
 
     def _show_accent(self) -> None:
         for hex_color, b in self.accent_swatches.items():
@@ -364,6 +420,9 @@ class SettingsDialog(QDialog):
             venue.save(
                 self.store,
                 logo=self.logo_data,
+                texture=self.texture_data,
+                texture_name=self.texture_file,
+                keep_texture=False,
                 name=self.venue_name.text(),
                 backup=self.backup.text(),
                 rider_label=self.rider_label.currentData(),

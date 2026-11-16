@@ -20,6 +20,7 @@ from madtracker.board import wordmark
 from madtracker.board.motion import Clock, default_clock
 from madtracker.board.pages import PAGES, EliminationPage, Page, lap_chip_height
 from madtracker.board.payloads import LAYOUT_PAYLOADS, Header, coerce
+from madtracker.board.texture import Texture
 from madtracker.displays import ScreenInfo, friendly_label
 
 # The board is designed on a 1080-line canvas; every size is a multiple
@@ -497,6 +498,13 @@ class BoardCanvas(QWidget):
             self.top_bar.logo = None
         self.top_bar.update()
         self.logo_page.update()
+
+    def set_texture(self, svg: bytes | None) -> None:
+        """The venue's texture SVG, or None for the built-in one, for every page."""
+        shared = Texture(svg)
+        for page in self.pages.values():
+            page.texture = shared
+            page.update()
 
     def set_show_bibs(self, show: bool) -> None:
         """Bibs and names, or names only: the two-way form of ``set_rider_label``."""
