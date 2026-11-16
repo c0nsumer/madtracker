@@ -46,8 +46,16 @@ TOTAL_SAMPLES = ("888", total_text(-88))
 # What a team page's size is decided for, beside the race's own figures: a
 # lap and a penalty, so the first lap gained or penalty given never steps
 # the totals down partway through a race.
-LAP_SAMPLES = ("+8", lap_text(-8))
+LAP_SAMPLES = ("+8L", f"{lap_text(-8)}L")
 PENALTY_SAMPLES = (lap_text(-88),)
+
+
+def team_laps_text(n: int) -> str:
+    """The Madison table's laps, "+1L" or "−1L": it has no headings, so the L
+    keeps a lap apart from a penalty, which stays a bare "−5"."""
+    return f"{lap_text(n)}L" if n else ""
+
+
 # Between two figure columns on a team row.
 FIGURE_GAP = 40
 # The sprint card's points sit this far after the widest team block or rider.
@@ -1830,7 +1838,7 @@ class StandingsPage(Page):
         if laps and not row.status:
             # The laps alone: the points they earn are in the total.
             rect = cell.adjusted(lay.laps_r - lay.laps_col, 0, lay.laps_r, 0)
-            t.text(p, rect, lap_text(laps), lay.num, t.GAIN if laps > 0 else t.LOSS, RIGHT)
+            t.text(p, rect, team_laps_text(laps), lay.num, t.GAIN if laps > 0 else t.LOSS, RIGHT)
         if lay.penalized and penalty and not row.status:
             # Written as a lap lost is, in the loss color: points taken.
             rect = cell.adjusted(lay.pen_r - lay.pen_col, 0, lay.pen_r, 0)
@@ -2003,7 +2011,7 @@ class StandingsPage(Page):
             # status row off the board; a page given one keeps the word
             # clear of the figures beside it.
             total_col = widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f)
-            shown_laps = [lap_text(r.laps) for r in d.rows if not r.status]
+            shown_laps = [team_laps_text(r.laps) for r in d.rows if not r.status]
             shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
             laps_col = widest([*shown_laps, *LAP_SAMPLES], num)
             pen_col = widest([*shown_pens, *PENALTY_SAMPLES], num)

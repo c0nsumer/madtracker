@@ -434,11 +434,11 @@ def test_the_madison_table_names_view_shows_surnames_and_no_team_words(qtbot, dr
 
 
 @pytest.mark.parametrize(
-    "teams, row_px, total, surname_px", [(1, 446, 144, 96), (2, 439, 125, 96), (5, 167, 104, 80)]
+    "teams, row_px, total, surname_px", [(1, 446, 133, 96), (2, 439, 120, 96), (5, 167, 104, 80)]
 )
 def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, row_px, total, surname_px):
     """Design section 10: 5 teams give rows of 167 px, totals of 104 px,
-    and surnames of 80 px; 2 teams 439, 125 and 96; a lone team 446, 144
+    and surnames of 80 px; 2 teams 439, 120 and 96; a lone team 446, 133
     and 96. The rows start at the page's top, the place is 0.85 of the
     total, and the laps are under it."""
     from madtracker.board import pages, team_rows
@@ -455,7 +455,7 @@ def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, row_px, t
     assert sizes(drawn, surnames(data)) == {surname_px}
     [place] = sizes(drawn, ["1", "2", "3", "4", "5"])
     assert place == pytest.approx(total * pages.TEAM_PLACE_SCALE, abs=1)
-    [laps] = sizes(drawn, ["+1", "−1"])
+    [laps] = sizes(drawn, ["+1L", "−1L"])
     assert laps < total
 
 
@@ -485,7 +485,7 @@ def test_a_small_table_never_sets_its_totals_or_surnames_smaller_than_five_teams
     assert surname_px == team_rows.START_SURNAME_MOST
     assert set(surnames(data)) <= set(strings(drawn))
     # LAPS stops at its cap, under the total.
-    [laps] = sizes(drawn, ["+1"])
+    [laps] = sizes(drawn, ["+1L"])
     assert laps <= 96 and laps < total
 
 
@@ -542,7 +542,7 @@ def test_the_table_draws_no_column_headings(qtbot, drawn):
         drawn.clear()
         w = render(qtbot, "madison", data)
         assert not HEADINGS & set(strings(drawn)), data.header.status
-    assert {"+1", "−20", "1st"} <= set(strings(drawn))
+    assert {"+1L", "−20", "1st"} <= set(strings(drawn))
     clocked(w, color_view_ms())
     drawn.clear()
     w.grab()
@@ -600,18 +600,18 @@ def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, m
     w = render(qtbot, "madison", standings(5))
     at = {s: (r, c) for s, r, _px, c in drawn}
     assert at["1"][1] == t.ACCENT.name() and at["2"][1] == t.TEXT.name()
-    assert at["+1"][1] == t.GAIN.name() and at["−1"][1] == t.LOSS.name()
+    assert at["+1L"][1] == t.GAIN.name() and at["−1L"][1] == t.LOSS.name()
     assert at["28"][1] == at["−14"][1] == t.TEXT.name()
     assert at["28"][0].right() == pytest.approx(at["−14"][0].right())
-    assert at["+1"][0].right() == pytest.approx(at["−1"][0].right())
-    assert at["+1"][0].right() < at["28"][0].right()
+    assert at["+1L"][0].right() == pytest.approx(at["−1L"][0].right())
+    assert at["+1L"][0].right() < at["28"][0].right()
     # The place left of the row, the names on it, the figures at its right end.
     row = bands[0][0]
     assert row.right() == pytest.approx(w.pages["madison"].margin_rect().right())
     assert at["1"][0].right() <= row.left()
     okafor, haddad = at["Okafor"][0], at["Haddad"][0]
-    laps_ink = at["+1"][0].right() - t.text_width(
-        "+1", t.font(sizes(drawn, ["+1"]).pop(), t.BOLD, tabular=True)
+    laps_ink = at["+1L"][0].right() - t.text_width(
+        "+1L", t.font(sizes(drawn, ["+1L"]).pop(), t.BOLD, tabular=True)
     )
     assert row.left() < okafor.left() < haddad.left() and okafor.right() < laps_ink
     assert okafor.center().y() == pytest.approx(row.center().y(), abs=1)
@@ -636,7 +636,7 @@ def test_the_color_view_shows_the_team_name_in_its_ink(qtbot, drawn, monkeypatch
     assert "Stars and Stripes" in colors and "Blue" not in colors
     assert not set(colors) & set(surnames(data))
     # The color fills the name area solid, short of the LAPS column.
-    laps = next(r for s, r, *_ in drawn if s == "+1")
+    laps = next(r for s, r, *_ in drawn if s == "+1L")
     assert {sweep for _r, sweep, _z in bands} == {1.0}
     assert all(z < laps.left() for _r, _s, z in bands)
     # The name is centered on the area.
@@ -677,7 +677,7 @@ def test_totals_and_laps_hold_still_across_the_rotation(qtbot, drawn):
         clock.advance(at - clock.now())
         drawn.clear()
         w.grab()
-        held = ("28", "+1", "1", "−14")
+        held = ("28", "+1L", "1", "−14")
         frames.append({s: (QRectF(r), px) for s, r, px, _c in drawn if s in held})
     assert all(f == frames[0] for f in frames) and len(frames[0]) == 4
 
@@ -907,10 +907,10 @@ def test_the_chip_shows_the_change_to_the_total(qtbot, drawn, monkeypatch):
     at = frame(w, clock, drawn, 100)
     assert chips[-1] == ("−20", t.OUT.name(), t.TEXT.name())
     # The lap figure changes as the new total rises in.
-    assert "−1" not in at
+    assert "−1L" not in at
     at = frame(w, clock, drawn, SETTLED)
     # Black's old 6 is gone; Yellow's 6 stays.
-    assert "−14" in at and "−1" in at and strings(drawn).count("6") == 1
+    assert "−14" in at and "−1L" in at and strings(drawn).count("6") == 1
 
 
 def test_the_first_sprint_plays_from_a_zero_table_in_start_list_order(qtbot, drawn):
@@ -1247,3 +1247,36 @@ def test_the_tv_and_the_preview_play_the_same_sequence(qtbot, drawn):
         w.grab()
         seen.append([(s, QRectF(r).getRect(), px, c) for s, r, px, c in drawn])
     assert seen[0] == seen[1] and any(s == "+5" for s, *_ in seen[0])
+
+
+def test_a_lost_lap_and_a_penalty_read_apart_without_headings(qtbot, drawn):
+    """With no headings, the laps carry an L ("−1L") and a penalty stays a
+    bare figure ("−5"); both are in the loss color at the figure's size."""
+    from madtracker.board import theme as t
+
+    data = standings(5)
+    for r in data.rows:
+        r.laps = 0
+    data.rows[0].laps, data.rows[0].penalty = -1, -5
+    data.rows[1].laps = 1
+    render(qtbot, "madison", data)
+    at = {s: (px, c) for s, _r, px, c in drawn}
+    assert at["−1L"][1] == t.LOSS.name() and at["−5"][1] == t.LOSS.name()
+    assert at["+1L"][1] == t.GAIN.name()
+    assert at["−1L"][0] == at["−5"][0] == at["+1L"][0]
+    assert "−1" not in at and "+1" not in at
+
+
+@pytest.mark.parametrize("teams", [1, 2, 5])
+def test_the_first_lap_with_its_l_never_steps_the_figures_down(qtbot, drawn, teams):
+    """The laps column is measured with the L, so the first lap gained or lost
+    leaves the totals, the surnames, and the laps size where they were."""
+    seen = []
+    for laps in (0, 1, -1, 8, -8):
+        data = standings(teams)
+        for r in data.rows:
+            r.laps = 0
+        data.rows[0].laps = laps
+        data.rows[-1].penalty = -5 if laps else 0
+        seen.append(table_sizes(qtbot, drawn, data))
+    assert all(s == seen[0] for s in seen)

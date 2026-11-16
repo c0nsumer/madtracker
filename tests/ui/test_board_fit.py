@@ -786,18 +786,18 @@ def test_a_team_tables_figures_stand_in_their_columns(qtbot, drawn):
     data.rows[2].penalty = -20
     render(qtbot, "madison", data)
     assert not {"#", "LAPS", "PENALTY", "TOTAL"} & set(strings(drawn))
-    at = {s: (r, px) for s, r, px, _c in drawn if s in ("+1", "−20", "40", "34")}
+    at = {s: (r, px) for s, r, px, _c in drawn if s in ("+1L", "−20", "40", "34")}
 
     def ink_left(s: str, weight) -> float:
         rect, px = at[s]
         return rect.right() - theme.text_width(s, theme.font(px, weight, tabular=True))
 
     # Text rects are drawn right-aligned, so a rect's right edge is its figure's.
-    assert at["+1"][0].right() < ink_left("−20", theme.BOLD)
+    assert at["+1L"][0].right() < ink_left("−20", theme.BOLD)
     assert at["−20"][0].right() < ink_left("40", theme.HEAVY)
     assert at["40"][0].right() == pytest.approx(at["34"][0].right())
     color = {s: c for s, _r, _px, c in drawn}
-    assert color["+1"] == theme.GAIN.name() and color["−20"] == theme.LOSS.name()
+    assert color["+1L"] == theme.GAIN.name() and color["−20"] == theme.LOSS.name()
     assert color["40"] == color["34"] == theme.TEXT.name()
 
 
@@ -842,7 +842,7 @@ def test_team_rows_share_the_page_and_their_type_grows_with_them(qtbot, drawn, m
     most = min(rh * pages.TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
     assert surname <= round(most)
     # LAPS keeps pace with the total, up to TEAM_LAPS_MOST, and stays under it.
-    lap = next(px for s, _r, px, _c in drawn if s == "+1")
+    lap = next(px for s, _r, px, _c in drawn if s == "+1L")
     laps_share = big * pages.TEAM_LAPS_SHARE / pages.TEAM_FIGURE_SHARE
     assert lap >= min(laps_share, pages.TEAM_LAPS_MOST * u) - 1
     assert lap <= round(pages.TEAM_LAPS_MOST * u) and lap < big
@@ -1156,8 +1156,8 @@ def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(qtbot
     assert not {"1", "2", "3", "4", "5"} & set(seen), "no bare place numbers once decided"
     assert "PROVISIONAL" in seen
     at = {s: r for s, r, *_ in drawn}
-    inks = (("+1", theme.GAIN), ("−20", theme.LOSS), ("60", theme.TEXT))
-    assert at["+1"].right() < at["−20"].right() < at["60"].right()
+    inks = (("+1L", theme.GAIN), ("−20", theme.LOSS), ("60", theme.TEXT))
+    assert at["+1L"].right() < at["−20"].right() < at["60"].right()
     for fig, ink in inks:
         assert color[fig] == ink.name(), fig
     # The riders' surnames still lead, and no lap chips: the laps column carries the laps.
@@ -1297,8 +1297,8 @@ def test_a_madison_status_row_shows_its_status_and_no_figures(qtbot, drawn):
     out.status, out.laps, out.penalty = "DNF", -2, -20
     render(qtbot, "madison", data)
     seen = strings(drawn)
-    assert "DNF" in seen and "+1" in seen
-    assert "−2" not in seen and "−20" not in seen and "PENALTY" not in seen
+    assert "DNF" in seen and "+1L" in seen
+    assert "−2L" not in seen and "−2" not in seen and "−20" not in seen and "PENALTY" not in seen
 
 
 def test_a_rider_table_status_row_shows_its_status_and_no_figures(qtbot, drawn):
