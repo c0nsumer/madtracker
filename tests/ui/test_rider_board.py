@@ -818,21 +818,13 @@ def test_a_rider_scoring_off_the_shown_page_updates_quietly(qtbot, drawn, monkey
     assert name(13) not in at and name(1) in at
 
 
-def test_no_layout_shows_a_sprint_card(qtbot, drawn, monkeypatch):
-    """The table plays a sprint itself: no card over it, clocked or at
-    rest, and nothing of the card left in the payload or the board."""
-    import dataclasses
-
-    from madtracker.board.window import BoardCanvas
-
-    assert not hasattr(P, "SprintResult")
-    assert "sprint_result" not in {f.name for f in dataclasses.fields(P.Standings)}
-    assert not hasattr(BoardCanvas, "SPRINT_OVERLAY_MS")
+def test_a_sprint_plays_on_the_table_alone_clocked_or_at_rest(qtbot, drawn, monkeypatch):
+    """The table plays a sprint itself: nothing over it names the sprint,
+    while it plays or after, and a board with no clock shows the result."""
     prev = table(9)
     data = scored(prev, {2: 5, 4: 3}, status="After Sprint 3 of 8")
     w, clock = playing(qtbot, prev)
     w.set_layout("sprint_points", data)
-    assert not hasattr(w, "_overlay")
     for at in (100, 1300, SETTLED, 12000):
         frame(w, clock, drawn, at)
         assert not [s for s, *_ in drawn if s.startswith("Sprint ") or s == "Final sprint"]

@@ -2783,7 +2783,7 @@ def _shown(c):
     return c.board._shown[c.live.race_id]
 
 
-def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_a_sprint_card(app):
+def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring(app):
     c = app
     c.set_board_live(True)
     select(c, MADISON)
@@ -2793,8 +2793,8 @@ def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_
 
     click("Blue", "Red")(c)
     record(c)
-    # Record Sprint turns the board to the table: no sprint card, and the
-    # sprint is what the table plays.
+    # Record Sprint turns the board to the table, which plays the sprint
+    # itself.
     assert c.board.layout_name() == "madison"
     data = _shown(c)
     assert data.scored.kind == "sprint"
@@ -2821,9 +2821,7 @@ def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring_not_
 
 
 @pytest.mark.parametrize("row", [POINTS, TEMPO], ids=["points", "tempo"])
-def test_the_points_board_has_a_start_list_then_a_table_that_plays_scoring_not_a_sprint_card(
-    app, row
-):
+def test_the_points_board_has_a_start_list_then_a_table_that_plays_scoring(app, row):
     c = app
     c.set_board_live(True)
     select(c, row)
