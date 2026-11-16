@@ -744,12 +744,10 @@ class PreRacePage(Page):
         if self.teams():
             self.team_list(p, area, d)
             return
-        count = len(d.roster)
-        # The top bar already says Start list; the count is the news here.
-        self.section_label(p, area.x(), area.y(), f"{count} rider{'' if count == 1 else 's'}")
-        top = area.y() + 64 * u
+        # No count label, as on a Madison's: the list shows the field, so
+        # the rows take the page from its top.
         laps = any(d.laps)
-        room = QRectF(area.x(), top, area.width(), area.bottom() - top)
+        room = QRectF(area)
         if self.bibs_only and not laps and all(e.bibs for e in d.roster):
             plate_grid(p, room, [e.bibs[0] for e in d.roster], u)
             return

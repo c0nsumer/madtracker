@@ -1344,7 +1344,7 @@ def test_a_small_start_list_shares_the_page_and_its_names_grow(qtbot, drawn, n):
     # Every row is the room shared by the least field, no larger.
     tops = sorted({round(r.center().y()) for r, _px in rows})
     pitch = tops[1] - tops[0]
-    room = bottom - page.margin_rect().y() - 64 * page.u
+    room = bottom - page.margin_rect().y()
     assert pitch <= room / max(n, pages.RIDER_FILL_LEAST) + 1
     assert pitch >= 128 * page.u
 
@@ -1400,10 +1400,19 @@ def test_seven_riders_take_one_column_when_it_sets_them_larger(qtbot, drawn):
     assert len({round(r.x()) for r, _px in _name_rows(drawn, short)}) == 2
 
 
-def test_a_start_list_of_one_counts_one_rider(qtbot, drawn):
-    render(qtbot, "pre_race", _start(["Ada Quill"]))
-    seen = strings(drawn)
-    assert "1 RIDER" in seen and "1 RIDERS" not in seen
+@pytest.mark.parametrize("n", [1, 6, 12, 24])
+def test_a_rider_start_list_draws_no_count_label(qtbot, drawn, n):
+    """The list shows the field, as a Madison's does, so no "12 riders"
+    label takes its first row's height."""
+    data = _laid_out("pre_race", n)
+    w = render(qtbot, "pre_race", data)
+    page = w.pages["pre_race"]
+    assert not [s for s in strings(drawn) if re.search(r"riders?", s, re.IGNORECASE)]
+    names = {e.names[0] for e in data.roster} | {
+        f"{e.names[0][0]}. {_last(e.names[0])}" for e in data.roster
+    }
+    top = min(r.y() for s, r, *_ in drawn if s in names)
+    assert top < page.margin_rect().y() + 64 * page.u
 
 
 FINAL = P.Header(title="Test Race", group="Pro", status="Final")
@@ -1476,7 +1485,7 @@ def test_a_grown_start_list_never_sets_its_rows_shorter_than_the_base_list(
     names = [_name(i) if long else f"{MID[i % len(MID)]} {i}" for i in range(n)]
     w = render(qtbot, "pre_race", _start(names), size=size)
     page = w.pages["pre_race"]
-    room = page.margin_rect().height() - 64 * page.u
+    room = page.margin_rect().height()
     tops = sorted({round(b.y(), 3) for b in bands})
     pitch = tops[1] - tops[0]
     # The base list: two columns from seven riders.
@@ -1513,9 +1522,9 @@ def test_a_grown_result_never_sets_its_rows_below_the_podium_shorter(qtbot, draw
     assert pages.FINISH_FILL_LEAST == 5
 
 
-def test_an_empty_start_list_paints_its_count_alone(qtbot, drawn):
+def test_an_empty_start_list_paints_no_count(qtbot, drawn):
     render(qtbot, "pre_race", _start([]))
-    assert "0 RIDERS" in strings(drawn)
+    assert not [s for s in strings(drawn) if "RIDER" in s.upper()]
 
 
 @pytest.mark.parametrize("riders", [2, 5, 8])

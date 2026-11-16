@@ -85,14 +85,15 @@ def record_plates(monkeypatch) -> list[QRectF]:
     return plates
 
 
-def record_chips(monkeypatch) -> list[QRectF]:
+def record_chips(monkeypatch) -> list[tuple[QRectF, object]]:
+    """Every chip drawn, with the device it was drawn on."""
     from madtracker.board import theme as t
 
-    chips: list[QRectF] = []
+    chips: list[tuple[QRectF, object]] = []
     chip = t.chip
 
     def record(p, x, y, h, s, *args, **kwargs):
-        chips.append(QRectF(x, y, t.chip_width(h, s), h))
+        chips.append((QRectF(x, y, t.chip_width(h, s), h), p.device()))
         return chip(p, x, y, h, s, *args, **kwargs)
 
     monkeypatch.setattr(t, "chip", record)
@@ -209,6 +210,8 @@ def test_rider_names_plates_and_lap_chips_clear_the_bar(
     air = team_rows.SLANT_AIR * u - 0.01
     rows = [b["row"] for b in bands]
     assert rows
+    # The page's lap chips, not the top bar's group chip.
+    page_chips = [c for c, device in chips if device is w.pages[layout]]
     entries = data.roster if layout == "pre_race" else data.rows
     names = {(e if layout == "pre_race" else e.entry).names[0] for e in entries}
     shown = [(r, px) for s, r, px, _c in drawn if named(s, names)]
@@ -225,13 +228,13 @@ def test_rider_names_plates_and_lap_chips_clear_the_bar(
         for pl in [pl for pl in plates if row.contains(pl.center())]:
             assert swatch_air(row, pl.left(), pl.top(), u) >= air
             assert row.top() <= pl.top() and pl.bottom() <= row.bottom()
-        for c in [c for c in chips if row.contains(c.center())]:
+        for c in [c for c in page_chips if row.contains(c.center())]:
             assert swatch_air(row, c.left(), c.top(), u) >= air
             assert c.right() <= row.right()
     if label == "bibs_names":
         assert len(plates) == len(rows)
     if layout == "pre_race":
-        assert chips
+        assert page_chips
 
 
 def _still(drawn, bands, names) -> tuple:
@@ -305,3 +308,32 @@ def test_the_rider_table_keeps_its_headings_and_plain_laps(qtbot, drawn, monkeyp
     assert not [s for s in seen if s.endswith("L") and s[:1] in "+−"]
     rider = next(r for s, r, *_ in drawn if s == "RIDER")
     assert rider.left() == pytest.approx(min(pl.left() for pl in plates), abs=0.5)
+
+
+# Names of a usual length and short names, as design section 10 measures them.
+USUAL = ["Arlo Quillan", "Bexa Yarrow", "Corin Fallowby", "Dalia Vesk", "Emrys Dunhallow"]
+SHORT = ["Ada Quill", "Bo Lin", "Cy Dorn", "Di Ash"]
+
+
+def test_the_rider_sizes_design_section_10_states_at_1080(qtbot, drawn):
+    """Five riders of a usual length set start list names of 100 px
+    against the base list's 56; five short-name riders set table totals
+    of 97 px and names of 74, nine riders 60 and 46, sixteen 44 and 36."""
+    roster = [P.Entry(bibs=[str(i + 1)], names=[n]) for i, n in enumerate(USUAL)]
+    render(qtbot, "pre_race", P.PreRace(header=START, roster=roster))
+    assert {px for s, _r, px, _c in drawn if s in USUAL} == {100}
+    for n, total_px, name_px in ((5, 97, 74), (9, 60, 46), (16, 44, 36)):
+        rows = [
+            P.StandingRow(
+                rank=i + 1,
+                entry=P.Entry(bibs=[str(500 + i)], names=[SHORT[i % 4]]),
+                sprints=[10 + i, None],
+                total=1000 + i,
+            )
+            for i in range(n)
+        ]
+        drawn.clear()
+        render(qtbot, "sprint_points", P.Standings(RUNNING, 2, rows, current_sprint=1))
+        totals = {px for s, _r, px, _c in drawn if s in {str(r.total) for r in rows}}
+        assert totals == {total_px}, n
+        assert {px for s, _r, px, _c in drawn if s in SHORT} == {name_px}, n
