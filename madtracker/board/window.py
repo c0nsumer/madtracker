@@ -538,6 +538,10 @@ class BoardCanvas(QWidget):
 
     def _turn_page(self) -> None:
         page = self.pages[self._layout_name]
+        # A Madison table with a clock turns its pages with its rotation,
+        # after each page's names and color views.
+        if getattr(page, "rotates", lambda: False)():
+            return
         if page.data is not None and hasattr(page, "advance"):
             page.advance()
 

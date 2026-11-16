@@ -11,13 +11,13 @@ import math
 from dataclasses import replace
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from madtracker.board import team_rows
+from madtracker.board import rotation, team_rows
 from madtracker.board import theme as t
-from madtracker.board.motion import Clock
+from madtracker.board.motion import Clock, Ticker
 from madtracker.board.payloads import (
     Between,
     Elimination,
@@ -37,22 +37,16 @@ LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter
 
-# A team's total plate is set in from its bar by this share of the bar's
-# height on the top, right, and bottom, so the color shows evenly around it.
-PLATE_MARGIN = 0.12
-# The air inside the plate on each side of the widest total, in ems of
-# the total's type.
-PLATE_PAD = 0.32
-# What the plate is sized for from the first lap, so the plates never
-# change width as the race goes on: three figures (the figures are
+# What a team table's total column is sized for from the first lap, so it
+# never widens as the race goes on: three figures (the figures are
 # tabular, so 888 is as wide as any) and a negative two.
-PLATE_SAMPLES = ("888", total_text(-88))
+TOTAL_SAMPLES = ("888", total_text(-88))
 # What a team page's size is decided for, beside the race's own figures: a
 # lap and a penalty, so the first lap gained or penalty given never steps
 # the totals down partway through a race.
 LAP_SAMPLES = ("+8", lap_text(-8))
 PENALTY_SAMPLES = (lap_text(-88),)
-# Between two figure columns inside a bar.
+# Between two figure columns on a team row.
 FIGURE_GAP = 40
 # The sprint card's points sit this far after the widest team block or rider.
 SPRINT_GAP = 28
@@ -78,51 +72,6 @@ def sprint_card_scale(rows: int, area_h: float, u: float) -> float:
     h = (SPRINT_HEAD_H + rows * SPRINT_ROW_H + SPRINT_FOOT_H) * u
     fit = (area_h - 2 * SPRINT_CARD_AIR * u) / h
     return max(0.0, min(SPRINT_CARD_SCALE, fit))
-
-
-def figure(p: QPainter, rect: QRectF, s: str, f: QFont, color: QColor, align=RIGHT) -> float:
-    """One line centered on ``rect`` by its capitals; return the width it used.
-
-    A team block centers its name by the capitals (``t.stacked_lines``),
-    so figures set beside or on a block are centered the same way and
-    share the name's baseline.
-    """
-    [line] = t.stacked_lines(rect, f, 1)
-    return t.text(p, QRectF(rect.x(), line.y(), rect.width(), line.height()), s, f, color, align)
-
-
-def block_name(p: QPainter, rect: QRectF, color: str, name: str, f: QFont, floor_px: float) -> None:
-    """A team's name in its color's ink, centered in ``rect``, a part of its block.
-
-    ``t.team_block`` centers a name in the whole block; a block that also
-    carries figures centers its name in the part the figures leave. The
-    name shrinks as ``t.team_block`` shrinks it, never under ``floor_px``.
-    """
-    if not name:
-        return
-    pad = f.pixelSize() * t.TEAM_PAD
-    room = rect.width() - 2 * pad
-    w = t.text_width(name, f)
-    if w > room > 0:
-        least = floor_px / f.pixelSize() if floor_px else t.NAME_FLOOR
-        f = t.scaled(f, min(1.0, max(least, room / w)))
-    shown = QRectF(rect.x() + pad, rect.y(), room, rect.height())
-    figure(p, shown, name, f, t.team_ink(QColor(color)), CENTER)
-
-
-def name_zone(bar: QRectF, names: list[str], f: QFont, figures_x: float, u: float) -> QRectF:
-    """Where a bar's name is centered: the whole bar, or the part left of its figures.
-
-    The whole bar while the widest name clears the figures, so the names
-    sit in the middle of the row; one answer for the list, so the names
-    stay one column.
-    """
-    gap = 24 * u
-    pad = f.pixelSize() * t.TEAM_PAD
-    half = max((t.text_width(n, f) for n in names), default=0.0) / 2 + pad
-    if bar.center().x() + half <= figures_x - gap:
-        return bar
-    return QRectF(bar.x(), bar.y(), max(0.0, figures_x - gap - bar.x()), bar.height())
 
 
 def lap_chip_height(u: float) -> float:
@@ -1068,29 +1017,37 @@ def sprint_title(res: SprintResult) -> str:
 # rather than shrinking its names, and its pages share the rows evenly, so
 # 24 riders show as 12 and 12, not 16 and a lonely 8.
 PAGE_ROWS = 16
-# A madison row carries a team block, so a page holds half as many. USAC
+# A madison row carries two riders, so a page holds half as many. USAC
 # 2B7 allows twelve teams on a 166.66 m track; twelve rows would set the
-# team names under MIN_PX, so a full field shows as two pages of six.
+# surnames under MIN_PX, so a full field shows as two pages of six.
 TEAM_PAGE_ROWS = 8
 # Team rows share the page's height whatever the field, so two teams read
 # from the track as large as the page allows; a lone team takes half the
-# page rather than one bar the whole height.
+# page rather than one row the whole height.
 TEAM_FILL_LEAST = 2
-# A team row's place and total, its largest type, as a share of the row.
+# A team row's total, its largest type, as a share of the row.
 TEAM_FIGURE_SHARE = 0.62
-# The team name as a share of the row; ``team_px`` holds it inside the bar.
-TEAM_NAME_SHARE = 0.5
+# The place beside the total's size: Black weight like the total, a step
+# under it, so the total stays the figure the eye finds first.
+TEAM_PLACE_SCALE = 0.85
 # The widest the place column grows, as a share of the page's width.
 TEAM_PLACE_SHARE = 0.14
-# LAPS and PENALTY grow with the row, under the total so it stays the
-# figure the eye finds first.
+# LAPS and PENALTY grow with the row, under the total.
 TEAM_LAPS_SHARE = 0.36
-# A small field's figures give way to its team names: they step down from
-# their share of the row until the widest name fits whole left of them at
-# TEAM_NAME_LEAST or larger, and never below TEAM_FIGURE_LEAST. A name is
-# what the stands match to the jerseys, and the growth is for both.
-TEAM_NAME_LEAST = 84
-TEAM_FIGURE_LEAST = 84
+# The riders' surnames, side by side on the row, as a share of its height.
+TEAM_SURNAME_SHARE = 0.48
+# The team's name in the color view, as a share of the row's height.
+TEAM_LABEL_SHARE = 0.52
+# The type grows with the rows up to a row this tall. A lone team's or a
+# pair's rows are taller, and type set to their height would leave two
+# surnames no room beside the figures; at this row the surnames are the
+# start list's largest.
+TEAM_TYPE_ROW_MOST = 200
+# The color view's solid color stops this far short of the first figure
+# column, so the figures keep the dark row around them in both views.
+COLOR_ZONE_GAP = 60
+# The total's right edge is set in this far from the row's right end.
+TEAM_FIGURE_PAD = 24
 # Row height to type in a rider table: the name is this share of the row,
 # so sixteen rows set it at MIN_PX and fewer rows set it larger.
 STANDINGS_NAME_SHARE = 0.69
@@ -1188,33 +1145,89 @@ def page_dots(p: QPainter, area: QRectF, pages: int, page: int, u: float) -> Non
         p.drawEllipse(QRectF(x + i * (dot + gap), y, dot, dot))
 
 
+class TeamTable(NamedTuple):
+    """A Madison table's layout, worked out once per payload and board size.
+
+    A frame of the rotation only reads it, so the motion never measures
+    text. ``labels`` holds each row's team name and its font, in the
+    payload's row order.
+    """
+
+    rows_top: float
+    rh: float
+    gap: float
+    row_x: float
+    rank_w: float
+    place_f: QFont
+    total_f: QFont
+    num: QFont
+    total_r: float
+    total_col: float
+    pen_r: float
+    pen_col: float
+    laps_r: float
+    laps_col: float
+    penalized: bool
+    zone_r: float
+    names_x: float
+    half: float
+    surname_f: QFont
+    plate_h: float
+    labels: list[tuple[str, QFont]]
+
+
 class StandingsPage(Page):
     """Points race, madison and tempo standings: place, who, sprint points, laps, total.
 
     No per-sprint columns: riders read the board at speed for their
     place, their total and their laps, and on a TV the columns squeeze a
-    long team name ("Stars and Stripes") and make the table too busy to
-    parse. One SPRINT PTS column carries the sprint points so far and
-    LAPS the laps alone ("+1"): a bare number under SPRINTS reads as a
-    count of sprints, and "+1 (+20)" mixes laps with points. The team
-    page drops SPRINT PTS and the riders' names and sets its place, team
-    bar and total as the row's largest things (``team_table``). Each
-    sprint shows for a few seconds on the sprint-result card as it lands; the operator table and the
-    results sheet keep every sprint. More than PAGE_ROWS rows
-    (TEAM_PAGE_ROWS for teams) are shown a page at a time; ``advance``
-    turns the page.
+    long name and make the table too busy to parse. One SPRINT PTS
+    column carries the sprint points so far and LAPS the laps alone
+    ("+1"): a bare number under SPRINTS reads as a count of sprints, and
+    "+1 (+20)" mixes laps with points. The Madison page drops SPRINT PTS,
+    names each team by its riders' surnames on a row of its color, and
+    turns to the team's color and name on a timer (``team_table``). Each
+    sprint of a Points Race shows for a few seconds on the sprint-result
+    card as it lands; the operator table and the results sheet keep
+    every sprint. More than PAGE_ROWS rows (TEAM_PAGE_ROWS for teams) are
+    shown a page at a time; ``advance`` turns the page, and a Madison
+    table with a clock turns its own pages with its rotation.
     """
 
     page = 0
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # The Madison table's layout and what it was worked out for, so a
+        # frame of the rotation measures nothing.
+        self._layout: tuple[tuple, TeamTable] | None = None
+        # The clock's time when the rotation last started: a new race or
+        # sprint (a new header) starts it over on the names view.
+        self._rotation_from = 0.0
+        # Frames run only while a change between views moves; between
+        # changes one timer waits for the next, so the board idles.
+        self._ticker = Ticker(self, self._busy)
+        self._wake = QTimer(self, singleShot=True)
+        self._wake.timeout.connect(self._wake_up)
+
     def set_data(self, data) -> None:
         if self.data is None or getattr(self.data, "header", None) != getattr(data, "header", None):
             self.page = 0
+            self._rotation_from = self.clock.now() if self.clock is not None else 0.0
         super().set_data(data)
 
+    def teams(self) -> bool:
+        return self.data is not None and any(r.entry.color for r in self.data.rows)
+
+    def rotates(self) -> bool:
+        """Whether the table turns between its names and color views, and its pages, on its own."""
+        return self.clock is not None and self.teams()
+
     def page_most(self) -> int:
-        teams = self.data is not None and any(r.entry.color for r in self.data.rows)
-        return TEAM_PAGE_ROWS if teams else PAGE_ROWS
+        return TEAM_PAGE_ROWS if self.teams() else PAGE_ROWS
+
+    def per_page(self) -> int:
+        return page_rows(len(self.data.rows), self.page_most()) if self.data is not None else 1
 
     def page_count(self) -> int:
         rows = len(self.data.rows) if self.data is not None else 0
@@ -1234,17 +1247,54 @@ class StandingsPage(Page):
             self.page = (self.page + 1) % self.page_count()
             self.update()
 
+    # The rotation ------------------------------------------------------
+
+    def since(self) -> float:
+        """Milliseconds into the rotation; 0 with no clock, so the table rests on its names."""
+        return self.clock.now() - self._rotation_from if self.clock is not None else 0.0
+
+    def moving_now(self) -> bool:
+        """Whether a change between the names and color views is playing."""
+        return self.rotates() and rotation.moving(self.since(), self.per_page())
+
+    def wake_in(self) -> float | None:
+        """Milliseconds until the table next wakes to play a change; None while none waits."""
+        return float(self._wake.remainingTime()) if self._wake.isActive() else None
+
+    def _busy(self) -> bool:
+        return self.isVisible() and self.moving_now()
+
+    def _wake_up(self) -> None:
+        if self.isVisible() and self.rotates():
+            self._ticker.poke()
+            self.update()
+
+    def _schedule(self) -> None:
+        """Frames while a change plays, else one timer for the next change's start."""
+        if not self.rotates():
+            self._wake.stop()
+            return
+        since, rows = self.since(), self.per_page()
+        if rotation.moving(since, rows):
+            self._wake.stop()
+            self._ticker.poke()
+        else:
+            self._wake.start(math.ceil(rotation.until_change(since, rows)) + 1)
+
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Standings = self.data
         u = self.u
         pages = self.page_count()
-        page = self.page % pages
         per_page = page_rows(len(d.rows), self.page_most())
+        if self.rotates():
+            page = rotation.page_at(self.since(), per_page, pages)
+        else:
+            page = self.page % pages
         rows = d.rows[page * per_page : (page + 1) * per_page]
         n = max(1, min(len(d.rows), per_page))
         bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
-        if any(r.entry.color for r in d.rows):
-            self.team_table(p, area, d, rows, n, bottom, self.ordinals(d))
+        if self.teams():
+            self.team_table(p, area, d, page * per_page, rows, n, bottom)
         else:
             self.rider_table(p, area, d, rows, n, bottom)
 
@@ -1253,6 +1303,7 @@ class StandingsPage(Page):
 
         if d.sprint_result is not None:
             self.paint_overlay(p, area, d)
+        self._schedule()
 
     def row_band(self, p: QPainter, area: QRectF, i: int, y: float, rh: float) -> None:
         """Every other row on a faint band, so a row reads across the page."""
@@ -1412,215 +1463,231 @@ class StandingsPage(Page):
         p: QPainter,
         area: QRectF,
         d: Standings,
+        first: int,
         rows: list,
         n: int,
         bottom: float,
-        ordinals: bool = False,
     ) -> None:
-        """The madison page while the race runs: place, then one bar per team carrying its figures.
+        """The Madison page: place, then each team's row, its riders' surnames leading.
 
-        The bar runs from the place to the page's edge and LAPS, PENALTY
-        and TOTAL sit inside its right end, so a rider finds the color and
-        reads the team's figures on it without tracking across bare
-        background. LAPS and PENALTY take the bar's ink: a lap's green or
-        red on a red or green bar would vanish, so the sign carries the
-        gain or loss. The total sits dark on a plate (``t.figure_plate``),
-        and a status row keeps its word in the bar's ink with no plate, so
-        it reads apart from a scored row. The place and the total are the
-        row's largest type.
+        The row is the start list's swatch and fade, and the figures sit
+        on its dark right end: LAPS in the gain or loss color, PENALTY
+        while one stands, and TOTAL in white, the row's largest type. On
+        a timer the row turns to its color view, the name area solid in
+        the team's color with the team's name on it, and back (design
+        section 10). ``first`` is the payload index of the page's first row.
         """
         u = self.u
+        key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
+        if self._layout is None or self._layout[0] != key:
+            # A copy, so a payload changed where it stands is not taken for the one measured.
+            self._layout = (
+                (*key[:-1], copy.deepcopy(d)),
+                self.team_table_layout(area, d, n, bottom),
+            )
+        lay = self._layout[1]
+        ordinals = self.ordinals(d)
+        lab = t.label(u)
         head_h = 44 * u
+        reach = 200 * u
         top = area.y()
-        rows_top = top + head_h + 8 * u
-        rh = (bottom - rows_top) / max(n, TEAM_FILL_LEAST)
-        inset = 0.05
-        bh = rh * (1 - 2 * inset)
+        t.text(p, QRectF(area.x(), top, lay.rank_w, head_h), "#", lab, t.MUTED)
+        t.text(p, QRectF(lay.laps_r - reach, top, reach, head_h), "LAPS", lab, t.MUTED, RIGHT)
+        if lay.penalized:
+            t.text(p, QRectF(lay.pen_r - reach, top, reach, head_h), "PENALTY", lab, t.MUTED, RIGHT)
+        t.text(p, QRectF(lay.total_r - reach, top, reach, head_h), "TOTAL", lab, t.TEXT, RIGHT)
+
+        since, per_page = self.since(), self.per_page()
+        for i, row in enumerate(rows):
+            y = lay.rows_top + i * (lay.rh + lay.gap)
+            look = rotation.look(since, i, per_page) if self.rotates() else rotation.NAMES
+            e = row.entry
+            band = QRectF(lay.row_x, y, area.right() - lay.row_x, lay.rh)
+            team_rows.paint_band(p, band, e.color, u, sweep=look.sweep, zone_right=lay.zone_r)
+            # The leader in the accent, running or decided, as the winner
+            # alone is on the podium page.
+            place = ordinal(row.rank) if ordinals else str(row.rank)
+            ink = t.ACCENT if row.rank == 1 else t.TEXT
+            t.text(p, QRectF(area.x(), y, lay.rank_w, lay.rh), place, lay.place_f, ink)
+            if look.names > 0:
+                p.save()
+                p.setOpacity(look.names)
+                self.team_riders(p, band, e, lay)
+                p.restore()
+            if look.label > 0:
+                name, f = lay.labels[first + i]
+                rise = (1 - look.label) * 12 * u
+                pad = team_rows.ROW_PAD * u
+                rect = QRectF(band.x() + pad, y + rise, lay.zone_r - band.x() - 2 * pad, lay.rh)
+                p.save()
+                p.setOpacity(look.label)
+                t.text(p, rect, name, f, t.team_ink(QColor(e.color)), CENTER)
+                p.restore()
+            cell = QRectF(0, y, 0, lay.rh)
+            # A status row shows its status and no figures, laps included.
+            if row.laps and not row.status:
+                # The laps alone: the points they earn are in the total.
+                rect = cell.adjusted(lay.laps_r - lay.laps_col, 0, lay.laps_r, 0)
+                t.text(
+                    p, rect, lap_text(row.laps), lay.num, t.GAIN if row.laps > 0 else t.LOSS, RIGHT
+                )
+            if lay.penalized and row.penalty and not row.status:
+                # Written as a lap lost is, in the loss color: points taken.
+                rect = cell.adjusted(lay.pen_r - lay.pen_col, 0, lay.pen_r, 0)
+                color = t.LOSS if row.penalty < 0 else t.GAIN
+                t.text(p, rect, lap_text(row.penalty), lay.num, color, RIGHT)
+            rect = cell.adjusted(lay.total_r - lay.total_col, 0, lay.total_r, 0)
+            shown = row.status or total_text(row.total)
+            t.text(p, rect, shown, lay.total_f, t.TEXT, RIGHT)
+
+    def team_riders(self, p: QPainter, band: QRectF, e: Entry, lay: TeamTable) -> None:
+        """A team's two riders side by side: their surnames, or with Bibs Only their plates.
+
+        A rider with no bib yet is named with Bibs Only too, never shown
+        an empty plate, as on the start list.
+        """
+        u = self.u
+        for k, name in enumerate(e.names[:2]):
+            x = lay.names_x + k * lay.half
+            room = max(0.0, lay.half - team_rows.RIDER_GAP * u)
+            bib = e.bibs[k] if k < len(e.bibs) else ""
+            if self.bibs_only and bib:
+                ph = lay.plate_h
+                t.plate(p, QRectF(x, band.center().y() - ph / 2, t.plate_width(ph), ph), bib)
+                continue
+            last = team_rows.split_name(name)[1]
+            rect = QRectF(x, band.y(), room, band.height())
+            t.text(p, rect, t.elide(last, room, lay.surname_f), lay.surname_f, t.TEXT)
+
+    def team_table_layout(self, area: QRectF, d: Standings, n: int, bottom: float) -> TeamTable:
+        """The Madison table's rows, columns and fonts for this payload on this board.
+
+        The rows share the page down to TEAM_FILL_LEAST rows' worth, each
+        page set for a full page's rows. Every column and size is measured
+        over every row, not the page's, so nothing moves as the page
+        turns, and the sizes are decided as though a lap, a penalty, and
+        ordinal places stood, so the first lap gained, the first penalty
+        given, or the race being decided never steps the totals or the
+        surnames down while the riders read them.
+        """
+        u = self.u
+        rows_top = area.y() + (44 + 10) * u
+        gap = team_rows.ROW_GAP * u
+        rh = (bottom - rows_top - (n - 1) * gap) / max(n, TEAM_FILL_LEAST)
+        type_h = min(rh, TEAM_TYPE_ROW_MOST * u)
         lab = t.label(u)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
         penalized = any(r.penalty for r in d.rows if not r.status)
+        ordinals = self.ordinals(d)
 
-        def widest(strings: list[str], f: QFont) -> float:
+        def widest(strings, f: QFont) -> float:
             return max((t.text_width(s, f) for s in strings if s), default=0.0)
 
-        # Every column is measured over every row, not the page's, so the
-        # bars and the figures hold still as the page turns.
-        def place(rank: int) -> str:
-            return ordinal(rank) if ordinals else str(rank)
-
-        places = [place(r.rank) for r in d.rows]
+        places = [ordinal(r.rank) if ordinals else str(r.rank) for r in d.rows]
         decided = [ordinal(r.rank) for r in d.rows]
-        names = [r.entry.team or "" for r in d.rows]
         totals = [total_text(r.total) for r in d.rows if not r.status]
-        gap = FIGURE_GAP * u
-
-        def columns(big_px: float, reserve: bool = False) -> dict:
-            """The fonts and right edges of the place and the figures at ``big_px``.
-
-            ``reserve`` lays the figures out as a race may come to need
-            them, with a lap, a penalty, and its places worded as ordinals
-            once decided, for deciding the page's size.
-            """
-            # The plate's margin is the bar's at full size and gives way
-            # with the figures, as the plate itself does.
-            margin = bh * PLATE_MARGIN * big_px / (rh * TEAM_FIGURE_SHARE)
-            place_f = t.font(big_px, t.HEAVY, tabular=True)
-            total_f = t.font(big_px, t.HEAVY, tabular=True)
-            # The laps and penalty keep pace with the figures, never under
-            # the floor.
-            laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
-            num = t.font(max(min(48 * u, rh * 0.7), laps_px), t.BOLD, tabular=True)
-            # The place matches the total until its column would pass
-            # TEAM_PLACE_SHARE of the page: a decided two-team field sets
-            # "2nd" at a row's height, which would take the bars' room.
-            most = area.width() * TEAM_PLACE_SHARE - 32 * u
-            shown = [*places, *decided] if reserve else places
-            if widest(shown, place_f) > most:
-                place_f = t.font(big_px * most / widest(shown, place_f), t.HEAVY, tabular=True)
-            rank_w = max(80 * u, widest(shown, place_f) + 32 * u)
-            # A column is as wide as its heading or its widest figure, so
-            # each heading sits over its figures, right edges together.
-            plate_col = max(widest([*totals, *PLATE_SAMPLES], total_f), t.text_width("TOTAL", lab))
-            # The feed leaves a status row off the board; a page given one
-            # keeps the word clear of the figures beside it.
-            total_col = max(plate_col, widest([r.status for r in d.rows], total_f))
-            laps_col = max(
-                widest(
-                    [
-                        *(lap_text(r.laps) for r in d.rows if not r.status),
-                        *(LAP_SAMPLES if reserve else ()),
-                    ],
-                    num,
-                ),
-                t.text_width("LAPS", lab),
-            )
-            pen_col = max(
-                widest(
-                    [
-                        *(lap_text(r.penalty) for r in d.rows if not r.status),
-                        *(PENALTY_SAMPLES if reserve else ()),
-                    ],
-                    num,
-                ),
-                t.text_width("PENALTY", lab),
-            )
-            bar_x = area.x() + rank_w
-            pad = big_px * PLATE_PAD
-            total_r = area.right() - margin - pad
-            # One width for every plate, so they stand as one column with
-            # the same air on both sides of its widest figure.
-            plate_l = total_r - plate_col - pad
-            pen_r = min(plate_l, total_r - total_col) - gap
-            laps_r = pen_r - pen_col - gap if penalized or reserve else pen_r
-            return {
-                "place_f": place_f,
-                "total_f": total_f,
-                "num": num,
-                "rank_w": rank_w,
-                "bar_x": bar_x,
-                "total_col": total_col,
-                "laps_col": laps_col,
-                "pen_col": pen_col,
-                "total_r": total_r,
-                "plate_l": plate_l,
-                "pen_r": pen_r,
-                "laps_r": laps_r,
-                "figures_x": laps_r - laps_col,
-                "margin": margin,
-            }
-
-        # The team name near the figures' size: with no riders on the row
-        # the bar is the row, and its name is read with the place and the
-        # total. ``team_px`` holds it inside the bar's height.
-        name_cap = self.team_px(rh * TEAM_NAME_SHARE, rh * TEAM_NAME_SHARE, bh)
-
-        def name_px(cols: dict) -> float:
-            """The largest name size up to ``name_cap`` at which the widest name fits left of the figures."""
-            room = cols["figures_x"] - 24 * u - cols["bar_x"]
-            wide = widest(names, t.font(name_cap, t.BOLD))
-            if not wide:
-                return name_cap
-            need = wide + 2 * name_cap * t.TEAM_PAD
-            if need <= room:
-                return name_cap
-            px = name_cap * max(0.0, room) / need
-            # Text width is not exactly linear in pixel size (hinting).
-            while px > 1 and widest(names, t.font(px, t.BOLD)) + 2 * px * t.TEAM_PAD > room:
-                px -= 1
-            return max(px, 0.0)
-
-        big_px = rh * TEAM_FIGURE_SHARE
-        least_big = min(big_px, TEAM_FIGURE_LEAST * u)
-        least_name = min(name_cap, TEAM_NAME_LEAST * u)
-        # The size is decided as though a lap and a penalty stood, and the
-        # names' size with it, so neither moves when the race gets one.
-        sizing = columns(big_px, reserve=True)
-
-        def short(cols: dict) -> bool:
-            # The names want more room, or the figures would start left
-            # of the bar, over the place column.
-            return name_px(cols) < least_name or cols["figures_x"] < cols["bar_x"] + 24 * u
-
-        while short(sizing) and big_px > least_big:
-            big_px = max(least_big, big_px * 0.96)
-            sizing = columns(big_px, reserve=True)
-        name_f = t.font(max(name_px(sizing), t.MIN_PX * u), t.BOLD)
-        cols = columns(big_px)
-        place_f, total_f, num = cols["place_f"], cols["total_f"], cols["num"]
-        rank_w, bar_x, bar_r = cols["rank_w"], cols["bar_x"], area.right()
-        total_col, laps_col, pen_col = cols["total_col"], cols["laps_col"], cols["pen_col"]
-        total_r, plate_l, pen_r, laps_r = (
-            cols["total_r"],
-            cols["plate_l"],
-            cols["pen_r"],
-            cols["laps_r"],
+        big_px = type_h * TEAM_FIGURE_SHARE
+        total_f = t.font(big_px, t.HEAVY, tabular=True)
+        # The laps and penalty keep pace with the total, never under the floor.
+        laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
+        num = t.font(max(min(48 * u, type_h * 0.7), laps_px), t.BOLD, tabular=True)
+        # A column is as wide as its heading or its widest figure, so each
+        # heading sits over its figures, right edges together. The feed
+        # leaves a status row off the board; a page given one keeps the
+        # word clear of the figures beside it.
+        total_col = max(
+            widest([*totals, *TOTAL_SAMPLES, *(r.status for r in d.rows)], total_f),
+            t.text_width("TOTAL", lab),
         )
-        figures_x = cols["figures_x"]
-        # A plate keeps to its figures when they gave way to the names, so
-        # a bar taller than its figures does not hold a tall, narrow plate
-        # with a heavy edge.
-        give = big_px / (rh * TEAM_FIGURE_SHARE)
-        margin = cols["margin"]
-        plate_h = (bh - 2 * bh * PLATE_MARGIN) * give
-        zone = name_zone(QRectF(bar_x, 0, bar_r - bar_x, bh), names, name_f, figures_x, u)
+        shown_laps = [lap_text(r.laps) for r in d.rows if not r.status]
+        shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
+        laps_col = max(widest([*shown_laps, *LAP_SAMPLES], num), t.text_width("LAPS", lab))
+        pen_col = max(widest([*shown_pens, *PENALTY_SAMPLES], num), t.text_width("PENALTY", lab))
+        fig_gap = FIGURE_GAP * u
+        total_r = area.right() - TEAM_FIGURE_PAD * u
+        pen_r = total_r - total_col - fig_gap
+        reserve_laps_r = pen_r - pen_col - fig_gap
+        laps_r = reserve_laps_r if penalized else pen_r
 
-        reach = 200 * u
-        t.text(p, QRectF(area.x(), top, rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(bar_x, top, reach, head_h), "TEAM", lab, t.MUTED)
-        t.text(p, QRectF(laps_r - reach, top, reach, head_h), "LAPS", lab, t.MUTED, RIGHT)
-        if penalized:
-            t.text(p, QRectF(pen_r - reach, top, reach, head_h), "PENALTY", lab, t.MUTED, RIGHT)
-        t.text(p, QRectF(total_r - reach, top, reach, head_h), "TOTAL", lab, t.TEXT, RIGHT)
+        def place_column(shown: list[str]) -> tuple[QFont, float]:
+            # The place matches the total's scale until its column would
+            # pass TEAM_PLACE_SHARE of the page: a decided two-team field
+            # sets "2nd" at a row's height, which would take the names' room.
+            f = t.font(big_px * TEAM_PLACE_SCALE, t.HEAVY, tabular=True)
+            most = area.width() * TEAM_PLACE_SHARE - 32 * u
+            if widest(shown, f) > most:
+                f = t.font(f.pixelSize() * most / widest(shown, f), t.HEAVY, tabular=True)
+            return f, max(80 * u, widest(shown, f) + 32 * u)
 
-        for i, row in enumerate(rows):
-            y = rows_top + i * rh
-            self.row_band(p, area, i, y, rh)
-            # The leader in the accent, running or decided, as the winner
-            # alone is on the podium page.
-            top = t.ACCENT if row.rank == 1 else t.TEXT
-            t.text(p, QRectF(area.x(), y, rank_w, rh), place(row.rank), place_f, top)
-            e = row.entry
-            bar = QRectF(bar_x, y + rh * inset, bar_r - bar_x, bh)
-            t.team_block(p, bar, e.color, "", name_f)
-            name_rect = QRectF(zone.x(), bar.y(), zone.width(), bh)
-            block_name(p, name_rect, e.color, e.team or "", name_f, t.MIN_PX * u)
-            ink = t.team_ink(QColor(e.color))
-            # A status row shows its status and no figures, laps included.
-            if row.laps and not row.status:
-                # The laps alone: the points they earn are in the total.
-                lap = QRectF(laps_r - laps_col, bar.y(), laps_col, bh)
-                figure(p, lap, lap_text(row.laps), num, ink, RIGHT)
-            if penalized and row.penalty and not row.status:
-                pen = QRectF(pen_r - pen_col, bar.y(), pen_col, bh)
-                figure(p, pen, lap_text(row.penalty), num, ink, RIGHT)
-            if not row.status:
-                plate_y = bar.y() + (bh - plate_h) / 2
-                plate = QRectF(plate_l, plate_y, bar_r - margin - plate_l, plate_h)
-                t.figure_plate(p, plate, bh * give)
-            total = QRectF(total_r - total_col, bar.y(), total_col, bh)
-            total_ink = ink if row.status else t.PLATE_TEXT
-            figure(p, total, row.status or total_text(row.total), total_f, total_ink, RIGHT)
+        place_f, rank_w = place_column(places)
+        _f, reserve_rank_w = place_column([*places, *decided])
+        row_x = area.x() + rank_w
+        pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u
+
+        def name_room(x: float, laps_right: float) -> tuple[float, float, float]:
+            zone_r = laps_right - laps_col - COLOR_ZONE_GAP * u
+            half = max(0.0, (zone_r - x - pad) / 2)
+            return zone_r, x + pad, half
+
+        zone_r, names_x, half = name_room(row_x, laps_r)
+        # The surnames are measured in the room a penalty and ordinal places
+        # would leave, so neither steps them down when it comes.
+        _z, _x, least_half = name_room(area.x() + reserve_rank_w, reserve_laps_r)
+        room = max(0.0, least_half - team_rows.RIDER_GAP * u)
+        size = type_h * TEAM_SURNAME_SHARE
+        surname_f = t.font(size, t.HEAVY)
+        lasts = [team_rows.split_name(n)[1] for r in d.rows for n in r.entry.names[:2]]
+        floor_px = round(t.MIN_PX * u)
+        scale = t.fit_scale([(s, room, surname_f) for s in lasts], floor=t.MIN_PX * u / size)
+        surname_f = t.font(max(math.floor(size * scale), floor_px), t.HEAVY)
+        # Text width is not exactly linear in pixel size (hinting).
+        while surname_f.pixelSize() > floor_px and widest(lasts, surname_f) > room:
+            surname_f = t.font(surname_f.pixelSize() - 1, t.HEAVY)
+        plate_h = min(
+            type_h * team_rows.BIBS_ONLY_PLATE_SHARE,
+            team_rows.BIBS_ONLY_PLATE_MOST * u,
+            max(0.0, half - team_rows.RIDER_GAP * u) / t.plate_width(1.0),
+        )
+
+        # The color view's team name: as large as its share of the row
+        # while it fits the area, then smaller down to the floor, then cut.
+        label_room = zone_r - row_x - 2 * team_rows.ROW_PAD * u
+        labels = []
+        for r in d.rows:
+            name = r.entry.team or ""
+            f = t.font(type_h * TEAM_LABEL_SHARE, t.HEAVY)
+            w = t.text_width(name, f)
+            if w > label_room > 0:
+                px = max(t.MIN_PX * u, f.pixelSize() * label_room / w)
+                f = t.font(px, t.HEAVY)
+                # Text width is not exactly linear in pixel size (hinting).
+                while f.pixelSize() > round(t.MIN_PX * u) and t.text_width(name, f) > label_room:
+                    f = t.font(f.pixelSize() - 1, t.HEAVY)
+            labels.append((name, f))
+        return TeamTable(
+            rows_top=rows_top,
+            rh=rh,
+            gap=gap,
+            row_x=row_x,
+            rank_w=rank_w,
+            place_f=place_f,
+            total_f=total_f,
+            num=num,
+            total_r=total_r,
+            total_col=total_col,
+            pen_r=pen_r,
+            pen_col=pen_col,
+            laps_r=laps_r,
+            laps_col=laps_col,
+            penalized=penalized,
+            zone_r=zone_r,
+            names_x=names_x,
+            half=half,
+            surname_f=surname_f,
+            plate_h=plate_h,
+            labels=labels,
+        )
 
     def paint_overlay(self, p: QPainter, area: QRectF, d: Standings) -> None:
         """The sprint's result over the standings: place, who, and the points one gap after.

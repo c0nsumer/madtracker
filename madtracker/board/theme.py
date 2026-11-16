@@ -27,9 +27,6 @@ MUTED = QColor("#8f9aab")
 DIM = QColor("#646d7e")
 PLATE = QColor("#f7f7f2")
 PLATE_TEXT = QColor("#0b0d11")
-# A team's total sits on a plate edged in the gray a Black block's ring
-# shows (TEAM_RING over Black), one edge for every outline on the board.
-FIGURE_PLATE_EDGE = QColor("#686a6c")
 # A plate for a rider already out: present but plainly not in the race,
 # its digits still 6:1 against the plate.
 PLATE_OUT = QColor("#262c36")
@@ -358,20 +355,6 @@ def team_block(
         team_ink(fill),
         Qt.AlignmentFlag.AlignCenter,
     )
-
-
-def figure_plate(p: QPainter, rect: QRectF, block_h: float) -> None:
-    """The plate a team's total sits on inside its block.
-
-    A mid-tone block such as Blue or Red gives its own ink only 4 to
-    4.5:1, so the total, the figure the riders race on, is set dark on a
-    plate that reads the same on every color. The edge is the width of a
-    Black block's ring, so a plate on White or Yellow still has an edge.
-    """
-    p.setPen(QPen(FIGURE_PLATE_EDGE, max(1.0, block_h * 0.03)))
-    p.setBrush(QColor(PLATE))
-    r = rect.height() * 0.14
-    p.drawRoundedRect(rect, r, r)
 
 
 CHIP_TYPE = 0.56

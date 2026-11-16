@@ -361,3 +361,289 @@ def test_a_dark_team_gets_no_ring(qapp):
     y = int(ROW.top()) + 1
     light = max(img.pixelColor(x, y).lightness() for x in range(int(ROW.left()), int(ROW.right())))
     assert light <= max(t.ROW.lightness(), QColor(formats.TEAM_COLORS["Black"]).lightness()) + 4
+
+
+# The standings table -----------------------------------------------------------
+
+# The design's example: color word, laps, total, in place order.
+TABLE = [("Red", 1, 28), ("Blue", 0, 17), ("Orange", 0, 11), ("Yellow", 0, 6), ("Black", -1, -14)]
+
+
+def standings(teams: int = 5, status: str = "After Sprint 2 of 4") -> P.Standings:
+    bibs = {c: (a, b) for c, a, b in TEAMS}
+    first = [c for c, *_ in TABLE]
+    order = first + [c for c, *_ in TEAMS if c not in first]
+    figures = {c: (laps, total) for c, laps, total in TABLE}
+    rows = []
+    for i, color in enumerate(order[:teams]):
+        laps, total = figures.get(color, (0, 5 - i))
+        entry = team(color, *bibs[color])
+        rows.append(P.StandingRow(rank=i + 1, entry=entry, sprints=[], laps=laps, total=total))
+    header = P.Header("2 Mile Madison", "Group A", "Madison", status)
+    return P.Standings(header=header, sprint_count=4, rows=rows, current_sprint=2)
+
+
+def surnames(data: P.Standings) -> list[str]:
+    return [surname(n) for r in data.rows for n in r.entry.names]
+
+
+def clocked(w, at: float = 0.0):
+    """Give the board a clock ``at`` ms into the rotation."""
+    from madtracker.board.motion import ManualClock
+
+    clock = ManualClock(0.0)
+    w.set_clock(clock)
+    clock.advance(at)
+    return clock
+
+
+def color_view_ms(rows: int = 5) -> float:
+    from madtracker.board import rotation
+
+    return rotation.NAMES_MS + rotation.change_ms(rows) + 10
+
+
+def record_bands(monkeypatch) -> list[tuple[QRectF, float, float | None]]:
+    """Every team row the page paints: its rect, sweep and color zone's right edge."""
+    from madtracker.board import team_rows
+
+    bands: list[tuple[QRectF, float, float | None]] = []
+    band = team_rows.paint_band
+
+    def record(p, row, color, u, sweep=0.0, zone_right=None):
+        bands.append((QRectF(row), sweep, zone_right))
+        return band(p, row, color, u, sweep, zone_right)
+
+    monkeypatch.setattr(team_rows, "paint_band", record)
+    return bands
+
+
+def test_the_madison_table_names_view_shows_surnames_and_no_team_words(qtbot, drawn):
+    data = standings(5)
+    data.rows[1].entry.team = "Stars and Stripes"
+    render(qtbot, "madison", data)
+    s = strings(drawn)
+    assert {"Okafor", "Haddad", "Delgado", "Mori"} <= set(s)
+    assert {"#", "LAPS", "TOTAL"} <= set(s)
+    assert "TEAM" not in s and "PENALTY" not in s and "SPRINT PTS" not in s
+    assert not set(s) & set(formats.TEAM_COLORS) and "Stars and Stripes" not in s
+    firsts = {n.partition(" ")[0] for r in data.rows for n in r.entry.names}
+    assert not set(s) & firsts
+
+
+@pytest.mark.parametrize("teams, total, surname_px", [(5, 97, 75)])
+def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, total, surname_px):
+    """Design section 10: 5 teams give rows of 156 px, totals of 97 px, and
+    surnames of 75 px; the place is 0.85 of the total and LAPS under it."""
+    from madtracker.board import pages, team_rows
+
+    bands = record_bands(monkeypatch)
+    data = standings(teams)
+    render(qtbot, "madison", data)
+    rows = [r for r, *_ in bands]
+    assert {round(r.height()) for r in rows} == {156}
+    for a, b in zip(rows, rows[1:], strict=False):
+        assert b.top() - a.bottom() == pytest.approx(team_rows.ROW_GAP)
+    assert sizes(drawn, ["28", "17", "11", "6", "−14"]) == {total}
+    assert sizes(drawn, surnames(data)) == {surname_px}
+    assert sizes(drawn, ["1", "2", "3", "4", "5"]) == {round(total * pages.TEAM_PLACE_SCALE)}
+    [laps] = sizes(drawn, ["+1", "−1"])
+    assert laps < total
+
+
+def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, monkeypatch):
+    """The leader's place in the accent; LAPS in the gain or loss color and
+    TOTAL in white on the dark row, each right-aligned under its heading."""
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "madison", standings(5))
+    at = {s: (r, c) for s, r, _px, c in drawn}
+    assert at["1"][1] == t.ACCENT.name() and at["2"][1] == t.TEXT.name()
+    assert at["+1"][1] == t.GAIN.name() and at["−1"][1] == t.LOSS.name()
+    assert at["28"][1] == at["−14"][1] == t.TEXT.name()
+    assert at["28"][0].right() == pytest.approx(at["TOTAL"][0].right())
+    assert at["+1"][0].right() == pytest.approx(at["LAPS"][0].right())
+    assert at["+1"][0].right() < at["28"][0].right()
+    # The place left of the row, the names on it, the figures at its right end.
+    row = bands[0][0]
+    assert row.right() == pytest.approx(w.pages["madison"].margin_rect().right())
+    assert at["1"][0].right() <= row.left()
+    okafor, haddad = at["Okafor"][0], at["Haddad"][0]
+    assert row.left() < okafor.left() < haddad.left() < at["LAPS"][0].left()
+    assert okafor.center().y() == pytest.approx(row.center().y(), abs=1)
+
+
+def test_the_color_view_shows_the_team_name_in_its_ink(qtbot, drawn, monkeypatch):
+    from PySide6.QtGui import QColor
+
+    from madtracker.board import theme as t
+
+    bands = record_bands(monkeypatch)
+    data = standings(5)
+    data.rows[1].entry.team = "Stars and Stripes"
+    w = render(qtbot, "madison", data)
+    clocked(w, color_view_ms())
+    drawn.clear()
+    bands.clear()
+    w.grab()
+    colors = {s: c for s, _r, _px, c in drawn}
+    assert colors["Red"] == t.team_ink(QColor(formats.TEAM_COLORS["Red"])).name()
+    assert colors["Yellow"] == t.team_ink(QColor(formats.TEAM_COLORS["Yellow"])).name()
+    assert "Stars and Stripes" in colors and "Blue" not in colors
+    assert not set(colors) & set(surnames(data))
+    # The color fills the name area solid, short of the LAPS column.
+    laps = next(r for s, r, *_ in drawn if s == "+1")
+    assert {sweep for _r, sweep, _z in bands} == {1.0}
+    assert all(z < laps.left() for _r, _s, z in bands)
+    # The name is centered on the area.
+    row, _sweep, zone = bands[0]
+    red = next(r for s, r, *_ in drawn if s == "Red")
+    assert red.center().x() == pytest.approx((row.left() + zone) / 2, abs=1)
+    assert red.center().y() == pytest.approx(row.center().y(), abs=1)
+
+
+def test_a_long_team_name_shrinks_to_the_floor_then_is_cut(qtbot, drawn):
+    from madtracker.board import theme as t
+
+    data = standings(8)
+    longest = "The Grand Corktown and Woodbridge Racing"
+    data.rows[0].entry.team = longest
+    data.rows[2].entry.team = "Stars and Stripes"
+    w = render(qtbot, "madison", data, size=(900, 768))
+    clocked(w, color_view_ms(8))
+    drawn.clear()
+    w.grab()
+    u = w.pages["madison"].u
+    px = {s: (r, px) for s, r, px, _c in drawn}
+    rect, size = px[longest]
+    assert size == round(t.MIN_PX * u)
+    assert t.elide(longest, rect.width(), t.font(size, t.HEAVY)).endswith("…")
+    rect, size = px["Stars and Stripes"]
+    assert size >= round(t.MIN_PX * u)
+    assert t.text_width("Stars and Stripes", t.font(size, t.HEAVY)) <= rect.width()
+
+
+def test_totals_and_laps_hold_still_across_the_rotation(qtbot, drawn):
+    from madtracker.board import rotation
+
+    w = render(qtbot, "madison", standings(5))
+    clock = clocked(w)
+    frames = []
+    for at in (0, rotation.NAMES_MS + 200, color_view_ms() - 10, color_view_ms()):
+        clock.advance(at - clock.now())
+        drawn.clear()
+        w.grab()
+        held = ("28", "+1", "1", "LAPS")
+        frames.append({s: (QRectF(r), px) for s, r, px, _c in drawn if s in held})
+    assert all(f == frames[0] for f in frames) and len(frames[0]) == 4
+
+
+def test_a_change_moves_down_the_table_a_row_at_a_time(qtbot, drawn, monkeypatch):
+    """Partway through the change each row is a little behind the one above."""
+    from madtracker.board import rotation
+
+    bands = record_bands(monkeypatch)
+    w = render(qtbot, "madison", standings(5))
+    clocked(w, rotation.NAMES_MS + 330)
+    bands.clear()
+    w.grab()
+    sweeps = [s for _r, s, _z in bands]
+    assert len(sweeps) == 5
+    assert all(a > b for a, b in zip(sweeps, sweeps[1:], strict=False))
+    assert 0 < sweeps[-1] and sweeps[0] < 1
+
+
+def test_twelve_teams_turn_a_page_after_each_names_and_color_cycle(qtbot, drawn):
+    from madtracker.board import rotation
+
+    data = standings(12)
+    w = render(qtbot, "madison", data)
+    clock = clocked(w)
+    names = surnames(data)
+
+    def shown() -> list[str]:
+        drawn.clear()
+        w.grab()
+        return [s for s in strings(drawn) if s in names]
+
+    assert shown() == names[:12]
+    # The canvas's page clock leaves a rotating table to its rotation.
+    w._turn_page()
+    assert shown() == names[:12]
+    clock.advance(rotation.cycle_ms(6))
+    assert shown() == names[12:]
+    clock.advance(rotation.cycle_ms(6))
+    assert shown() == names[:12]
+
+
+def test_a_headless_table_never_rotates(qtbot, drawn):
+    data = standings(12)
+    w = render(qtbot, "madison", data)
+    page = w.pages["madison"]
+    assert page.clock is None
+    assert {"Okafor", "Haddad"} <= set(strings(drawn))
+    assert not set(strings(drawn)) & set(formats.TEAM_COLORS)
+    # Headless, the canvas's page clock turns the pages, as before.
+    drawn.clear()
+    w._turn_page()
+    w.grab()
+    assert page.page == 1
+    assert set(strings(drawn)) & set(surnames(data)) == set(surnames(data)[12:])
+
+
+def test_bibs_only_shows_the_riders_plates_in_place_of_surnames(qtbot, drawn, monkeypatch):
+    from madtracker.board import theme as t
+
+    plates: list[str] = []
+    plate = t.plate
+    monkeypatch.setattr(
+        t, "plate", lambda p, r, bib, out=False: plates.append(bib) or plate(p, r, bib)
+    )
+    data = standings(5)
+    render(qtbot, "madison", data, label="bibs")
+    assert plates == [b for r in data.rows for b in r.entry.bibs]
+    assert not set(strings(drawn)) & set(surnames(data))
+    plates.clear()
+    drawn.clear()
+    render(qtbot, "madison", data, label="bibs_names")
+    assert not plates and {"Okafor", "Haddad"} <= set(strings(drawn))
+
+
+@pytest.mark.parametrize("label", ["names", "bibs_names", "bibs"])
+@pytest.mark.parametrize("teams", [1, 2, 5, 8, 12])
+@pytest.mark.parametrize("view", ["names", "color"])
+def test_nothing_on_the_madison_table_is_under_the_floor(qtbot, drawn, label, teams, view):
+    from madtracker.board import theme as t
+
+    data = standings(teams)
+    data.rows[0].entry.names = ["Ada Featherstonehaugh-Rochester-Montgomery", NAMES["36"]]
+    data.rows[-1].entry.team = "The Grand Corktown and Woodbridge Racing"
+    w = render(qtbot, "madison", data, label=label)
+    if view == "color":
+        clocked(w, color_view_ms(min(teams, 6 if teams > 8 else teams)))
+        drawn.clear()
+        w.grab()
+    plates = {t.PLATE_TEXT.name()}
+    assert min(px for _s, _r, px, color in drawn if color not in plates) >= t.MIN_PX
+
+
+def test_between_changes_the_table_waits_with_no_frames(qtbot):
+    """Frames run only while a change moves; between changes one timer
+    waits for the next change and nothing repaints."""
+    from madtracker.board import rotation
+
+    w = render(qtbot, "madison", standings(5))
+    w.show()
+    page = w.pages["madison"]
+    clock = clocked(w)
+    w.grab()
+    assert not page.moving_now()
+    assert page.wake_in() == pytest.approx(rotation.NAMES_MS, abs=1)
+    clock.advance(rotation.NAMES_MS + 100)
+    w.grab()
+    assert page.moving_now() and page.wake_in() is None
+    clock.advance(rotation.change_ms(5))
+    w.grab()
+    assert not page.moving_now()
+    assert page.wake_in() == pytest.approx(rotation.COLOR_MS - 100, abs=1)
