@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetricsF,
+    QImage,
     QLinearGradient,
     QPainter,
     QPen,
@@ -1574,7 +1575,8 @@ class Turn:
     ``start`` is the clock's time at the turn and ``picture`` the start
     list as the board showed it (None when there was none to take).
     ``rows`` turn on ``page``, the table's page that holds the first
-    play. ``plays`` are the score changes that wait
+    play, from ``clear`` ms on, once a rider start list has cleared
+    (0 for a Madison's). ``plays`` are the score changes that wait
     for the turn and its hold: they join the queue at ``release``, a time
     worked out from the turn's start and not from when a board next
     paints, so the TV and the preview start them at one moment.
@@ -1584,11 +1586,17 @@ class Turn:
     picture: QPixmap | None
     rows: int
     page: int
+    clear: float = 0.0
     plays: list[Play] = field(default_factory=list)
 
     @property
     def release(self) -> float:
-        return self.start + scorebug.intro_ms(self.rows) + scorebug.INTRO_HOLD_MS
+        rows = scorebug.intro_ms(self.rows)
+        return self.start + self.clear + rows + scorebug.INTRO_HOLD_MS
+
+    def row_ms(self, now: float) -> float:
+        """Milliseconds into the rows' turn at ``now``; negative while the start list clears."""
+        return now - self.start - self.clear
 
 
 class TurnRow(NamedTuple):
@@ -1732,7 +1740,8 @@ class StandingsPage(Page):
         rows = len(data.rows[page * per_page : (page + 1) * per_page])
         outgoing = self.outgoing
         picture = outgoing.grab() if isinstance(outgoing, PreRacePage) else None
-        self._turn = Turn(start=now, picture=picture, rows=rows, page=page)
+        clear = 0.0 if self.teams() else scorebug.INTRO_CLEAR_MS
+        self._turn = Turn(start=now, picture=picture, rows=rows, page=page, clear=clear)
         self._ticker.poke()
 
     def _steps_on(self, data: Standings, prev: PreRace, page: int) -> int:
@@ -1963,7 +1972,7 @@ class StandingsPage(Page):
             p.save()
             if turn is not None and not self.teams():
                 # The rider start list has no dots: they come in with the last row.
-                p.setOpacity(scorebug.intro_row(now - turn.start, turn.rows - 1))
+                p.setOpacity(scorebug.intro_row(turn.row_ms(now), turn.rows - 1))
             page_dots(p, area, pages, page, u)
             p.restore()
         self._schedule()
@@ -2047,25 +2056,21 @@ class StandingsPage(Page):
     def rider_turn(
         self, p: QPainter, area: QRectF, lay: RiderTable, rows: list, turn: Turn
     ) -> None:
-        """The start list dissolving into the rider table, a row at a time, then the table held.
+        """The start list clearing from the board, then the rider table coming in a row at a time.
 
-        The start list's rows line up with none of the table's, so the
-        picture is cut into the table's row bands instead: the first band
-        reaches up over the headings, which come in with the first row,
-        and the last reaches to the page's foot. Each band of the picture
-        fades out in place while the table's row fades in from the right
-        over it; only opacity and position move, and the rows stand as
-        the first play starts from them.
+        The start list's rows line up with none of the table's, so a row
+        crossing one would show two names at once: the start list clears
+        first, top to bottom (``clear_picture``), and the table's rows
+        then fade in from the right on the cleared board, the headings
+        with the first. Only opacity and position move, and the rows
+        stand as the first play starts from them.
         """
-        ms = self.now() - turn.start
-        shown = self._turn_rows(rows, turn)
-        last = len(shown) - 1
-        for i, r in enumerate(shown):
+        now = self.now()
+        self.clear_picture(p, turn, scorebug.intro_clear(now - turn.start))
+        ms = turn.row_ms(now)
+        for i, r in enumerate(self._turn_rows(rows, turn)):
             y = lay.rows_top + i * lay.rh
             k = scorebug.intro_row(ms, i)
-            top = 0.0 if i == 0 else y
-            foot = self.height() if i == last else y + lay.rh
-            self.turn_picture(p, turn, QRectF(0, top, self.width(), foot - top), k)
             if k > 0:
                 self.turn_arriving(p, k)
                 if i == 0:
@@ -2076,6 +2081,50 @@ class StandingsPage(Page):
                     p, area, lay, y, r.row, r.leader, r.sprints, r.laps, r.penalty, r.total
                 )
                 p.restore()
+
+    def clear_edge(self, cleared: float) -> float:
+        """The top of the soft edge clearing the start list, ``cleared`` of the way down the page."""
+        band = scorebug.INTRO_CLEAR_BAND * self.u
+        return -band + cleared * (self.height() + band)
+
+    def clear_picture(self, p: QPainter, turn: Turn, cleared: float) -> None:
+        """The start list's picture, cleared down to a soft edge ``cleared`` of the way down.
+
+        Above the edge the board is bare; across its INTRO_CLEAR_BAND
+        units the picture comes up from nothing to full; below it the
+        picture stands untouched.
+        """
+        if cleared >= 1 or turn.picture is None:
+            return
+        picture = turn.picture
+        band = scorebug.INTRO_CLEAR_BAND * self.u
+        top = self.clear_edge(cleared)
+        foot = top + band
+        p.save()
+        p.setClipRect(QRectF(0, foot, self.width(), self.height() - foot))
+        p.drawPixmap(QPointF(0, 0), picture)
+        p.restore()
+        if foot <= 0:
+            return
+        # The edge itself: its strip of the picture masked by a gradient, so
+        # the mask costs one strip of the board a frame, not the whole page.
+        dpr = picture.devicePixelRatio()
+        strip = QImage(
+            max(1, math.ceil(self.width() * dpr)),
+            max(1, math.ceil(band * dpr)),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        strip.setDevicePixelRatio(dpr)
+        strip.fill(Qt.GlobalColor.transparent)
+        q = QPainter(strip)
+        q.drawPixmap(QPointF(0, -top), picture)
+        q.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        fade = QLinearGradient(0, 0, 0, band)
+        fade.setColorAt(0, QColor(0, 0, 0, 0))
+        fade.setColorAt(1, QColor(0, 0, 0, 255))
+        q.fillRect(QRectF(0, 0, self.width(), band), fade)
+        q.end()
+        p.drawImage(QPointF(0, top), strip)
 
     def turn_picture(self, p: QPainter, turn: Turn, band: QRectF, k: float, dx: float = 0) -> None:
         """The start list's picture over ``band`` as the row there is ``k`` into its turn.
@@ -2430,7 +2479,7 @@ class StandingsPage(Page):
         table's rows stand as the first play starts from them, so the
         play's first frame follows on with nothing moving but its chip.
         """
-        ms = self.now() - turn.start
+        ms = turn.row_ms(self.now())
         drift = scorebug.INTRO_DRIFT * self.u
         pitch = lay.rh + lay.gap
         labels = {row_key(r): label for r, label in zip(self.data.rows, lay.labels, strict=True)}

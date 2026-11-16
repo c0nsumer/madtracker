@@ -63,6 +63,10 @@ def ease_in(x: float) -> float:
     return x**3
 
 
+def ease_in_out(x: float) -> float:
+    return x * x * (3.0 - 2.0 * x)
+
+
 def ease_back(x: float, s: float = 1.70158) -> float:
     """Overshoots 1 and settles back to it."""
     y = x - 1.0

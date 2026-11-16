@@ -3983,9 +3983,9 @@ def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_pat
 
 
 def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
-    """Record Sprint on the demo's Points Race: the start list dissolves
-    into the table, which plays each rider's points on their total, 1st
-    first, with no card; an Undo stops the play."""
+    """Record Sprint on the demo's Points Race: the start list clears and
+    the table comes in, then plays each rider's points on their total,
+    1st first, with no card; an Undo stops the play."""
     from madtracker.board import pages, scorebug
     from madtracker.board.motion import ManualClock
 
@@ -4011,9 +4011,9 @@ def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp
     assert new.scored.kind == "sprint" and list(new.scored.keys) == [("12",), ("7",)]
     totals = {r.entry.bibs[0]: r.total for r in new.rows}
     page = c.board.pages["sprint_points"]
-    # The start list dissolves into the table before the first score plays.
+    # The start list clears and the table comes in before the first score plays.
     rows = min(page.per_page(), len(new.rows))
-    clock.advance(scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS + 100)
+    clock.advance(scorebug.INTRO_CLEAR_MS + scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS + 100)
     c.board.grab()
     assert page.scoring_now() and chips == [f"+{totals['12']}"]
     clock.advance(scorebug.STEP_MS)

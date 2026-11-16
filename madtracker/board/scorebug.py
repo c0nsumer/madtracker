@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from madtracker.board.motion import ease_out, phase
+from madtracker.board.motion import ease_in_out, ease_out, phase
 from madtracker.board.payloads import MINUS
 from madtracker.board.rotation import ROW_STAGGER_MS
 
@@ -31,14 +31,18 @@ REORDER_MS = 600
 RUSH = 2.0
 # The first score of a race turns the start list into the table before it
 # plays: row by row, top to bottom, as the rotation's changes move, each
-# table row fading in from INTRO_DRIFT units right while the start list
-# under it fades out (a Madison's drifting as far left). The zero table
-# then holds for INTRO_HOLD_MS, so the turn and the first chip read as
-# two moves.
+# table row fading in from INTRO_DRIFT units right. A Madison's start list
+# row fades out under its table row, drifting as far left. A rider start
+# list lines up with no table row, so it first clears top to bottom over
+# INTRO_CLEAR_MS behind a soft edge INTRO_CLEAR_BAND units tall, and the
+# rows come in on the cleared board. The zero table then holds for
+# INTRO_HOLD_MS, so the turn and the first chip read as two moves.
 INTRO_STAGGER_MS = ROW_STAGGER_MS
 INTRO_FADE_MS = 500
 INTRO_DRIFT = 30
 INTRO_HOLD_MS = 400
+INTRO_CLEAR_MS = 300
+INTRO_CLEAR_BAND = 120
 
 Key = tuple[str, ...]
 
@@ -83,6 +87,11 @@ class Frame:
 def intro_ms(rows: int) -> float:
     """How long the turn from the start list takes, from the first row's start to the last row's end."""
     return (max(1, rows) - 1) * INTRO_STAGGER_MS + INTRO_FADE_MS
+
+
+def intro_clear(ms: float) -> float:
+    """How far a rider start list has cleared ``ms`` into the turn, 0..1."""
+    return ease_in_out(phase(ms, 0, INTRO_CLEAR_MS))
 
 
 def intro_row(ms: float, row: int) -> float:
