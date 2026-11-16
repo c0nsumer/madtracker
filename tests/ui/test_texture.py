@@ -57,8 +57,8 @@ def test_a_venue_shape_tiles_in_a_staggered_grid(qapp):
 
 def test_any_shape_tiles_at_the_tile_height(qapp):
     shapes = {
-        "wide": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 50"><rect width="1000" height="50"/></svg>',
-        "tall": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 1000"><rect width="50" height="1000"/></svg>',
+        "wide": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 50"><rect width="300" height="50"/></svg>',
+        "tall": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 300"><rect width="50" height="300"/></svg>',
         "offset": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="-300 -200 600 400"><rect x="-300" y="-200" width="300" height="400"/></svg>',
         "grouped": b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g transform="translate(10,20) scale(2,1)"><path d="M0 0H10V40H0Z"/></g></svg>',
     }
@@ -147,3 +147,64 @@ def test_cells_and_brushes_are_cached(qapp, monkeypatch):
     assert len(built) == count
     tex.cell(2.0, 1.0)
     assert len(built) > count
+
+
+NS = 'xmlns="http://www.w3.org/2000/svg"'
+REAL = '<circle cx="50" cy="50" r="40" id="real"/>'
+
+
+def _picked(body: str) -> bytes | None:
+    return texture.first_shape_svg(f'<svg {NS} viewBox="0 0 100 100">{body}</svg>'.encode())
+
+
+def test_the_first_visible_filled_shape_is_taken(qapp):
+    cases = {
+        "defs": f'<defs><path d="M0 0H9V9Z"/></defs>{REAL}',
+        "clip": f'<defs><clipPath id="c"><rect width="9" height="9"/></clipPath></defs>{REAL}',
+        "mask": f'<mask id="m"><rect width="9" height="9"/></mask>{REAL}',
+        "symbol": f'<symbol id="s"><rect width="9" height="9"/></symbol>{REAL}',
+        "none attr": f'<path d="M0 0H9V9Z" fill="none"/>{REAL}',
+        "none style": f'<path d="M0 0H9V9Z" style="fill:none;stroke:#000"/>{REAL}',
+        "inherited attr": f'<g fill="none"><rect width="9" height="9"/></g>{REAL}',
+        "inherited style": f'<g style="fill: none"><rect width="9" height="9"/></g>{REAL}',
+        "hidden": f'<rect width="9" height="9" display="none"/>{REAL}',
+    }
+    for name, body in cases.items():
+        out = _picked(body)
+        assert out is not None, name
+        assert b'r="40" id="tile"' in out, name
+
+
+def test_a_document_with_filled_shapes_only_in_definitions_is_refused(qapp):
+    assert _picked('<defs><clipPath id="c"><rect width="9" height="9"/></clipPath></defs>') is None
+    assert (
+        _picked(
+            '<defs><rect width="9" height="9"/></defs><g fill="none"><rect width="9" height="9"/></g>'
+        )
+        is None
+    )
+
+
+def test_a_filled_child_of_an_unfilled_group_is_taken(qapp):
+    assert _picked('<g fill="none"><rect width="50" height="50" fill="#000"/></g>') is not None
+
+
+def test_a_very_wide_shape_is_refused_quickly_and_a_wide_one_tiles(qapp):
+    import time
+
+    wide = f'<svg {NS} viewBox="0 0 200 1"><rect width="200" height="1"/></svg>'.encode()
+    start = time.perf_counter()
+    assert texture.first_shape_svg(wide) is None
+    assert texture.Texture(wide).builtin
+    assert time.perf_counter() - start < 1
+    six = f'<svg {NS} viewBox="0 0 60 10"><rect width="60" height="10"/></svg>'.encode()
+    svg = texture.first_shape_svg(six)
+    assert svg is not None
+    tex = texture.Texture(svg)
+    assert not tex.builtin
+    assert tex.cell(1.0, 1.0).width() > 0
+
+
+def test_a_cell_side_is_capped(qapp):
+    cell = texture.Texture(None).cell(200.0, 1.0)
+    assert max(cell.width(), cell.height()) <= texture.MAX_CELL_PX

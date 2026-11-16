@@ -48,6 +48,26 @@ def _local(tag) -> str:
 _DRAWS = (*_SHAPES, "line", "polyline", "text", "image", "use", "g", "switch")
 
 
+# Containers whose shapes are never drawn where they stand: they are clips,
+# masks, definitions, or styling, so a shape inside is not the logo.
+_NOT_DRAWN = ("defs", "clipPath", "mask", "symbol", "pattern", "marker", "style")
+# A shape wider or taller than this many times its other side cannot tile
+# in a cell of a usable size, and would not read as a texture.
+MAX_ASPECT = 8
+# The backstop on a cell's side in pixels.
+MAX_CELL_PX = 8192
+
+
+def _declared(el, name: str) -> str | None:
+    """A presentation value from the element's inline style or attribute."""
+    for part in (el.get("style") or "").split(";"):
+        key, _, value = part.partition(":")
+        if key.strip() == name and value.strip():
+            return value.strip()
+    value = el.get(name)
+    return value.strip() if value else None
+
+
 def first_shape_svg(data: bytes) -> bytes | None:
     """The SVG reduced to its first filled shape, tagged ``id="tile"``, or None.
 
@@ -66,17 +86,21 @@ def first_shape_svg(data: bytes) -> bytes | None:
         return None
     chain: list = []
 
-    def find(el) -> bool:
+    def find(el, inherited: str | None) -> bool:
         for child in el:
-            if _local(child.tag) in _SHAPES and child.get("fill") != "none":
+            tag = _local(child.tag)
+            if tag in _NOT_DRAWN or _declared(child, "display") == "none":
+                continue
+            fill = _declared(child, "fill") or inherited
+            if tag in _SHAPES and fill != "none":
                 chain.append((el, child))
                 return True
-            if find(child):
+            if find(child, fill):
                 chain.append((el, child))
                 return True
         return False
 
-    if not find(root):
+    if not find(root, _declared(root, "fill")):
         return None
     tile = chain[0][1]
     keep = {id(el) for pair in chain for el in pair}
@@ -86,7 +110,20 @@ def first_shape_svg(data: bytes) -> bytes | None:
             if id(child) not in keep and _local(child.tag) in _DRAWS:
                 parent.remove(child)
     tile.set("id", "tile")
-    return _writer.tostring(root, encoding="utf-8")
+    out = _writer.tostring(root, encoding="utf-8")
+    return out if _measure(out) is not None else None
+
+
+def _measure(svg: bytes) -> tuple[QSvgRenderer, QRectF] | None:
+    """The renderer and the shape's box, or None when it cannot tile."""
+    renderer = QSvgRenderer(QByteArray(svg))
+    ink = _ink_bounds(renderer) if renderer.isValid() else None
+    if ink is None:
+        return None
+    ratio = ink.width() / ink.height()
+    if ratio > MAX_ASPECT or ratio < 1 / MAX_ASPECT:
+        return None
+    return renderer, ink
 
 
 def _ink_bounds(renderer: QSvgRenderer) -> QRectF | None:
@@ -126,9 +163,9 @@ class Texture:
         self._renderer: QSvgRenderer | None = None
         self._aspect = (BUILTIN_W + theme.SLANT) / 1.0
         if svg is not None:
-            renderer = QSvgRenderer(QByteArray(svg))
-            ink = _ink_bounds(renderer) if renderer.isValid() else None
-            if ink is not None:
+            measured = _measure(svg)
+            if measured is not None:
+                renderer, ink = measured
                 # The view box is the shape's own box, so the render below
                 # fills the bounds it is given.
                 renderer.setViewBox(ink)
@@ -165,8 +202,8 @@ class Texture:
             return self._cells[key]
         h = TILE_H * u * dpr
         w = h * self._aspect
-        width = max(1, round(PITCH_X * w))
-        height = max(1, round(2 * PITCH_Y * h))
+        width = min(MAX_CELL_PX, max(1, round(PITCH_X * w)))
+        height = min(MAX_CELL_PX, max(1, round(2 * PITCH_Y * h)))
         image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         p = QPainter(image)
