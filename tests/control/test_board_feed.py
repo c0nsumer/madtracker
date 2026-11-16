@@ -361,3 +361,125 @@ def test_a_points_race_keeps_its_start_list_until_a_sprint_or_lap_counts(
     assert layout == "pre_race"
     assert s.act(ids[19], "lap_gained").ok
     assert bf.board_for(s.view())[0] == "sprint_points"
+
+
+def _madison(store, make_race, house, sprints=4):
+    s = live(
+        store, make_race, "madison", [3, 24, 5, 36, 8, 12], house.madison(sprints), teams=TEAMS
+    )
+    return s, {s.name(t): t for t in s.roster.ids}
+
+
+KEY = {"Blue": ("3", "24"), "Red": ("5", "36"), "Orange": ("8", "12")}
+
+
+def test_a_new_madison_sprint_is_scored_in_sprint_order(store, make_race, house):
+    s, teams = _madison(store, make_race, house)
+    before = s.view().actions
+    for name in ("Orange", "Blue", "Red"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    payload = bf.standings(s.view(), overlay=True, before=before)
+    assert payload.sprint_result is None, "a team roster gets no sprint card"
+    assert payload.scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"], KEY["Red"]])
+
+
+def test_only_the_teams_with_points_are_in_a_sprint(store, make_race, house):
+    s, teams = _madison(store, make_race, house)
+    for name in ("Orange", "Blue", "Red"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    before = s.view().actions
+    for name in ("Red", "Orange", "Blue"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    scored = bf.standings(s.view(), before=before).scored
+    assert scored.kind == "sprint"
+    assert scored.keys == [KEY["Red"], KEY["Orange"], KEY["Blue"]][: len(scored.keys)]
+    assert len(scored.keys) <= 4
+
+
+def test_a_lap_gained_lap_lost_and_penalty_are_scored(store, make_race, house):
+    s, teams = _madison(store, make_race, house)
+    for name in ("Orange", "Blue"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    kinds = []
+    for team, key in (("Red", "lap_gained"), ("Blue", "lap_lost"), ("Orange", "points_penalty:2")):
+        before = s.view().actions
+        assert s.act(teams[team], key).ok
+        scored = bf.standings(s.view(), before=before).scored
+        kinds.append(scored.kind)
+        assert scored.keys == [KEY[team]]
+    assert kinds == ["lap_gained", "lap_lost", "penalty"]
+
+
+def test_corrections_and_undo_are_not_scored(store, make_race, house):
+    s, teams = _madison(store, make_race, house)
+    for name in ("Orange", "Blue"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    assert s.act(teams["Red"], "lap_gained").ok
+    assert s.act(teams["Orange"], "points_penalty:3").ok
+    payloads = []
+
+    def after(step_ok):
+        assert step_ok
+        payloads.append(bf.standings(s.view(), before=before))
+
+    # A penalty lowered is a positive PointsAdjusted.
+    before = s.view().actions
+    after(s.act(teams["Orange"], "points_penalty:1").ok)
+    # A lap not counted.
+    before = s.view().actions
+    after(s.act(teams["Red"], "lap_not_counted").ok)
+    # A sprint re-recorded after a reopen.
+    before = s.view().actions
+    assert s.reopen_sprint(1).ok
+    assert s.click(teams["Red"]).ok
+    after(s.record_sprint().ok)
+    # Undo.
+    before = s.view().actions
+    after(s.undo().ok)
+    assert all(p.scored is None for p in payloads)
+    assert len(payloads) == 4
+
+
+def test_a_finish_order_re_recorded_is_not_scored(store, make_race, house):
+    """A Madison's result cannot be reordered in review (its points decide it);
+    the final sprint is corrected through the reopen, which replaces the order."""
+    s, teams = _madison(store, make_race, house, sprints=1)
+    for name in ("Orange", "Blue", "Red"):
+        assert s.click(teams[name]).ok
+    assert s.state == "provisional"
+    assert s.review_actions(teams["Blue"]) == [
+        ("points_penalty", "Points Penalty..."),
+        ("dq", "Disqualify"),
+    ]
+    before = s.view().actions
+    assert s.reopen_sprint(1).ok
+    assert s.record_sprint().ok
+    assert bf.standings(s.view(), before=before).scored is None
+
+
+def test_the_madison_finish_order_is_scored_once(store, make_race, house):
+    s, teams = _madison(store, make_race, house, sprints=1)
+    before = s.view().actions
+    for name in ("Orange", "Blue", "Red"):
+        assert s.click(teams[name]).ok
+    scored = bf.standings(s.view(), before=before).scored
+    assert scored == P.Scored("sprint", [KEY["Orange"], KEY["Blue"], KEY["Red"]])
+
+
+def test_nothing_is_scored_without_a_before_or_for_a_points_race(store, make_race, event, house):
+    s, teams = _madison(store, make_race, house)
+    for name in ("Orange", "Blue"):
+        assert s.click(teams[name]).ok
+    assert s.record_sprint().ok
+    assert bf.standings(s.view(), before=None).scored is None
+    ids = ids_of(event)
+    p = live(store, make_race, "points", [7, 12, 33, 9], house.points(2))
+    before = p.view().actions
+    sprint(p, ids, 33, 7)
+    payload = bf.standings(p.view(), overlay=True, before=before)
+    assert payload.scored is None and payload.sprint_result is not None

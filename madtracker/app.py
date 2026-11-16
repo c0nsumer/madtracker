@@ -282,6 +282,9 @@ class AppController:
         self.races: list = []
         self.live = None
         self._known_state: dict[int, str] = {}
+        # The log each race's board last drew, so the feed can tell one new
+        # scoring entry from a correction.
+        self._board_actions: dict[int, tuple] = {}
         # A result's backup waiting for its timer; see _run_result_backup.
         self._backup_pending = False
         self._notice: str | None = None
@@ -1471,6 +1474,7 @@ class AppController:
         self.races = []
         self.live = None
         self._known_state = {}
+        self._board_actions = {}
         self.settings.remove(EVENT_KEY)
         self.main.set_event("", "")
         self.main.set_races([], None)
@@ -1660,7 +1664,10 @@ class AppController:
         self.main.set_undo(screen.undo_text, screen.undo_enabled, screen.undo_who)
         self._reload_races()
         self._show_program()
-        self._set_board(*board_feed.board_for(self.live.view(), overlay=overlay))
+        view = self.live.view()
+        before = self._board_actions.get(screen.race_id)
+        self._board_actions[screen.race_id] = view.actions
+        self._set_board(*board_feed.board_for(view, overlay=overlay, before=before))
         # A result just became provisional or final: back it up, the
         # moment it would hurt most to lose (design section 12). After the
         # redraw has reached the screen, so the screen and the board

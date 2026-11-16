@@ -19,7 +19,14 @@ from madtracker.control.race import RaceView, starts_race
 from madtracker.control.roster import Entrant
 from madtracker.export.summary import rules_in_force, sprints_run
 from madtracker.scoring._common import place_map
-from madtracker.scoring.actions import FinishOrder, SprintResult
+from madtracker.scoring.actions import (
+    Action,
+    FinishOrder,
+    LapGained,
+    LapLost,
+    PointsAdjusted,
+    SprintResult,
+)
 from madtracker.scoring.result import Standing
 from madtracker.scoring.rules import SprintPointsRules, _Rules
 from madtracker.scoring.sprint_points import award
@@ -165,11 +172,18 @@ def _rank(row: Standing, index: int) -> int:
     return row.rank if row.rank is not None else index + 1
 
 
-def standings(view: RaceView, *, overlay: bool = False) -> P.Standings:
+def standings(
+    view: RaceView,
+    *,
+    overlay: bool = False,
+    before: tuple[Action, ...] | None = None,
+) -> P.Standings:
     """The points and madison table in the house sheet's column order.
 
     ``overlay`` adds the sprint-result card for the entry just made, if
-    it was a sprint.
+    it was a sprint, to a rider roster. A team roster never gets the
+    card: its table says what is new through ``scored``, which compares
+    the log with ``before``, the log the board last drew.
     """
     st = view.standings
     run, final_no = _sprints_run(view)
@@ -200,14 +214,59 @@ def standings(view: RaceView, *, overlay: bool = False) -> P.Standings:
                 status=r.status or "",
             )
         )
-    result = sprint_result(view, final_no) if overlay else None
+    is_team = view.roster.is_team
+    result = sprint_result(view, final_no) if overlay and not is_team else None
     return P.Standings(
         header=header(view),
         sprint_count=columns,
         rows=rows,
         current_sprint=max(run) if run else None,
         sprint_result=result,
+        scored=scored(before, view),
     )
+
+
+def _team_key(view: RaceView, entrant_id: int) -> tuple[str, ...]:
+    return tuple(_entry_for(view, entrant_id).bibs)
+
+
+def _sprint_keys(view: RaceView, final_no: int | None) -> list[tuple[str, ...]] | None:
+    card = sprint_result(view, final_no)
+    if card is None:
+        return None
+    return [tuple(entry.bibs) for _place, entry, _pts in card.placings]
+
+
+def scored(before: tuple[Action, ...] | None, view: RaceView) -> P.Scored | None:
+    """What the newest entry scored, when it is new scoring and not a correction.
+
+    Only an entry appended to the log the board last drew plays: a
+    sprint re-recorded after a reopen, a finish order edited in review
+    and an Undo replace or remove rows, so the log is no longer the old
+    one plus one and the table changes quietly. A penalty taken down, a
+    lap not counted and a sprint number already scored are quiet too.
+    """
+    if before is None or not view.roster.is_team or not view.actions:
+        return None
+    if view.actions[:-1] != before:
+        return None
+    new = view.actions[-1]
+    if isinstance(new, SprintResult):
+        if any(isinstance(a, SprintResult) and a.sprint_no == new.sprint_no for a in before):
+            return None
+        keys = _sprint_keys(view, _sprints_run(view)[1])
+        return P.Scored("sprint", keys) if keys is not None else None
+    if isinstance(new, FinishOrder):
+        if any(isinstance(a, FinishOrder) for a in before):
+            return None
+        keys = _sprint_keys(view, _sprints_run(view)[1])
+        return P.Scored("sprint", keys) if keys is not None else None
+    if isinstance(new, (LapGained, LapLost)):
+        kind = "lap_gained" if isinstance(new, LapGained) else "lap_lost"
+        return P.Scored(kind, [_team_key(view, eid) for eid in new.entrant_ids])
+    if isinstance(new, PointsAdjusted) and new.points < 0:
+        return P.Scored("penalty", [_team_key(view, new.entrant_id)])
+    return None
 
 
 def sprint_result(view: RaceView, final_no: int | None = None) -> P.SprintResult | None:
@@ -293,7 +352,12 @@ def _points_scored(view: RaceView) -> bool:
     return bool(run) or st.is_complete or any(r.net_laps or r.lap_points for r in st.rows)
 
 
-def board_for(view: RaceView, *, overlay: bool = False) -> tuple[str, object]:
+def board_for(
+    view: RaceView,
+    *,
+    overlay: bool = False,
+    before: tuple[Action, ...] | None = None,
+) -> tuple[str, object]:
     """(layout name, payload) the scoreboard shows for the race as it stands."""
     if _start_list(view):
         return "pre_race", pre_race(view)
@@ -307,7 +371,7 @@ def board_for(view: RaceView, *, overlay: bool = False) -> tuple[str, object]:
             # result; until a sprint or a lap counts, the start list stays.
             return "pre_race", pre_race(view)
         name = "madison" if view.roster.is_team else "sprint_points"
-        return name, standings(view, overlay=overlay)
+        return name, standings(view, overlay=overlay, before=before)
     if view.standings.is_complete or (view.engine == "win_and_out" and view.standings.ranked()):
         # A win-and-out's places fill in during the race, so the recap is
         # the live layout: each lap winner appears as their place is decided.

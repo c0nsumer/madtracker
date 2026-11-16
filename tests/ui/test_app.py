@@ -3923,3 +3923,20 @@ def test_the_platform_keys_undo_close_the_help_and_open_it(make_app, tmp_path, q
     assert QKeySequence(Qt.Key.Key_F1).toString() in keys
     assert QKeySequence(QKeySequence.StandardKey.HelpContents).toString() in keys
     assert win.settings_action.shortcut() == QKeySequence(QKeySequence.StandardKey.Preferences)
+
+
+def test_a_madison_sprint_reaches_the_board_as_scored_and_undo_does_not(make_app, tmp_path):
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[3].race_id)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append((layout, payload)), draw(layout, payload))
+    _play_in_app(c, [("click", "Blue"), ("click", "Red"), ("record", None)])
+    layout, payload = next(x for x in reversed(sent) if x[0] == "madison")
+    assert payload.scored is not None and payload.scored.kind == "sprint"
+    assert payload.sprint_result is None
+    assert [len(k) for k in payload.scored.keys] == [2, 2]
+    sent.clear()
+    assert c.undo(), c.main.surface.problem.text()
+    assert all(getattr(p, "scored", None) is None for _, p in sent)

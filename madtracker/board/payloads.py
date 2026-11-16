@@ -123,6 +123,14 @@ class SprintResult:
 
 
 @dataclass
+class Scored:
+    """New scoring the board plays, in the order it lands."""
+
+    kind: str  # "sprint", "lap_gained", "lap_lost", "penalty"
+    keys: list[tuple[str, ...]]  # each team as tuple(Entry.bibs), in play order
+
+
+@dataclass
 class Standings:
     """Points race and madison table, in the house sheet's column order."""
 
@@ -133,6 +141,7 @@ class Standings:
     # which column just changed.
     current_sprint: int | None = None
     sprint_result: SprintResult | None = None
+    scored: Scored | None = None
 
 
 @dataclass
