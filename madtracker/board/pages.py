@@ -1035,14 +1035,13 @@ TEAM_PLACE_SHARE = 0.14
 # LAPS and PENALTY grow with the row, under the total.
 TEAM_LAPS_SHARE = 0.36
 # The riders' surnames, side by side on the row, as a share of its height.
+# They stop growing at the start list's largest surname
+# (``team_rows.START_SURNAME_MOST``): a lone team's or a pair's totals keep
+# their full share of the tall row, and surnames set to that row would
+# leave each other no room beside the figures.
 TEAM_SURNAME_SHARE = 0.48
 # The team's name in the color view, as a share of the row's height.
 TEAM_LABEL_SHARE = 0.52
-# The type grows with the rows up to a row this tall. A lone team's or a
-# pair's rows are taller, and type set to their height would leave two
-# surnames no room beside the figures; at this row the surnames are the
-# start list's largest.
-TEAM_TYPE_ROW_MOST = 200
 # The color view's solid color stops this far short of the first figure
 # column, so the figures keep the dark row around them in both views.
 COLOR_ZONE_GAP = 60
@@ -1574,7 +1573,6 @@ class StandingsPage(Page):
         rows_top = area.y() + (44 + 10) * u
         gap = team_rows.ROW_GAP * u
         rh = (bottom - rows_top - (n - 1) * gap) / max(n, TEAM_FILL_LEAST)
-        type_h = min(rh, TEAM_TYPE_ROW_MOST * u)
         lab = t.label(u)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
@@ -1587,11 +1585,11 @@ class StandingsPage(Page):
         places = [ordinal(r.rank) if ordinals else str(r.rank) for r in d.rows]
         decided = [ordinal(r.rank) for r in d.rows]
         totals = [total_text(r.total) for r in d.rows if not r.status]
-        big_px = type_h * TEAM_FIGURE_SHARE
+        big_px = rh * TEAM_FIGURE_SHARE
         total_f = t.font(big_px, t.HEAVY, tabular=True)
         # The laps and penalty keep pace with the total, never under the floor.
         laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
-        num = t.font(max(min(48 * u, type_h * 0.7), laps_px), t.BOLD, tabular=True)
+        num = t.font(max(min(48 * u, rh * 0.7), laps_px), t.BOLD, tabular=True)
         # A column is as wide as its heading or its widest figure, so each
         # heading sits over its figures, right edges together. The feed
         # leaves a status row off the board; a page given one keeps the
@@ -1635,7 +1633,7 @@ class StandingsPage(Page):
         # would leave, so neither steps them down when it comes.
         _z, _x, least_half = name_room(area.x() + reserve_rank_w, reserve_laps_r)
         room = max(0.0, least_half - team_rows.RIDER_GAP * u)
-        size = type_h * TEAM_SURNAME_SHARE
+        size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
         surname_f = t.font(size, t.HEAVY)
         lasts = [team_rows.split_name(n)[1] for r in d.rows for n in r.entry.names[:2]]
         floor_px = round(t.MIN_PX * u)
@@ -1645,7 +1643,7 @@ class StandingsPage(Page):
         while surname_f.pixelSize() > floor_px and widest(lasts, surname_f) > room:
             surname_f = t.font(surname_f.pixelSize() - 1, t.HEAVY)
         plate_h = min(
-            type_h * team_rows.BIBS_ONLY_PLATE_SHARE,
+            rh * team_rows.BIBS_ONLY_PLATE_SHARE,
             team_rows.BIBS_ONLY_PLATE_MOST * u,
             max(0.0, half - team_rows.RIDER_GAP * u) / t.plate_width(1.0),
         )
@@ -1656,7 +1654,7 @@ class StandingsPage(Page):
         labels = []
         for r in d.rows:
             name = r.entry.team or ""
-            f = t.font(type_h * TEAM_LABEL_SHARE, t.HEAVY)
+            f = t.font(rh * TEAM_LABEL_SHARE, t.HEAVY)
             w = t.text_width(name, f)
             if w > label_room > 0:
                 px = max(t.MIN_PX * u, f.pixelSize() * label_room / w)

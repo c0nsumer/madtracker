@@ -451,6 +451,30 @@ def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, total, su
     assert laps < total
 
 
+@pytest.mark.parametrize("teams", [1, 2])
+def test_a_small_tables_totals_keep_their_share_and_its_surnames_stop_at_96(
+    qtbot, drawn, monkeypatch, teams
+):
+    """One or two teams keep the totals at their share of the tall row, as
+    the riders asked; the surnames stop at the start list's largest and
+    fit whole."""
+    from madtracker.board import pages, team_rows
+
+    bands = record_bands(monkeypatch)
+    data = standings(teams)
+    w = render(qtbot, "madison", data)
+    u = w.pages["madison"].u
+    rh = bands[0][0].height()
+    totals = [P.total_text(r.total) for r in data.rows]
+    assert sizes(drawn, totals) == {round(rh * pages.TEAM_FIGURE_SHARE)}
+    places = [str(r.rank) for r in data.rows]
+    assert sizes(drawn, places) == {round(rh * pages.TEAM_FIGURE_SHARE * pages.TEAM_PLACE_SCALE)}
+    [surname_px] = sizes(drawn, surnames(data))
+    assert surname_px <= round(team_rows.START_SURNAME_MOST * u)
+    # Whole: drawn as given, never cut.
+    assert set(surnames(data)) <= set(strings(drawn))
+
+
 def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, monkeypatch):
     """The leader's place in the accent; LAPS in the gain or loss color and
     TOTAL in white on the dark row, each right-aligned under its heading."""

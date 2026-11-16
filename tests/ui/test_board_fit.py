@@ -777,8 +777,8 @@ def test_a_team_tables_figures_stand_under_their_headings(qtbot, drawn):
 def test_team_rows_share_the_page_and_their_type_grows_with_them(qtbot, drawn, monkeypatch, teams):
     """A small field reads from the track as large as the page allows: the
     rows share its height whatever the count, a lone team half of it, and
-    the place, total, and surnames are shares of the row, the type growing
-    with it up to TEAM_TYPE_ROW_MOST."""
+    the place and total are shares of the row; the surnames are too, up to
+    the start list's largest."""
     from madtracker.board import pages, team_rows
 
     rows: list[QRectF] = []
@@ -800,19 +800,20 @@ def test_team_rows_share_the_page_and_their_type_grows_with_them(qtbot, drawn, m
     room = page.margin_rect().bottom() - rows[0].top()
     gap = team_rows.ROW_GAP * u
     assert rh * max(teams, pages.TEAM_FILL_LEAST) + (teams - 1) * gap == pytest.approx(room, abs=1)
-    type_h = min(rh, pages.TEAM_TYPE_ROW_MOST * u)
     big = {px for s, _r, px, _c in drawn if s == "0"}
-    assert big == {round(type_h * pages.TEAM_FIGURE_SHARE)}
+    assert big == {round(rh * pages.TEAM_FIGURE_SHARE)}
     ranks = {str(r.rank) for r in data.rows}
     place = {px for s, _r, px, _c in drawn if s in ranks}
-    assert place == {round(type_h * pages.TEAM_FIGURE_SHARE * pages.TEAM_PLACE_SCALE)}
-    # The surnames share one size, no larger than their share of the row.
+    assert place == {round(rh * pages.TEAM_FIGURE_SHARE * pages.TEAM_PLACE_SCALE)}
+    # The surnames share one size, no larger than their share of the row
+    # or the start list's largest.
     lasts = {_last(n) for r in data.rows for n in r.entry.names}
     [surname] = {px for s, _r, px, _c in drawn if s in lasts}
-    assert surname <= round(type_h * pages.TEAM_SURNAME_SHARE)
+    most = min(rh * pages.TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
+    assert surname <= round(most)
     # LAPS grows with the row and stays under the total.
     lap = next(px for s, _r, px, _c in drawn if s == "+1")
-    assert lap >= round(type_h * pages.TEAM_LAPS_SHARE) - 1
+    assert lap >= round(rh * pages.TEAM_LAPS_SHARE) - 1
     assert lap < big.pop()
     assert pages.TEAM_PAGE_ROWS == 8
 
