@@ -12,9 +12,10 @@ from dataclasses import replace
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from madtracker.board import team_rows
 from madtracker.board import theme as t
 from madtracker.board.motion import Clock
 from madtracker.board.payloads import (
@@ -664,9 +665,9 @@ LIST_COL_GAP = 48
 # size; a longer name shrinks inside it, down to the board's floor.
 TEAM_SHARE = 0.4
 # How much of a row a block takes beside its riders when they leave the
-# room (the start list, the result's podium): the color is the thing a
-# rider at speed finds first, so it gets the spare room, and the riders
-# keep one column beside it.
+# room (the result's podium): the color is the thing a rider at speed
+# finds first, so it gets the spare room, and the riders keep one column
+# beside it.
 TEAM_FILL = 0.6
 # A list row's name as a share of the row's pitch.
 LIST_NAME_SHARE = 0.56
@@ -676,15 +677,20 @@ LIST_MIN_PITCH = t.MIN_PX / LIST_NAME_SHARE
 # to take their place: one long column of names barely larger has
 # shorter rows and smaller plates.
 ONE_COLUMN_GAIN = 1.03
-# A team list row's name as a share of its pitch: less than a rider's, as
-# the row stacks the team's two riders beside the block.
-TEAM_LIST_NAME_SHARE = 0.4
 # The widest lap chips a list keeps room for while it grows, so a lap
 # taken mid-race never steps the list's names down.
 LAP_CHIP_SAMPLES = (8, -8)
 
 
 class PreRacePage(Page):
+    """The start list: riders as a list of rows, or a Madison's teams as one row each.
+
+    A team list longer than TEAM_PAGE_ROWS is shown a page at a time, as
+    the team standings are; ``advance`` turns the page.
+    """
+
+    page = 0
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         # The last list's layout and what it was worked out for: finding
@@ -692,23 +698,42 @@ class PreRacePage(Page):
         # repaint of the same list on the same page needs none of that.
         self._layout: tuple[tuple, tuple[int, float, float]] | None = None
 
+    def set_data(self, data) -> None:
+        if self.data is None or getattr(self.data, "header", None) != getattr(data, "header", None):
+            self.page = 0
+        super().set_data(data)
+
+    def teams(self) -> bool:
+        return self.data is not None and any(e.color for e in self.data.roster)
+
+    def page_count(self) -> int:
+        if not self.teams():
+            return 1
+        n = len(self.data.roster)
+        return max(1, -(-n // page_rows(n, TEAM_PAGE_ROWS)))
+
+    def advance(self) -> None:
+        if self.page_count() > 1:
+            self.page = (self.page + 1) % self.page_count()
+            self.update()
+
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: PreRace = self.data
         u = self.u
+        if self.teams():
+            self.team_list(p, area, d)
+            return
         count = len(d.roster)
-        teams = any(e.color for e in d.roster)
-        noun = ("team" if teams else "rider") + ("" if count == 1 else "s")
         # The top bar already says Start list; the count is the news here.
-        self.section_label(p, area.x(), area.y(), f"{count} {noun}")
+        self.section_label(p, area.x(), area.y(), f"{count} rider{'' if count == 1 else 's'}")
         top = area.y() + 64 * u
         laps = any(d.laps)
         room = QRectF(area.x(), top, area.width(), area.bottom() - top)
-        if self.bibs_only and not teams and not laps and all(e.bibs for e in d.roster):
+        if self.bibs_only and not laps and all(e.bibs for e in d.roster):
             plate_grid(p, room, [e.bibs[0] for e in d.roster], u)
             return
         if not d.roster:
             return
-        self.team_fill = TEAM_FILL
         key = (room.width(), room.height(), u, self.rider_label, d)
         if self._layout is None or self._layout[0] != key:
             # A copy, so a payload changed where it stands is not taken for the one measured.
@@ -716,20 +741,49 @@ class PreRacePage(Page):
         cols, pitch_cap, name_cap = self._layout[1]
         self.entry_rows(p, room, d.roster, cols, t.ROW, pitch_cap, name_cap, d.laps)
 
+    def team_list(self, p: QPainter, area: QRectF, d: PreRace) -> None:
+        """A Madison's teams, one row each: the riders' names lead and the color identifies.
+
+        No section label and no team word or name: the start list is
+        riders only (design section 10). The rows share the page down to
+        TEAM_FILL_LEAST rows' worth, so fewer teams get larger names and a
+        lone team takes half the page. Every page is set for a full page's
+        rows, so the names keep one size as the pages turn. The list
+        leaves the board at the first sprint or lap, so a row keeps no
+        room for a lap.
+        """
+        u = self.u
+        pages = self.page_count()
+        page = self.page % pages
+        per_page = page_rows(len(d.roster), TEAM_PAGE_ROWS)
+        rows = d.roster[page * per_page : (page + 1) * per_page]
+        bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
+        gap = team_rows.ROW_GAP * u
+        rh = (bottom - area.y() - (per_page - 1) * gap) / max(per_page, TEAM_FILL_LEAST)
+        last_px = min(team_rows.START_SURNAME_SHARE * rh, team_rows.START_SURNAME_MOST * u)
+        first_px = min(
+            max(team_rows.START_FIRST_SHARE * rh, t.MIN_PX * u), team_rows.START_FIRST_MOST * u
+        )
+        for i, e in enumerate(rows):
+            row = QRectF(area.x(), area.y() + i * (rh + gap), area.width(), rh)
+            team_rows.paint_band(p, row, e.color, u)
+            team_rows.paint_start_riders(
+                p, row, e.bibs, e.names, first_px, last_px, u, self.rider_label
+            )
+        if pages > 1:
+            page_dots(p, area, pages, page, u)
+
     def list_layout(self, room: QRectF, d: PreRace) -> tuple[int, float, float]:
         """The list's columns and its pitch and name caps: the plan that sets its names largest."""
         u = self.u
         count = len(d.roster)
-        teams = any(e.color for e in d.roster)
         if count <= 6:
             # A small field is one column of big names.
             plans = [(1, 128, 56)]
         else:
             cols = max(2, self.list_columns(count, room.height()))
-            if teams:
-                cols = self.team_columns(room, d.roster, cols, d.laps)
             plans = [(cols, 112, 46)]
-            if not teams and count <= room.height() // (LIST_MIN_PITCH * u):
+            if count <= room.height() // (LIST_MIN_PITCH * u):
                 # A mid-size field may read larger in one column than in
                 # two, whose half-width rows cap the names.
                 plans.append((1, 112, 46))
@@ -751,64 +805,30 @@ class PreRacePage(Page):
     ) -> tuple[float, float]:
         """The list's pitch and name caps, grown so a small field's rows share the page.
 
-        The rows share the room down to a least field, as the race's own
-        table does, shared by the list's columns; the type grows with them
-        only while every name fits whole at its size and, for teams, every
-        team keeps its riders beside it. A rider list keeps room for a lap
-        chip on every row, so the first lap taken never steps it down. The
-        caps never go under ``pitch_cap`` and ``name_cap``, so a long list
-        keeps its base sizes.
+        The rows share the room down to RIDER_FILL_LEAST rows, as the race's
+        own table does, shared by the list's columns; the type grows with
+        them only while every name fits whole at its size. The list keeps
+        room for a lap chip on every row, so the first lap taken never
+        steps it down. The caps never go under ``pitch_cap`` and
+        ``name_cap``, so a long list keeps its base sizes.
         """
         u = self.u
-        teams = any(e.color for e in roster)
         per_col = math.ceil(len(roster) / cols)
-        least = math.ceil((TEAM_FILL_LEAST if teams else RIDER_FILL_LEAST) / cols)
-        share = TEAM_LIST_NAME_SHARE if teams else LIST_NAME_SHARE
+        least = math.ceil(RIDER_FILL_LEAST / cols)
         fill = room.height() / max(per_col, least)
         base_size = min(name_cap * u, min(pitch_cap * u, room.height() / per_col) * LIST_NAME_SHARE)
-        # A team list leaves the board at its first lap, for the race's table.
-        chip = 0 if teams else max(LAP_CHIP_SAMPLES, key=self.lap_room)
+        chip = max(LAP_CHIP_SAMPLES, key=self.lap_room)
         laps = [chip] * len(roster)
-        size = fill * share
+        size = fill * LIST_NAME_SHARE
         while size > base_size:
             # The rows never come out shorter than the base list's, which
             # would cost the plates what the names gain.
-            caps = (max(size / share / u, pitch_cap), size / u)
+            caps = (max(size / LIST_NAME_SHARE / u, pitch_cap), size / u)
             _per, _pitch, got, inner, _pad = self.rows_geometry(room, len(roster), cols, *caps)
-            whole = self.entry_scale(roster, inner, got, True, laps) >= 1.0
-            if whole and teams:
-                whole = self.team_fit(roster, inner, got, True, laps) == 2
-                whole = whole and self.pair_height(got) <= inner.height()
-            if whole:
+            if self.entry_scale(roster, inner, got, True, laps) >= 1.0:
                 return caps
             size *= 0.96
         return pitch_cap, name_cap
-
-    def pair_height(self, size: float) -> float:
-        """The height a team's two riders need in a list set at ``size``.
-
-        The lines are centered by their capitals (``t.stacked_lines``), so
-        the descenders below need the same room above.
-        """
-        f = t.font(self.pair_size(size), t.SEMI)
-        fm = QFontMetricsF(f)
-        return fm.capHeight() + t.STACK_LEADING * f.pixelSize() + 2 * fm.descent()
-
-    def team_columns(self, room: QRectF, roster: list[Entry], cols: int, laps: list[int]) -> int:
-        """Fewer, wider columns for a team list whose riders or names a column would lose.
-
-        Eight long team names in two columns would show blocks alone over
-        half an empty page; one column holds them with their riders. A list
-        keeps its columns when it is whole in them, and
-        never takes fewer than show every entry.
-        """
-        best = (-1, cols)
-        for c in range(cols, 0, -1):
-            per_col, _pitch, size, inner, _pad = self.rows_geometry(room, len(roster), c)
-            if per_col * c < len(roster):
-                break
-            best = max(best, (self.team_fit(roster, inner, size, True, laps), c))
-        return best[1]
 
 
 # The most riders still in that show as cards; more open as rows. Four
@@ -1149,6 +1169,25 @@ def page_rows(count: int, most: int = PAGE_ROWS) -> int:
     return max(1, -(-count // pages))
 
 
+# The strip under a paged list that its page dots take.
+PAGE_DOTS_H = 32
+
+
+def page_dots(p: QPainter, area: QRectF, pages: int, page: int, u: float) -> None:
+    """Page dots at the bottom right of ``area``, the page in view lit.
+
+    Dots, not a "1-8 of 16" footer: they say there is more without asking
+    anyone to read a line of small print.
+    """
+    dot, gap = 16 * u, 14 * u
+    x = area.right() - pages * dot - (pages - 1) * gap - 20 * u
+    y = area.bottom() - dot - 6 * u
+    p.setPen(Qt.PenStyle.NoPen)
+    for i in range(pages):
+        p.setBrush(t.TEXT if i == page else t.RULE)
+        p.drawEllipse(QRectF(x + i * (dot + gap), y, dot, dot))
+
+
 class StandingsPage(Page):
     """Points race, madison and tempo standings: place, who, sprint points, laps, total.
 
@@ -1203,22 +1242,14 @@ class StandingsPage(Page):
         per_page = page_rows(len(d.rows), self.page_most())
         rows = d.rows[page * per_page : (page + 1) * per_page]
         n = max(1, min(len(d.rows), per_page))
-        bottom = area.bottom() - (32 * u if pages > 1 else 0)
+        bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
         if any(r.entry.color for r in d.rows):
             self.team_table(p, area, d, rows, n, bottom, self.ordinals(d))
         else:
             self.rider_table(p, area, d, rows, n, bottom)
 
         if pages > 1:
-            # Page dots, not a "1-8 of 16" footer: they say there is more
-            # without asking anyone to read a line of small print.
-            dot, gap = 16 * u, 14 * u
-            x = area.right() - pages * dot - (pages - 1) * gap - 20 * u
-            y = area.bottom() - dot - 6 * u
-            p.setPen(Qt.PenStyle.NoPen)
-            for i in range(pages):
-                p.setBrush(t.TEXT if i == page else t.RULE)
-                p.drawEllipse(QRectF(x + i * (dot + gap), y, dot, dot))
+            page_dots(p, area, pages, page, u)
 
         if d.sprint_result is not None:
             self.paint_overlay(p, area, d)

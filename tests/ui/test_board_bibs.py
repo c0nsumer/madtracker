@@ -15,6 +15,15 @@ ROSTER = [
     P.Entry(bibs=["704"], names=["Dov Ristanen"]),
 ]
 BIBS = {"701", "702", "703", "704"}
+# The same riders as two Madison teams, for the team start list.
+TEAMS = [
+    P.Entry(
+        bibs=["701", "702"], names=ROSTER[0].names + ROSTER[1].names, team="Blue", color="#2f6bff"
+    ),
+    P.Entry(
+        bibs=["703", "704"], names=ROSTER[2].names + ROSTER[3].names, team="Red", color="#e5323b"
+    ),
+]
 HEADER = P.Header(title="Test Race", group="Cat 3", detail="Rules", status="Racing")
 
 
@@ -26,6 +35,7 @@ def _layouts() -> list[tuple[str, object]]:
     placings = [P.Placing(i + 1, e) for i, e in enumerate(ROSTER)]
     return [
         ("pre_race", P.PreRace(header=HEADER, roster=ROSTER)),
+        ("pre_race", P.PreRace(header=HEADER, roster=TEAMS)),
         (
             "elimination",
             P.Elimination(
@@ -190,4 +200,22 @@ def test_a_rider_without_a_bib_is_named_with_no_plate(board, drawn, monkeypatch,
     board.set_layout(name, data)
     board.grab()
     assert "Bo Nobib" in drawn
+    assert plates == ([] if label == "names" else ["701"]), "no empty plate"
+
+
+@pytest.mark.parametrize("label", ["bibs_names", "bibs", "names"])
+def test_a_team_rider_without_a_bib_is_named_with_no_plate(board, drawn, monkeypatch, label):
+    """A Madison start list still waiting for a bib names that rider in every mode."""
+    from madtracker.board import theme
+
+    plates: list[str] = []
+    plate = theme.plate
+    monkeypatch.setattr(theme, "plate", lambda p, r, bib: plates.append(bib) or plate(p, r, bib))
+    team = P.Entry(
+        bibs=["701"], names=["Ada Quillfeather", "Bo Nobib"], team="Blue", color="#2f6bff"
+    )
+    board.set_rider_label(label)
+    board.set_layout("pre_race", P.PreRace(header=HEADER, roster=[team]))
+    board.grab()
+    assert "Nobib" in drawn
     assert plates == ([] if label == "names" else ["701"]), "no empty plate"
