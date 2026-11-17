@@ -716,12 +716,6 @@ def test_choosing_a_pattern_changes_nothing_until_save(store, qtbot, tmp_path):
     assert venue.texture_pattern(store) == "bolts"
 
 
-def test_the_adjust_button_waits_for_its_dialog(store, qtbot, tmp_path):
-    d = _settings(store, tmp_path, qtbot)
-    d.show()
-    assert d.adjust_button.isHidden()
-
-
 def test_the_pattern_and_adjustments_travel_into_a_new_file(store, tmp_path):
     from madtracker.board.texture import Adjust
     from madtracker.control.copying import CopyChoice, copy_venue

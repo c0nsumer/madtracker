@@ -37,6 +37,7 @@ from madtracker.inputs import clean_line
 from madtracker.store import Store, StoreError
 from madtracker.ui import style
 from madtracker.ui.icons import mdi
+from madtracker.ui.texture_dialog import TextureDialog
 from madtracker.ui.widgets import (
     Form,
     apply_style,
@@ -188,10 +189,9 @@ class SettingsDialog(QDialog):
         self.texture_combo = QComboBox()
         self._fill_texture_combo()
         self.texture_combo.currentIndexChanged.connect(self._texture_picked)
-        # Opens the adjustments dialog; it stays out of the row until that
-        # dialog is wired, and is off while no pattern is drawn.
+        # Opens the adjustments dialog; it is off while no pattern is drawn.
         self.adjust_button = QPushButton("Adjust...")
-        self.adjust_button.setVisible(False)
+        self.adjust_button.clicked.connect(self.open_adjustments)
         self.adjust_button.setEnabled(self.pending_pattern != "none")
         texture_row = QHBoxLayout()
         texture_row.addWidget(self.texture_combo, 1)
@@ -441,6 +441,11 @@ class SettingsDialog(QDialog):
         self.preview.setPixmap(shown_pix)
         if not data:
             self.logo_name.setText("Default logo")
+
+    def open_adjustments(self) -> None:
+        dialog = TextureDialog(self.pending_pattern, self.texture_data, self.pending_adjust, self)
+        if run_dialog(dialog) == QDialog.DialogCode.Accepted:
+            self.pending_adjust = dialog.adjust()
 
     def open_rulesets(self) -> None:
         from madtracker.ui.rulesets import open_rulesets
