@@ -207,6 +207,7 @@ def test_settings_dialog_previews_and_saves(store, qtbot, tmp_path):
     assert d.preview.pixmap() is not None and not d.preview.pixmap().isNull()
     # The scoreboard display is chosen on the Scoreboard menu only.
     # Its label says what it is; a tooltip repeating it would say nothing.
+    # The texture row carries the approved row tooltip, so it is excluded.
     assert [c.toolTip() for c in d.findChildren(QComboBox) if c is not d.texture_combo] == [""]
     # The accent is one of the palette's swatches, named, never a hex code.
     assert [b.toolTip() for b in d.accent_swatches.values()] == [n for n, _h in venue.ACCENTS]
@@ -617,9 +618,37 @@ def test_the_dropdown_lists_the_patterns_then_add_from_file(store, qtbot, tmp_pa
 
     monkeypatch.setattr(QFileDialog, "getOpenFileName", fake)
     d.texture_combo.setCurrentIndex(d.texture_combo.count() - 1)
+    qtbot.waitUntil(lambda: "args" in seen)
     assert seen["args"] == ("Choose Scoreboard Texture", "SVG Images (*.svg)")
     # Cancelling the file dialog returns to the previous item, with no red line.
     assert d.texture_combo.currentData() == "bolts" and d.error.text() == ""
+
+
+def test_a_wheel_over_the_texture_list_changes_nothing(store, qtbot, tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
+    opened = []
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: opened.append(1) or ("", ""))
+    d = _settings(store, tmp_path, qtbot)
+    combo = d.texture_combo
+    combo.setCurrentIndex(combo.count() - 3)
+    before = combo.currentIndex()
+    for dy in (-120, 120, 120, 120, 120):
+        event = QWheelEvent(
+            QPointF(5, 5),
+            QPointF(5, 5),
+            QPoint(0, 0),
+            QPoint(0, dy),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(combo, event)
+    QApplication.processEvents()
+    assert combo.currentIndex() == before and opened == []
 
 
 def test_bolts_is_the_default_for_a_new_file(store, qtbot, tmp_path):
@@ -639,6 +668,7 @@ def test_add_from_file_adds_and_selects_the_venue_shape(store, qtbot, tmp_path, 
     d = _settings(store, tmp_path, qtbot)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
     d.texture_combo.setCurrentIndex(d.texture_combo.count() - 1)
+    qtbot.waitUntil(lambda: d.texture_file == "bolt.svg")
     assert _items(d) == [
         "Lightning Bolts",
         "Slant Strokes",
@@ -765,7 +795,7 @@ def test_bad_stored_adjustments_clamp_or_default(store):
         venue.save(store, name="R", backup="", texture_pattern="swirls")
 
 
-def test_an_older_file_with_a_venue_shape_opens_on_bolts_and_lists_it(store, qtbot, tmp_path):
+def test_a_stored_shape_with_no_pattern_opens_on_bolts_and_lists_it(store, qtbot, tmp_path):
     venue.save(
         store, name="R", backup="", texture=CHEVRON, texture_name="old.svg", keep_texture=False
     )

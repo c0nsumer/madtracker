@@ -26,7 +26,8 @@ from madtracker.store.paths import BACKUP_DIR_NAME
 LOGO_KEY = "venue/logo_png"
 NAME_KEY = "venue/name"
 # The venue's scoreboard texture: an SVG file kept as the file itself, base64
-# like the logo, with the name it was chosen under. None means the built-in.
+# like the logo, with the name it was chosen under. None means no venue shape
+# is stored; the pattern setting decides what the board draws.
 TEXTURE_KEY = "board/texture_svg"
 TEXTURE_NAME_KEY = "board/texture_name"
 # Which pattern the board tiles: a bundled key, "none", or "venue" for the
@@ -101,7 +102,7 @@ def logo_setting(store: Store) -> bytes | None:
 
 
 def texture_setting(store: Store) -> bytes | None:
-    """The venue's texture SVG as stored, or None for the built-in one."""
+    """The venue's texture SVG as stored, or None when no venue shape is stored."""
     value = store.get_setting(TEXTURE_KEY)
     if not value or not isinstance(value, str):
         return None
@@ -241,7 +242,7 @@ def save(
     RIDER_LABELS; left None it stays as it was, as do ``accent`` and
     ``exports`` (the folder the exports are offered in; blank means
     Documents) when None. ``texture`` replaces the stored texture (None
-    clears it to the built-in one) only when ``keep_texture`` is off, so a
+    clears the stored shape) only when ``keep_texture`` is off, so a
     caller that does not mention it leaves it alone. ``texture_pattern`` and
     ``texture_adjust`` stay as they were when None.
     """

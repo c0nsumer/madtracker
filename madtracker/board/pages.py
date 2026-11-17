@@ -43,7 +43,18 @@ from madtracker.board.payloads import (
     total_text,
 )
 from madtracker.board.scorebug import Frame, Key, Play, ScoreQueue, Step
-from madtracker.board.texture import Adjust, make_texture
+from madtracker.board.texture import Adjust, Texture, make_texture
+
+_default_texture: Texture | None = None
+
+
+def default_texture() -> Texture | None:
+    """The bolts at default adjustments, built once for every page."""
+    global _default_texture
+    if _default_texture is None:
+        _default_texture = make_texture("bolts", None, Adjust())
+    return _default_texture
+
 
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -99,8 +110,9 @@ class Page(QWidget):
         # The canvas sets the time source; None leaves the page at rest.
         self.clock: Clock | None = None
         self.rider_label = "bibs_names"
-        # The venue's texture, shared by every page of one board.
-        self.texture = make_texture("bolts", None, Adjust())
+        # The venue's texture, shared by every page of every board until
+        # the window sets one.
+        self.texture = default_texture()
         # The team column of the list being drawn and how its riders are
         # set beside it (``entry_scale`` sets both, see ``team_layout``).
         self.team_w = 0.0
@@ -606,16 +618,7 @@ class Page(QWidget):
         return max(1, min(most, -(-count // fit)))
 
     def bar_lead(self, band_h: float, h: float, size: float, teams: bool = False) -> float:
-        """How far a rider row's plate, or its name without one, stands from the row's left end.
-
-        Past the bar and ROW_PAD, and as much further as keeps the plate's
-        top and the name's capitals SLANT_AIR from the bar's slanted edge
-        (``team_rows.clearance``), as the Madison start list's riders are:
-        ``band_h`` is the row's height, ``h`` the entry's that the plate
-        is sized in, and ``size`` the name's largest, so a list set
-        smaller never moves its plates or names. ``teams`` is a list that
-        holds a team, whose block is the entry's whole height.
-        """
+        """How far a rider row's plate, or its name without one, stands from the row's left end; see ``bar_lead``."""
         return bar_lead(band_h, h, size, self.u, self.show_bibs, teams)
 
     def rows_geometry(
@@ -733,6 +736,16 @@ def plate_height(h: float, u: float) -> float:
 def bar_lead(
     band_h: float, h: float, size: float, u: float, show_bibs: bool, teams: bool = False
 ) -> float:
+    """How far a rider row's plate, or its name without one, stands from the row's left end.
+
+    Past the bar and ROW_PAD, and as much further as keeps the plate's
+    top and the name's capitals SLANT_AIR from the bar's slanted edge
+    (``team_rows.clearance``), as the Madison start list's riders are:
+    ``band_h`` is the row's height, ``h`` the entry's that the plate
+    is sized in, and ``size`` the name's largest, so a list set
+    smaller never moves its plates or names. ``teams`` is a list that
+    holds a team, whose block is the entry's whole height.
+    """
     shift = team_rows.slant_shift(band_h, size, u)
     if show_bibs:
         ph = plate_height(h, u)

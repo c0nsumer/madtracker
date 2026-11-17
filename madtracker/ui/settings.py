@@ -15,7 +15,7 @@ on the window's light gray.
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QDir, QEvent, QIODevice, QSize, Qt
+from PySide6.QtCore import QBuffer, QDir, QEvent, QIODevice, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QImage, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -153,6 +153,13 @@ def _swatch(name: str, hex_color: str) -> QPushButton:
     return b
 
 
+class NoWheelCombo(QComboBox):
+    """A dropdown a wheel notch passes over, so scrolling the form never changes it."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, store: Store, data_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -186,7 +193,7 @@ class SettingsDialog(QDialog):
         self.texture_file = venue.texture_name(store)
         self.pending_pattern = venue.texture_pattern(store)
         self.pending_adjust = venue.texture_adjust(store)
-        self.texture_combo = QComboBox()
+        self.texture_combo = NoWheelCombo()
         self._fill_texture_combo()
         self.texture_combo.currentIndexChanged.connect(self._texture_picked)
         # Opens the adjustments dialog; it is off while no pattern is drawn.
@@ -337,7 +344,9 @@ class SettingsDialog(QDialog):
     def _texture_picked(self, index: int) -> None:
         key = self.texture_combo.itemData(index)
         if key == ADD_KEY:
-            self._pick_texture()
+            # The dialog is modal and the combo is rebuilt after it, so it runs
+            # once this signal handler has returned.
+            QTimer.singleShot(0, self, self._pick_texture)
             return
         if key is None:
             return

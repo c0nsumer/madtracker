@@ -567,8 +567,10 @@ def test_no_texture_behind_the_figures(qtbot, view):
 
 
 def test_texture_layers_are_built_once_per_row_size_and_color(qtbot, monkeypatch):
-    from madtracker.board import rotation, team_rows
+    from madtracker.board import pages, rotation, team_rows
 
+    # The shared default keeps layers earlier tests built; a fresh one counts them.
+    monkeypatch.setattr(pages, "_default_texture", None)
     built: list[tuple] = []
     build = team_rows._build_fade_layer
 
