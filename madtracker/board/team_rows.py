@@ -453,6 +453,23 @@ def paint_stacked(
     t.text(p, line, t.elide(last, rect.width(), lf), lf, t.TEXT, LEFT)
 
 
+def start_name_px(row_h: float, u: float) -> tuple[float, float]:
+    """The start list's first-name and surname sizes in a row ``row_h`` tall."""
+    last_px = min(START_SURNAME_SHARE * row_h, START_SURNAME_MOST * u)
+    first_px = min(max(START_FIRST_SHARE * row_h, t.MIN_PX * u), START_FIRST_MOST * u)
+    return first_px, last_px
+
+
+def stacked_row_h(room_h: float, n: int, u: float, least: int) -> float:
+    """One of ``n`` team rows sharing ``room_h`` with ROW_GAP between them.
+
+    The rows share the room down to ``least`` rows' worth, so a lone team
+    takes a share of the page, not all of it.
+    """
+    gap = ROW_GAP * u
+    return (room_h - (n - 1) * gap) / max(n, least)
+
+
 def paint_start_riders(
     p: QPainter,
     row: QRectF,

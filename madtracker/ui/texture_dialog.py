@@ -21,16 +21,35 @@ from PySide6.QtWidgets import (
 )
 
 from madtracker.board import team_rows, texture, theme
-from madtracker.board.pages import LIST_NAME_SHARE
+from madtracker.board.pages import (
+    PLATE_NAME_GAP,
+    RIDER_HEAD_GAP,
+    RIDER_HEAD_H,
+    RIDER_INSET,
+    RIDER_ROW_FULL,
+    STANDINGS_NAME_SHARE,
+    TEAM_FILL_LEAST,
+    TEAM_LABEL_SHARE,
+    band_gap,
+    bar_lead,
+    plate_height,
+    rider_row_fill,
+)
+from madtracker.board.window import DESIGN_HEIGHT, TOP_BAR_HEIGHT
 from madtracker.ui import style
 from madtracker.ui.look import DIALOG_BASE_PT
 from madtracker.ui.widgets import Form, apply_style, button_row, fit_to_screen
 
-# The preview's rows in board units: a Madison's start list row, a team's
-# color row, and a rider row, at the heights the board gives them.
+# The preview's rows in board units at u = 1, measured as the board measures
+# them on a full page: a Madison of five teams for the start list row and the
+# color view's row, and sixteen riders for the rider table's row.
+TEAMS, RIDERS = 5, 16
+ROOM_H = DESIGN_HEIGHT - TOP_BAR_HEIGHT - theme.PAGE_TOP - theme.PAGE_BOTTOM
+TEAM_ROW_H = team_rows.stacked_row_h(ROOM_H, TEAMS, 1.0, TEAM_FILL_LEAST)
+RIDER_PITCH = min(rider_row_fill(ROOM_H - RIDER_HEAD_H - RIDER_HEAD_GAP, RIDERS), RIDER_ROW_FULL)
+RIDER_BAND_H = RIDER_PITCH - band_gap(RIDER_PITCH, 1.0)
 DESIGN_W = 1000
-MADISON_H, COLOR_H, RIDER_H = 150, 120, 112
-DESIGN_H = MADISON_H + COLOR_H + RIDER_H + 2 * team_rows.ROW_GAP
+DESIGN_H = 2 * TEAM_ROW_H + RIDER_BAND_H + 2 * team_rows.ROW_GAP
 PREVIEW_W = 520
 PREVIEW_H = round(PREVIEW_W * DESIGN_H / DESIGN_W)
 # Invented riders and team colors, as every example value is.
@@ -80,20 +99,13 @@ class TexturePreview(QWidget):
         x = (self.width() - width) / 2
         y = (self.height() - DESIGN_H * u) / 2
         dpr = self.devicePixelRatioF()
-        # A row's text is sized from its height as the board's rows are.
-        madison = QRectF(x, y, width, MADISON_H * u)
-        color = QRectF(x, madison.bottom() + gap, width, COLOR_H * u)
-        rider = QRectF(x, color.bottom() + gap, width, RIDER_H * u)
+        madison = QRectF(x, y, width, TEAM_ROW_H * u)
+        color = QRectF(x, madison.bottom() + gap, width, TEAM_ROW_H * u)
+        rider = QRectF(x, color.bottom() + gap, width, RIDER_BAND_H * u)
         paint = {"slant": theme.SLANT, "texture": self.texture, "dpr": dpr}
 
         team_rows.paint_band(p, madison, MADISON_COLOR, u, **paint)
-        last_px = min(
-            team_rows.START_SURNAME_SHARE * madison.height(), team_rows.START_SURNAME_MOST * u
-        )
-        first_px = min(
-            max(team_rows.START_FIRST_SHARE * madison.height(), theme.MIN_PX * u),
-            team_rows.START_FIRST_MOST * u,
-        )
+        first_px, last_px = team_rows.start_name_px(madison.height(), u)
         team_rows.paint_start_riders(
             p, madison, MADISON_BIBS, MADISON_NAMES, first_px, last_px, u, "names"
         )
@@ -105,22 +117,25 @@ class TexturePreview(QWidget):
             p,
             inner,
             COLOR_NAME,
-            theme.font(color.height() * 0.5, theme.HEAVY),
+            theme.font(color.height() * TEAM_LABEL_SHARE, theme.HEAVY),
             theme.team_ink(QColor(COLOR_VIEW_COLOR)),
             Qt.AlignmentFlag.AlignCenter,
         )
 
         team_rows.paint_band(p, rider, team_rows.RIDER_BAR, u, **paint)
-        ph = min(rider.height() * team_rows.PLATE_SHARE, team_rows.PLATE_MOST * u)
+        pitch = RIDER_PITCH * u
+        entry_h = pitch * (1 - 2 * RIDER_INSET)
+        size = min(46 * u, pitch * STANDINGS_NAME_SHARE)
+        ph = plate_height(entry_h, u)
         pw = theme.plate_width(ph)
-        left = rider.left() + (team_rows.SWATCH_W + team_rows.ROW_PAD) * u
+        left = rider.left() + bar_lead(rider.height(), entry_h, size, u, True)
         theme.plate(p, QRectF(left, rider.center().y() - ph / 2, pw, ph), RIDER_BIB)
-        name_x = left + pw + team_rows.PLATE_GAP * u
+        name_x = left + pw + PLATE_NAME_GAP * u
         theme.text(
             p,
             QRectF(name_x, rider.top(), rider.right() - pad - name_x, rider.height()),
             RIDER_NAME,
-            theme.font(rider.height() * LIST_NAME_SHARE, theme.HEAVY),
+            theme.font(size, theme.HEAVY),
             theme.TEXT,
         )
         p.end()

@@ -303,14 +303,8 @@ class Page(QWidget):
         return max(k * 0.8, min(k, t.MIN_PX * self.u))
 
     def plate_height(self, h: float) -> float:
-        """A bib plate's height in an entry ``h`` tall.
-
-        Three quarters of the row when the row is roomy; in a dense list
-        the plate takes more of its row, up to nearly all of it, so its
-        digits stay near the board's minimum instead of shrinking with the
-        row. The digits are 0.68 of the plate (``t.plate``).
-        """
-        return min(h * 0.92, max(h * 0.74, t.MIN_PX * self.u / 0.68))
+        """A bib plate's height in an entry ``h`` tall (``plate_height``)."""
+        return plate_height(h, self.u)
 
     def lap_room(self, laps: int) -> float:
         """The width a lap chip takes at the end of an entry, its gap included."""
@@ -622,16 +616,7 @@ class Page(QWidget):
         smaller never moves its plates or names. ``teams`` is a list that
         holds a team, whose block is the entry's whole height.
         """
-        u = self.u
-        shift = team_rows.slant_shift(band_h, size, u)
-        if self.show_bibs:
-            ph = self.plate_height(h)
-            # The name stands a plate's width and its gap further right.
-            beside = shift - t.plate_width(ph) - PLATE_NAME_GAP * u
-            shift = max(team_rows.clearance(band_h, ph / 2, u), beside)
-        if teams:
-            shift = max(shift, team_rows.clearance(band_h, h / 2, u))
-        return (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
+        return bar_lead(band_h, h, size, self.u, self.show_bibs, teams)
 
     def rows_geometry(
         self,
@@ -732,6 +717,36 @@ class Page(QWidget):
                 )
             lap = laps[i] if laps and i < len(laps) else 0
             self.entry_line(p, row.adjusted(*pad), entry, size, scale=scale, laps=lap)
+
+
+def plate_height(h: float, u: float) -> float:
+    """A bib plate's height in an entry ``h`` tall.
+
+    Three quarters of the row when the row is roomy; in a dense list
+    the plate takes more of its row, up to nearly all of it, so its
+    digits stay near the board's minimum instead of shrinking with the
+    row. The digits are 0.68 of the plate (``t.plate``).
+    """
+    return min(h * 0.92, max(h * 0.74, t.MIN_PX * u / 0.68))
+
+
+def bar_lead(
+    band_h: float, h: float, size: float, u: float, show_bibs: bool, teams: bool = False
+) -> float:
+    shift = team_rows.slant_shift(band_h, size, u)
+    if show_bibs:
+        ph = plate_height(h, u)
+        # The name stands a plate's width and its gap further right.
+        beside = shift - t.plate_width(ph) - PLATE_NAME_GAP * u
+        shift = max(team_rows.clearance(band_h, ph / 2, u), beside)
+    if teams:
+        shift = max(shift, team_rows.clearance(band_h, h / 2, u))
+    return (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
+
+
+def rider_row_fill(span: float, n: int) -> float:
+    """One rider table row's pitch when ``n`` rows share ``span``, down to RIDER_FILL_LEAST."""
+    return span / max(n, RIDER_FILL_LEAST)
 
 
 # Between a team block and its riders' names.
@@ -841,11 +856,8 @@ class PreRacePage(Page):
         rows = d.roster[page * per_page : (page + 1) * per_page]
         bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
         gap = team_rows.ROW_GAP * u
-        rh = (bottom - area.y() - (per_page - 1) * gap) / max(per_page, TEAM_FILL_LEAST)
-        last_px = min(team_rows.START_SURNAME_SHARE * rh, team_rows.START_SURNAME_MOST * u)
-        first_px = min(
-            max(team_rows.START_FIRST_SHARE * rh, t.MIN_PX * u), team_rows.START_FIRST_MOST * u
-        )
+        rh = team_rows.stacked_row_h(bottom - area.y(), per_page, u, TEAM_FILL_LEAST)
+        first_px, last_px = team_rows.start_name_px(rh, u)
         for i, e in enumerate(rows):
             row = QRectF(area.x(), area.y() + i * (rh + gap), area.width(), rh)
             team_rows.paint_band(
@@ -1318,6 +1330,11 @@ RIDER_ROW_FULL = 96
 # how far the type grows, as the wider figure columns leave a name less
 # room, and a name that holds the type back shortens the rows with it.
 RIDER_FILL_LEAST = 5
+# A rider table's heading row and the air under it, and the share of a row
+# its entry leaves clear at the top and the bottom each.
+RIDER_HEAD_H = 44
+RIDER_HEAD_GAP = 8
+RIDER_INSET = 0.05
 
 
 # The header words of a race the officials have decided.
@@ -2155,18 +2172,18 @@ class StandingsPage(Page):
     def rider_table_layout(self, area: QRectF, d: Standings, n: int, bottom: float) -> RiderTable:
         """The rider table's rows, columns and fonts for this payload on this board."""
         u = self.u
-        head_h = 44 * u
-        rows_top = area.y() + head_h + 8 * u
+        head_h = RIDER_HEAD_H * u
+        rows_top = area.y() + head_h + RIDER_HEAD_GAP * u
         # The feed leaves a status row off the board; a page given one
         # prints the status for a total and no figures, so a penalty on it
         # opens no column.
         penalized = any(r.penalty for r in d.rows if not r.status)
         entries = [r.entry for r in d.rows]
-        fill = (bottom - rows_top) / max(n, RIDER_FILL_LEAST)
+        fill = rider_row_fill(bottom - rows_top, n)
         # The entry takes nearly the whole row, so the bib plate keeps its
         # size in a dense table; the gaps between the rows carry the
         # separation.
-        inset = 0.05
+        inset = RIDER_INSET
 
         def layout(g: float, reserve: bool = False):
             rh = min(fill, RIDER_ROW_FULL * g)
@@ -2666,7 +2683,7 @@ class StandingsPage(Page):
         # The rows take the page from its top: there is no heading row.
         rows_top = area.y()
         gap = team_rows.ROW_GAP * u
-        rh = (bottom - rows_top - (n - 1) * gap) / max(n, TEAM_FILL_LEAST)
+        rh = team_rows.stacked_row_h(bottom - rows_top, n, u, TEAM_FILL_LEAST)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
         penalized = any(r.penalty for r in d.rows if not r.status)

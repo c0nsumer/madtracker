@@ -228,3 +228,61 @@ def test_every_control_does_something(qtbot):
     d.finished.connect(results.append)
     d.cancel_button.click()
     assert results == [int(QDialog.DialogCode.Rejected)]
+
+
+def _bands(monkeypatch):
+    from madtracker.board import team_rows
+
+    rows: list = []
+    band = team_rows.paint_band
+
+    def record(p, row, color, *args, **kwargs):
+        rows.append((row.height(), color))
+        return band(p, row, color, *args, **kwargs)
+
+    monkeypatch.setattr(team_rows, "paint_band", record)
+    return rows
+
+
+def test_the_preview_rows_are_as_tall_as_the_boards_at_1080p(qtbot, monkeypatch):
+    """A five-team Madison's start list and table rows, and a sixteen-rider table's rows."""
+    import dataclasses
+
+    from madtracker.board import payloads as P
+    from madtracker.board import sample
+    from madtracker.ui import texture_dialog as td
+    from ui.board_helpers import render
+    from ui.test_board_fit import madison
+    from ui.test_madison_board import start_list
+
+    rows = _bands(monkeypatch)
+    render(qtbot, "pre_race", start_list(td.TEAMS))
+    assert [round(h, 3) for h, _c in rows] == [round(td.TEAM_ROW_H, 3)] * td.TEAMS
+    rows.clear()
+    render(qtbot, "madison", madison(teams=td.TEAMS))
+    assert [round(h, 3) for h, _c in rows] == [round(td.TEAM_ROW_H, 3)] * td.TEAMS
+    rows.clear()
+    data = sample.sprint_points()
+    many = [
+        dataclasses.replace(data.rows[i % len(data.rows)], rank=i + 1) for i in range(td.RIDERS)
+    ]
+    render(qtbot, "sprint_points", dataclasses.replace(data, rows=many))
+    assert isinstance(data, P.Standings)
+    assert len(rows) == td.RIDERS
+    assert {round(h, 2) for h, _c in rows} == {round(td.RIDER_BAND_H, 2)}
+
+
+def test_the_preview_sizes_the_start_names_with_the_boards_helper():
+    from madtracker.board import team_rows
+    from madtracker.ui import texture_dialog as td
+
+    first, last = team_rows.start_name_px(td.TEAM_ROW_H, 1.0)
+    assert last == min(team_rows.START_SURNAME_SHARE * td.TEAM_ROW_H, team_rows.START_SURNAME_MOST)
+    assert first <= team_rows.START_FIRST_MOST
+
+
+def test_the_preview_keeps_the_boards_gap_between_rows(qtbot):
+    from madtracker.board import team_rows
+    from madtracker.ui import texture_dialog as td
+
+    assert td.DESIGN_H == 2 * td.TEAM_ROW_H + td.RIDER_BAND_H + 2 * team_rows.ROW_GAP
