@@ -326,11 +326,11 @@ SHORT = ["Ada Quill", "Bo Lin", "Cy Dorn", "Di Ash"]
 def test_the_rider_sizes_design_section_10_states_at_1080(qtbot, drawn):
     """Five riders of a usual length set start list names of 100 px
     against the base list's 56; five short-name riders set table totals
-    of 97 px and names of 74, nine riders 60 and 46, sixteen 44 and 36."""
+    of 116 px and names of 74, nine riders 72 and 46, sixteen 44 and 36."""
     roster = [P.Entry(bibs=[str(i + 1)], names=[n]) for i, n in enumerate(USUAL)]
     render(qtbot, "pre_race", P.PreRace(header=START, roster=roster))
     assert {px for s, _r, px, _c in drawn if s in USUAL} == {100}
-    for n, total_px, name_px in ((5, 97, 74), (9, 60, 46), (16, 44, 36)):
+    for n, total_px, name_px in ((5, 116, 74), (9, 72, 46), (16, 44, 36)):
         rows = [
             P.StandingRow(
                 rank=i + 1,

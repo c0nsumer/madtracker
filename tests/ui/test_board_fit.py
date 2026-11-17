@@ -929,6 +929,8 @@ def test_a_small_rider_fields_names_and_totals_grow_together(qtbot, drawn, penal
     """A long name stops the growth at the size where it fits whole at the
     table's own name size: the names are never shrunk while the figures
     grow, so they keep the base table's proportion to the totals."""
+    from madtracker.board import pages
+
     data = points(riders=5, sprints=3, done=1)
     for i, row in enumerate(data.rows):
         row.entry.names = [SHORT[i % len(SHORT)]]
@@ -939,7 +941,7 @@ def test_a_small_rider_fields_names_and_totals_grow_together(qtbot, drawn, penal
     names = {px for s, _r, px, _c in drawn if s in {row.entry.names[0] for row in data.rows}}
     assert len(totals) == 1 and len(names) == 1
     total_px, name_px = totals.pop(), names.pop()
-    assert name_px >= round(total_px * 46 / 60) - 1
+    assert name_px >= round(total_px * 46 / pages.RIDER_TOTAL) - 1
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
 
@@ -968,7 +970,7 @@ def test_a_small_rider_field_grows_its_rows_type_and_columns_as_one(qtbot, drawn
     fill = room / max(riders, pages.RIDER_FILL_LEAST)
     assert rh <= fill + 1
     assert rh == pytest.approx(min(fill, pages.RIDER_ROW_FULL * g), abs=1)
-    assert {px for _r, px in totals} == {round(min(60 * g, rh * 0.84))}
+    assert {px for _r, px in totals} == {round(min(pages.RIDER_TOTAL * g, rh * 0.84))}
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
 
@@ -977,13 +979,15 @@ def test_a_small_rider_field_grows_its_rows_type_and_columns_as_one(qtbot, drawn
 def test_a_small_field_of_long_names_grows_only_while_every_name_fits_whole(qtbot, drawn, riders):
     """The larger figures take the names' room, so the growth stops where
     a name would give up its first name, and never goes under the base."""
+    from madtracker.board import pages
+
     data = points(riders=riders, sprints=3, done=1)
     w = render(qtbot, "sprint_points", data)
     u = w.pages["sprint_points"].u
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
     totals = {px for s, _r, px, _c in drawn if s in {str(row.total) for row in data.rows}}
-    assert len(totals) == 1 and totals.pop() >= round(60 * u)
+    assert len(totals) == 1 and totals.pop() >= round(pages.RIDER_TOTAL * u)
 
 
 @pytest.mark.parametrize("riders", [9, 10, 16])

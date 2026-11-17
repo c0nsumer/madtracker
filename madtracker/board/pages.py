@@ -1348,6 +1348,12 @@ RIDER_FILL_LEAST = 5
 RIDER_HEAD_H = 44
 RIDER_HEAD_GAP = 8
 RIDER_INSET = 0.05
+# The rider table's total and its other figures at the figure unit. They
+# fill their columns' width (TOTAL is 170 units over a 20-unit inset,
+# the others 150 over a 24-unit pad), so a small field's larger rows set
+# them as large as the columns hold without taking room from the names.
+RIDER_TOTAL = 72
+RIDER_FIGURE = 56
 
 
 # The header words of a race the officials have decided.
@@ -2234,10 +2240,10 @@ class StandingsPage(Page):
             name_size=name_size,
             scale=scale,
             place_f=t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True),
-            total_f=t.font(min(60 * g, rh * 0.84), t.HEAVY, tabular=True),
+            total_f=t.font(min(RIDER_TOTAL * g, rh * 0.84), t.HEAVY, tabular=True),
             # The figures keep pace with the names: at sixteen rows a sprint
             # value set at half the row would be 26 px, under the board's minimum.
-            num=t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True),
+            num=t.font(min(RIDER_FIGURE * g, rh * 0.7), t.BOLD, tabular=True),
             pad=24 * g,
             penalized=penalized,
         )
