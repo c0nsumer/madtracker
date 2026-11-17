@@ -796,10 +796,12 @@ class AppController:
         # app's wordmark as vectors, sharp on any TV, instead of the PNG.
         data = venue.logo_setting(self.store)
         name = venue.venue_name(self.store, self.event.venue if self.event else "")
-        texture = venue.texture_setting(self.store)
+        pattern = venue.texture_pattern(self.store)
+        texture_svg = venue.texture_setting(self.store)
+        adjust = venue.texture_adjust(self.store)
         for b in self.boards:
             b.set_logo_bytes(data)
-            b.set_texture(texture)
+            b.set_texture(pattern, texture_svg, adjust)
             b.set_rider_label(venue.rider_label(self.store))
             b.set_accent(venue.accent(self.store))
             b.set_venue_name(name)

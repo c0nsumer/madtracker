@@ -4025,7 +4025,8 @@ def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp
     assert not page.scoring_now() and not chips
 
 
-def test_the_app_gives_every_canvas_the_venues_texture(make_app, tmp_path):
+def test_the_app_gives_every_canvas_the_chosen_pattern(make_app, tmp_path):
+    from madtracker.board.texture import Adjust
     from madtracker.control import venue
 
     shape = (
@@ -4033,16 +4034,28 @@ def test_the_app_gives_every_canvas_the_venues_texture(make_app, tmp_path):
         b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
     )
     c = make_app(demo=True, data_dir=tmp_path / "data")
+    pages = [p for b in c.boards for p in b.pages.values()]
+    assert len(c.boards) == 2 and all(p.texture.builtin for p in pages)
+    # A stored shape alone changes nothing: the chosen pattern says to draw it.
+    venue.save(
+        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+    )
+    c.apply_venue()
     assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
-    venue.save(
-        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
-    )
+    chosen = Adjust(size=150, rotation=15, opacity=80)
+    venue.save(c.store, name="R", backup="", texture_pattern="venue", texture_adjust=chosen)
     c.apply_venue()
-    assert len(c.boards) == 2
-    assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
+    pages = [p for b in c.boards for p in b.pages.values()]
+    assert all(not p.texture.builtin and p.texture.adjust == chosen for p in pages)
+    venue.save(c.store, name="R", backup="", texture_pattern="none")
+    c.apply_venue()
+    assert all(p.texture is None for b in c.boards for p in b.pages.values())
+    venue.save(c.store, name="R", backup="", texture_pattern="dots")
+    c.apply_venue()
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
 
 
-def test_a_file_with_no_texture_puts_the_built_in_one_back(make_app, tmp_path):
+def test_a_file_with_no_texture_puts_the_bolts_back(make_app, tmp_path):
     from madtracker.control import venue
 
     shape = (
@@ -4051,11 +4064,17 @@ def test_a_file_with_no_texture_puts_the_built_in_one_back(make_app, tmp_path):
     )
     c = make_app(demo=True, data_dir=tmp_path / "data")
     venue.save(
-        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+        c.store,
+        name="R",
+        backup="",
+        texture=shape,
+        texture_name="bolt.svg",
+        keep_texture=False,
+        texture_pattern="venue",
     )
     c.apply_venue()
     assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
-    # The next file has no texture key at all.
+    # The next file has no shape stored, so a venue choice is the bolts.
     venue.save(c.store, name="R", backup="", texture=None, keep_texture=False)
     assert c.store.get_setting(venue.TEXTURE_KEY) is None
     c.apply_venue()

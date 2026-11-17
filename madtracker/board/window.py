@@ -483,9 +483,12 @@ class BoardCanvas(QWidget):
         self.top_bar.update()
         self.logo_page.update()
 
-    def set_texture(self, svg: bytes | None) -> None:
-        """The venue's texture SVG, or None for the bolts, for every page."""
-        shared = make_texture("venue" if svg else "bolts", svg, Adjust())
+    def set_texture(self, pattern: str, svg: bytes | None, adjust: Adjust) -> None:
+        """The chosen pattern, the venue's SVG, and the adjustments, for every page.
+
+        One Texture is shared, so the pages' caches are shared too.
+        """
+        shared = make_texture(pattern, svg, adjust)
         for page in self.pages.values():
             page.texture = shared
             page.update()

@@ -2086,7 +2086,7 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     ]
     rows = button_rows(d)
     assert rows[0] == ["Choose...", "Use Default"]
-    assert rows[1] == ["Choose...", "Use Built-In"]
+    assert ["Adjust..."] not in rows, "the adjustments button stays hidden"
     assert ["Rulesets..."] in rows
     assert rows[-1] == ["Cancel", "Save"]
     d.close()

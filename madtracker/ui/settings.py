@@ -62,9 +62,12 @@ LOGO_MAX_PIXELS = 64 * 1024 * 1024
 # PNG decodes to 64-bit color. Qt's own default (256) would refuse a
 # 16-bit print wordmark well inside the pixel cap.
 LOGO_DECODE_LIMIT_MB = LOGO_MAX_PIXELS * 8 // (1024 * 1024)
-TEXTURE_TIP = (
-    "A shape tiled faintly across the scoreboard's rows. An SVG file; its first shape is used."
-)
+TEXTURE_TIP = "The pattern tiled faintly across the scoreboard's rows."
+# The combo's last item opens the file dialog; it is never a stored value.
+ADD_FROM_FILE = "Add from File..."
+ADD_KEY = "add"
+# The venue shape's item when the file's name was not kept.
+VENUE_SHAPE = "Venue Shape"
 TEXTURE_REFUSAL = "That file has no shape to tile. Choose an SVG file with a filled shape."
 LOGO_TIP = "A PNG with a transparent background and light artwork; it is scaled to the scoreboard."
 # An invented venue, as every other field shows an example value.
@@ -175,24 +178,27 @@ class SettingsDialog(QDialog):
         logo_row.addWidget(browse)
         logo_row.addWidget(default)
 
-        # The bytes to save: the stored SVG, or None for the built-in texture.
+        # Pending until Save, like every other value here: the venue's own
+        # shape (None when none is stored), the chosen pattern, and the
+        # adjustments, which "None" keeps so a pattern chosen again is as it was.
         self.texture_data: bytes | None = venue.texture_setting(store)
         self.texture_file = venue.texture_name(store)
-        self.texture_name = QLabel("")
-        texture_pick = QPushButton("Choose...")
-        texture_pick.clicked.connect(self._pick_texture)
-        texture_default = QPushButton("Use Built-In")
-        texture_default.clicked.connect(lambda: self.set_texture(None))
+        self.pending_pattern = venue.texture_pattern(store)
+        self.pending_adjust = venue.texture_adjust(store)
+        self.texture_combo = QComboBox()
+        self._fill_texture_combo()
+        self.texture_combo.currentIndexChanged.connect(self._texture_picked)
+        # Opens the adjustments dialog; it stays out of the row until that
+        # dialog is wired, and is off while no pattern is drawn.
+        self.adjust_button = QPushButton("Adjust...")
+        self.adjust_button.setVisible(False)
+        self.adjust_button.setEnabled(self.pending_pattern != "none")
         texture_row = QHBoxLayout()
-        texture_row.addWidget(self.texture_name, 1)
-        texture_row.addWidget(texture_pick)
-        texture_row.addWidget(texture_default)
+        texture_row.addWidget(self.texture_combo, 1)
+        texture_row.addWidget(self.adjust_button)
         self.texture_label = QLabel("Scoreboard texture")
-        for w in (self.texture_label, self.texture_name, texture_pick):
+        for w in (self.texture_label, self.texture_combo):
             w.setToolTip(TEXTURE_TIP)
-        self.texture_name.setText(
-            (self.texture_file or "Built-in") if self.texture_data else "Built-in"
-        )
 
         self.preview = QLabel()
         self.preview.setFixedSize(PREVIEW_W + PREVIEW_PAD, PREVIEW_H + PREVIEW_PAD)
@@ -313,15 +319,48 @@ class SettingsDialog(QDialog):
         self.logo_name.setText(name if data else "Default logo")
         self._preview()
 
+    def _fill_texture_combo(self) -> None:
+        """The patterns, the venue's own shape when one is stored, then Add from File."""
+        combo = self.texture_combo
+        combo.blockSignals(True)
+        combo.clear()
+        for key, label in texture.PATTERNS:
+            combo.addItem(label, key)
+        if self.texture_data:
+            combo.addItem(self.texture_file or VENUE_SHAPE, "venue")
+        combo.insertSeparator(combo.count())
+        combo.addItem(ADD_FROM_FILE, ADD_KEY)
+        combo.setCurrentIndex(max(0, combo.findData(self.pending_pattern)))
+        combo.blockSignals(False)
+
+    def _texture_picked(self, index: int) -> None:
+        key = self.texture_combo.itemData(index)
+        if key == ADD_KEY:
+            self._pick_texture()
+            return
+        if key is None:
+            return
+        self.pending_pattern = key
+        show_message(self.error, "")
+        self.adjust_button.setEnabled(key != "none")
+
     def _pick_texture(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose Scoreboard Texture", "", "SVG Images (*.svg)"
         )
         if path:
             self.choose_texture(path)
+        else:
+            self._show_pending_pattern()
+
+    def _show_pending_pattern(self) -> None:
+        combo = self.texture_combo
+        combo.blockSignals(True)
+        combo.setCurrentIndex(max(0, combo.findData(self.pending_pattern)))
+        combo.blockSignals(False)
 
     def choose_texture(self, path: str | Path) -> bool:
-        """Read the file into the texture; False, with the red line, when it has no shape to tile."""
+        """Take the file as the venue shape and select it; False, with the red line, when it has no shape to tile."""
         try:
             with open(path, "rb") as f:
                 raw = f.read(texture.MAX_SVG_BYTES + 1)
@@ -330,15 +369,15 @@ class SettingsDialog(QDialog):
         data = texture.first_shape_svg(raw) if raw else None
         if data is None:
             show_message(self.error, TEXTURE_REFUSAL)
+            self._show_pending_pattern()
             return False
-        self.set_texture(data, Path(path).name)
-        return True
-
-    def set_texture(self, data: bytes | None, name: str = "") -> None:
         self.texture_data = data
-        self.texture_file = name if data else ""
+        self.texture_file = Path(path).name
+        self.pending_pattern = "venue"
         show_message(self.error, "")
-        self.texture_name.setText(name if data else "Built-in")
+        self._fill_texture_combo()
+        self.adjust_button.setEnabled(True)
+        return True
 
     def _show_accent(self) -> None:
         for hex_color, b in self.accent_swatches.items():
@@ -423,6 +462,8 @@ class SettingsDialog(QDialog):
                 texture=self.texture_data,
                 texture_name=self.texture_file,
                 keep_texture=False,
+                texture_pattern=self.pending_pattern,
+                texture_adjust=self.pending_adjust,
                 name=self.venue_name.text(),
                 backup=self.backup.text(),
                 rider_label=self.rider_label.currentData(),

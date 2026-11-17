@@ -534,7 +534,7 @@ def test_a_venue_shape_replaces_the_builtin_stroke(qtbot):
     w = render(qtbot, "madison", standings(5))
     clocked(w, color_view_ms())
     builtin = w.grab().toImage()
-    w.set_texture(texture.first_shape_svg(CHEVRON))
+    w.set_texture("venue", texture.first_shape_svg(CHEVRON), texture.Adjust())
     page = w.pages["madison"]
     assert not page.texture.builtin
     venue = w.grab().toImage()
