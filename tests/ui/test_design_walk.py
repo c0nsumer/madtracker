@@ -2094,6 +2094,138 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     d.close()
 
 
+def test_settings_texture_dropdown_lists_the_patterns_and_opens_on_bolts(app):
+    """The patterns in order, a separator, then Add from File; a fresh file opens on the bolts."""
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(app.store, app.data_dir, app.main)
+    d.show()
+    combo = d.texture_combo
+    items = [
+        "separator" if combo.itemData(i) is None else combo.itemText(i)
+        for i in range(combo.count())
+    ]
+    assert items == [
+        "Lightning Bolts",
+        "Slant Strokes",
+        "Chevrons",
+        "Dots",
+        "None",
+        "separator",
+        "Add from File...",
+    ]
+    assert combo.currentText() == "Lightning Bolts" and combo.currentData() == "bolts"
+    d.close()
+
+
+def test_settings_adjust_button_is_off_only_for_none(app):
+    """Nothing to adjust on a board without a texture; every pattern has adjustments."""
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(app.store, app.data_dir, app.main)
+    d.show()
+    combo, adjust = d.texture_combo, d.adjust_button
+    assert adjust.text() == "Adjust..." and adjust.isVisibleTo(d)
+    for key in ("bolts", "slant", "chevrons", "dots", "none"):
+        combo.setCurrentIndex(combo.findData(key))
+        assert adjust.isEnabled() == (key != "none"), key
+    combo.setCurrentIndex(combo.findData("bolts"))
+    assert adjust.isEnabled(), "a pattern again re-enables it"
+    d.close()
+
+
+def test_scoreboard_texture_dialog_lists_its_controls(app):
+    """Section 11: five sliders with their ranges, defaults, and readouts; Reset apart from Cancel and OK."""
+    from madtracker.board.texture import Adjust
+    from madtracker.ui.texture_dialog import TextureDialog
+
+    d = TextureDialog("bolts", None, Adjust(), app.main)
+    d.show()
+    assert d.windowTitle() == "Scoreboard Texture"
+    assert form_labels(d) == ["Size", "Rotation", "Spacing", "Opacity", "Tone"]
+    assert [(d.tone_ends[0].text(), d.tone_ends[1].text())] == [("Darker", "Lighter")]
+    table = {
+        "size": (50, 200, 100, "100%"),
+        "rotation": (-45, 45, 0, "0°"),
+        "spacing": (60, 200, 100, "100%"),
+        "opacity": (0, 200, 100, "100%"),
+        "tone": (-100, 100, 0, "0"),
+    }
+    assert list(d.sliders) == list(table)
+    for key, (lo, hi, default, shown) in table.items():
+        s = d.sliders[key]
+        assert (s.minimum(), s.maximum(), s.value()) == (lo, hi, default), key
+        assert d.readouts[key].text() == shown, key
+    assert button_rows(d)[-1] == ["Reset", "Cancel", "OK"]
+    assert d.ok_button.isDefault()
+    d.close()
+
+
+def test_every_control_in_the_scoreboard_texture_dialog_does_something(app, quiet):
+    """The sweep for the Scoreboard Texture dialog: each control moves a readout, the preview, or closes it."""
+    from PySide6.QtWidgets import QApplication
+
+    from madtracker.board.texture import Adjust
+    from madtracker.ui.texture_dialog import TextureDialog
+
+    start = Adjust(size=120, rotation=10, spacing=90, opacity=80, tone=-20)
+
+    def build():
+        d = TextureDialog("bolts", None, start, app.main)
+        d.show()
+        d.results = []
+        d.finished.connect(d.results.append)
+        QApplication.processEvents()
+        return d
+
+    def snap(d) -> tuple:
+        return (
+            d.adjust(),
+            tuple(r.text() for r in d.readouts.values()),
+            d.preview.grab().toImage(),
+            tuple(d.results),
+        )
+
+    def controls(d) -> list[tuple[str, Callable]]:
+        out = [
+            (
+                f"{key} slider",
+                lambda s=s: s.setValue(
+                    s.minimum() + 1 if s.value() != s.minimum() + 1 else s.maximum()
+                ),
+            )  # fmt: skip
+            for key, s in d.sliders.items()
+        ]
+        out += [
+            ("Reset", d.reset_button.click),
+            ("Cancel", d.cancel_button.click),
+            ("OK", d.ok_button.click),
+        ]
+        return out
+
+    names = [name for name, _press in controls(build())]
+    assert names == [f"{k} slider" for k in start.__dataclass_fields__] + ["Reset", "Cancel", "OK"]
+    for k, name in enumerate(names):
+        d = build()
+        _name, press = controls(d)[k]
+        before = snap(d)
+        press()
+        QApplication.processEvents()
+        after = snap(d)
+        assert after != before, f"{name} was silent"
+        if name.endswith("slider"):
+            assert after[1] != before[1], f"{name}: the readout did not move"
+        if name in ("size slider", "rotation slider", "Reset"):
+            assert after[2] != before[2], f"{name}: the preview did not redraw"
+        if name == "Cancel":
+            assert after[3] == (int(QDialog.DialogCode.Rejected),)
+        if name == "OK":
+            assert after[3] == (int(QDialog.DialogCode.Accepted),)
+        if name == "Reset":
+            assert d.adjust() == Adjust()
+        d.close()
+
+
 def test_rulesets_dialog_buttons_in_order_and_close_last(app):
     """Section 11: USAC 2025 and the venue's copies, one column of actions."""
     from madtracker.ui.about import NOT_USAC
