@@ -42,6 +42,10 @@ PATTERNS: tuple[tuple[str, str], ...] = (
 )
 DEFAULT_PATTERN = "bolts"
 _BUNDLED = ("bolts", "slant", "chevrons", "dots")
+# A bundled pattern's shape height as a share of TILE_H: dots are a fine
+# grain and chevrons small Vs, so neither is as tall as a row's text.
+# A venue's own shape is drawn at 1.0.
+BASE_SCALE = {"bolts": 1.0, "slant": 1.0, "chevrons": 0.75, "dots": 0.28}
 
 _SVG_NS = "http://www.w3.org/2000/svg"
 _SHAPES = ("path", "polygon", "rect", "circle", "ellipse")
@@ -230,7 +234,9 @@ class Texture:
     back to the bolts, so a texture always draws something.
     """
 
-    def __init__(self, svg: bytes, adjust: Adjust | None = None, *, builtin: bool = False):
+    def __init__(
+        self, svg: bytes, adjust: Adjust | None = None, *, builtin: bool = False, scale: float = 1.0
+    ):
         self.adjust = (adjust or Adjust()).clamped()
         measured = _measure(svg)
         if measured is None:
@@ -245,6 +251,7 @@ class Texture:
         self._renderer = renderer
         self._aspect = ink.width() / ink.height()
         self._builtin = builtin
+        self._scale = scale
         self._cells: dict[tuple[float, float], QImage] = {}
         self._brushes: dict[tuple[float, float, int], QBrush] = {}
 
@@ -277,7 +284,7 @@ class Texture:
         key = (u, dpr)
         if key in self._cells:
             return self._cells[key]
-        h = TILE_H * self.adjust.size / 100 * u * dpr
+        h = TILE_H * self._scale * self.adjust.size / 100 * u * dpr
         w = h * self._aspect
         spread = self.adjust.spacing / 100
         width = min(MAX_CELL_PX, max(1, round(PITCH_X * spread * w)))
@@ -337,4 +344,5 @@ def make_texture(pattern: str, venue_svg: bytes | None, adjust: Adjust) -> Textu
         return Texture(venue_svg, adjust)
     svg = pattern_svg(pattern) or pattern_svg(DEFAULT_PATTERN)
     assert svg is not None
-    return Texture(svg, adjust, builtin=True)
+    key = pattern if pattern in BASE_SCALE else DEFAULT_PATTERN
+    return Texture(svg, adjust, builtin=True, scale=BASE_SCALE[key])

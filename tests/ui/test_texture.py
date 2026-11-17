@@ -264,9 +264,9 @@ def test_every_bundled_pattern_tiles(qapp):
         ), key
 
 
-def _run(cell: QImage) -> int:
+def _run(cell: QImage, scale: str = "dots") -> int:
     """The inked length of the cell's top row of shapes, left to right."""
-    y = round(texture.TILE_H / 2)
+    y = round(texture.TILE_H * texture.BASE_SCALE[scale] / 2)
     line = [cell.pixelColor(x, y).alpha() > 0 for x in range(cell.width())]
     first = line.index(True)
     end = first
@@ -382,3 +382,10 @@ def test_adjust_extremes_tile_without_error_and_within_the_cell_cap(qapp):
                     assert 0 < cell.width() <= texture.MAX_CELL_PX
                     assert 0 < cell.height() <= texture.MAX_CELL_PX
                 tex.brush(1.0, 1.0, QColor("white"), QPointF(5, 5))
+
+
+def test_dots_are_a_fine_grain_beside_the_bolts(qapp):
+    bolt, dot = _tex("bolts").cell(1.0, 1.0), _tex("dots").cell(1.0, 1.0)
+    assert dot.height() < bolt.height() / 3
+    venue = texture.make_texture("venue", texture.first_shape_svg(CHEVRON), texture.Adjust())
+    assert abs(venue.cell(1.0, 1.0).height() - 2 * texture.PITCH_Y * texture.TILE_H) <= 1
