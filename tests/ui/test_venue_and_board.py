@@ -835,3 +835,14 @@ def test_choosing_a_texture_then_cancelling_saves_nothing(store, qtbot, tmp_path
     d.reject()
     assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == "old.svg"
     assert venue.texture_pattern(store) == "bolts"
+
+
+def test_a_stored_shape_without_a_name_is_no_venue_shape(store, qtbot, tmp_path):
+    venue.save(store, name="R", backup="", texture=CHEVRON, texture_name="", keep_texture=False)
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "venue")
+    assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == ""
+    assert venue.texture_pattern(store) == "bolts"
+    d = _settings(store, tmp_path, qtbot)
+    assert d.texture_combo.currentText() == "Lightning Bolts"
+    assert d.texture_combo.findData("venue") == -1
+    assert d.save() and venue.texture_setting(store) == CHEVRON

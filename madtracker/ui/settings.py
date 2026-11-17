@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from madtracker.board import texture, theme
 from madtracker.control import venue
 from madtracker.control.exports import documents_dir
+from madtracker.inputs import clean_line
 from madtracker.store import Store, StoreError
 from madtracker.ui import style
 from madtracker.ui.icons import mdi
@@ -66,8 +67,7 @@ TEXTURE_TIP = "The pattern tiled faintly across the scoreboard's rows."
 # The combo's last item opens the file dialog; it is never a stored value.
 ADD_FROM_FILE = "Add from File..."
 ADD_KEY = "add"
-# The venue shape's item when the file's name was not kept.
-VENUE_SHAPE = "Venue Shape"
+
 TEXTURE_REFUSAL = "That file has no shape to tile. Choose an SVG file with a filled shape."
 LOGO_TIP = "A PNG with a transparent background and light artwork; it is scaled to the scoreboard."
 # An invented venue, as every other field shows an example value.
@@ -326,8 +326,9 @@ class SettingsDialog(QDialog):
         combo.clear()
         for key, label in texture.PATTERNS:
             combo.addItem(label, key)
-        if self.texture_data:
-            combo.addItem(self.texture_file or VENUE_SHAPE, "venue")
+        # The item is the file's name; a stored shape without one is not offered.
+        if self.texture_data and self.texture_file:
+            combo.addItem(self.texture_file, "venue")
         combo.insertSeparator(combo.count())
         combo.addItem(ADD_FROM_FILE, ADD_KEY)
         combo.setCurrentIndex(max(0, combo.findData(self.pending_pattern)))
@@ -367,12 +368,14 @@ class SettingsDialog(QDialog):
         except OSError:
             raw = b""
         data = texture.first_shape_svg(raw) if raw else None
-        if data is None:
+        # The item is named by the file, so a file with no usable name is refused.
+        name = clean_line(Path(path).name) or Path(path).name
+        if data is None or not name:
             show_message(self.error, TEXTURE_REFUSAL)
             self._show_pending_pattern()
             return False
         self.texture_data = data
-        self.texture_file = Path(path).name
+        self.texture_file = name
         self.pending_pattern = "venue"
         show_message(self.error, "")
         self._fill_texture_combo()

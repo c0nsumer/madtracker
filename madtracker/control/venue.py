@@ -118,11 +118,12 @@ def texture_name(store: Store) -> str:
 
 
 def texture_pattern(store: Store) -> str:
-    """The chosen pattern key; the bolts when unset, unknown, or "venue" with no shape stored."""
+    """The chosen pattern key; the bolts when unset, unknown, or "venue" with no shape or no file name stored."""
     value = store.get_setting(TEXTURE_PATTERN_KEY)
     offered = {key for key, _label in board_texture.PATTERNS}
     if value == "venue":
-        return "venue" if texture_setting(store) else board_texture.DEFAULT_PATTERN
+        shaped = texture_setting(store) and texture_name(store)
+        return "venue" if shaped else board_texture.DEFAULT_PATTERN
     if isinstance(value, str) and value in offered:
         return value
     return board_texture.DEFAULT_PATTERN
