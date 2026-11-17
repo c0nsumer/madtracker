@@ -18,7 +18,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QTransform
 from PySide6.QtSvg import QSvgRenderer
 
 # The shape's height in board units; its width follows its aspect.
-TILE_H = 64
+TILE_H = 32
 # The grid's pitch as a multiple of the shape's width and height. Every
 # second row shifts half a pitch, so shapes interlock as bricks do.
 PITCH_X = 1.35
