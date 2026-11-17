@@ -128,6 +128,8 @@ datas += [(str(ROOT / "madtracker" / "assets" / "icons" / "*.png"), "madtracker/
 # The bike glyph the board's wordmark draws from at paint time.
 datas += [(str(ROOT / "madtracker" / "assets" / "icons" / "*.svg"), "madtracker/assets/icons")]
 datas += [(str(ROOT / "madtracker" / "assets" / "icons" / "mdi" / "*.svg"), "madtracker/assets/icons/mdi")]
+# The scoreboard's texture patterns, read through importlib.resources.
+datas += [(str(ROOT / "madtracker" / "assets" / "textures" / "*.svg"), "madtracker/assets/textures")]
 # The bundled Inter font and its OFL license: the window, the board and
 # the PDF all draw with it, and the license must travel with the files.
 datas += [(str(ROOT / "madtracker" / "assets" / "fonts" / "*.ttf"), "madtracker/assets/fonts")]

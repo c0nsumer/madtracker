@@ -1,19 +1,21 @@
 """The board's texture: one shape tiled in a staggered grid.
 
-The scoreboard fades and solid fills carry a faint repeat of a shape (the
-venue's own SVG, or a built-in stroke at the board's slant). The cell is an
-alpha mask, so any color tints it, and it is cut to tile seamlessly so a
-brush anchored at one point shows the same pattern under every row.
+The scoreboard fades and solid fills carry a faint repeat of a shape (a
+bundled pattern, or the venue's own SVG), sized, turned, spaced, and toned
+by the venue's adjustments. The cell is an alpha mask, so any color tints
+it, and it is cut to tile seamlessly so a brush anchored at one point shows
+the same pattern under every row.
 """
 
+import functools
+from dataclasses import dataclass
+from importlib.resources import files
 from xml.etree import ElementTree as _writer  # writes only; parsing is defusedxml's
 
 from defusedxml import ElementTree
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPolygonF, QTransform
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QTransform
 from PySide6.QtSvg import QSvgRenderer
-
-from madtracker.board import theme
 
 # The shape's height in board units; its width follows its aspect.
 TILE_H = 64
@@ -29,8 +31,17 @@ SOLID_ALPHA = 0.12
 SOLID_DARKER = 115
 # A venue file larger than this is refused: a logo is a few kilobytes.
 MAX_SVG_BYTES = 256 * 1024
-# The built-in stroke's width as a share of its height, leaning at SLANT.
-BUILTIN_W = 0.16
+
+# The bundled patterns, in the order the picker offers them: key and label.
+PATTERNS: tuple[tuple[str, str], ...] = (
+    ("bolts", "Lightning Bolts"),
+    ("slant", "Slant Strokes"),
+    ("chevrons", "Chevrons"),
+    ("dots", "Dots"),
+    ("none", "None"),
+)
+DEFAULT_PATTERN = "bolts"
+_BUNDLED = ("bolts", "slant", "chevrons", "dots")
 
 _SVG_NS = "http://www.w3.org/2000/svg"
 _SHAPES = ("path", "polygon", "rect", "circle", "ellipse")
@@ -156,54 +167,121 @@ def _ink_bounds(renderer: QSvgRenderer) -> QRectF | None:
     )
 
 
-class Texture:
-    """A shape and its staggered cell, cached per scale."""
+@functools.cache
+def pattern_svg(key: str) -> bytes | None:
+    """A bundled pattern's SVG reduced to its shape, or None for any other key."""
+    if key not in _BUNDLED:
+        return None
+    raw = (files("madtracker.assets") / "textures" / f"{key}.svg").read_bytes()
+    return first_shape_svg(raw)
 
-    def __init__(self, svg: bytes | None):
-        self._renderer: QSvgRenderer | None = None
-        self._aspect = (BUILTIN_W + theme.SLANT) / 1.0
-        if svg is not None:
-            measured = _measure(svg)
-            if measured is not None:
-                renderer, ink = measured
-                # The view box is the shape's own box, so the render below
-                # fills the bounds it is given.
-                renderer.setViewBox(ink)
-                self._renderer = renderer
-                self._aspect = ink.width() / ink.height()
+
+# Each adjustment's range, low and high.
+SIZE = (50, 200)
+ROTATION = (-45, 45)
+SPACING = (60, 200)
+OPACITY = (0, 200)
+TONE = (-100, 100)
+
+
+def _within(value: int, bounds: tuple[int, int]) -> int:
+    return min(bounds[1], max(bounds[0], int(value)))
+
+
+@dataclass(frozen=True)
+class Adjust:
+    """The venue's taste for the texture: percents, and rotation in degrees."""
+
+    size: int = 100
+    rotation: int = 0
+    spacing: int = 100
+    opacity: int = 100
+    tone: int = 0
+
+    def clamped(self) -> "Adjust":
+        return Adjust(
+            _within(self.size, SIZE),
+            _within(self.rotation, ROTATION),
+            _within(self.spacing, SPACING),
+            _within(self.opacity, OPACITY),
+            _within(self.tone, TONE),
+        )
+
+
+def _mixed(color: QColor, tone: int) -> QColor:
+    """``color`` mixed toward black (tone below 0) or white (above), keeping its alpha."""
+    if tone == 0:
+        return QColor(color)
+    target = 0 if tone < 0 else 255
+    share = abs(tone) / 100
+    out = QColor(
+        round(color.red() + (target - color.red()) * share),
+        round(color.green() + (target - color.green()) * share),
+        round(color.blue() + (target - color.blue()) * share),
+    )
+    out.setAlpha(color.alpha())
+    return out
+
+
+class Texture:
+    """A shape and its staggered cell, cached per scale.
+
+    ``builtin`` marks a bundled pattern. A shape that cannot tile falls
+    back to the bolts, so a texture always draws something.
+    """
+
+    def __init__(self, svg: bytes, adjust: Adjust | None = None, *, builtin: bool = False):
+        self.adjust = (adjust or Adjust()).clamped()
+        measured = _measure(svg)
+        if measured is None:
+            fallback = pattern_svg(DEFAULT_PATTERN)
+            measured = _measure(fallback) if fallback is not None else None
+            builtin = True
+        assert measured is not None
+        renderer, ink = measured
+        # The view box is the shape's own box, so the render below fills
+        # the bounds it is given.
+        renderer.setViewBox(ink)
+        self._renderer = renderer
+        self._aspect = ink.width() / ink.height()
+        self._builtin = builtin
         self._cells: dict[tuple[float, float], QImage] = {}
         self._brushes: dict[tuple[float, float, int], QBrush] = {}
 
     @property
     def builtin(self) -> bool:
-        return self._renderer is None
+        return self._builtin
+
+    @property
+    def rotated(self) -> bool:
+        return self.adjust.rotation != 0
+
+    @property
+    def fade_share(self) -> float:
+        return FADE_SHARE * self.adjust.opacity / 100
+
+    @property
+    def solid_alpha(self) -> float:
+        return SOLID_ALPHA * self.adjust.opacity / 100
+
+    def fade_color(self, base: QColor) -> QColor:
+        return _mixed(base, self.adjust.tone)
+
+    def solid_color(self, base: QColor) -> QColor:
+        return _mixed(base.darker(SOLID_DARKER), self.adjust.tone)
 
     def _draw_shape(self, p: QPainter, x: float, y: float, w: float, h: float) -> None:
-        if self._renderer is not None:
-            self._renderer.render(p, QRectF(x, y, w, h))
-            return
-        # The stroke's top leans right of its foot by SLANT * h.
-        run = theme.SLANT * h
-        stroke = w - run
-        p.drawPolygon(
-            QPolygonF(
-                [
-                    QPointF(x + run, y),
-                    QPointF(x + run + stroke, y),
-                    QPointF(x + stroke, y + h),
-                    QPointF(x, y + h),
-                ]
-            )
-        )
+        self._renderer.render(p, QRectF(x, y, w, h))
 
     def cell(self, u: float, dpr: float) -> QImage:
         key = (u, dpr)
         if key in self._cells:
             return self._cells[key]
-        h = TILE_H * u * dpr
+        h = TILE_H * self.adjust.size / 100 * u * dpr
         w = h * self._aspect
-        width = min(MAX_CELL_PX, max(1, round(PITCH_X * w)))
-        height = min(MAX_CELL_PX, max(1, round(2 * PITCH_Y * h)))
+        spread = self.adjust.spacing / 100
+        width = min(MAX_CELL_PX, max(1, round(PITCH_X * spread * w)))
+        height = min(MAX_CELL_PX, max(1, round(2 * PITCH_Y * spread * h)))
         image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         p = QPainter(image)
@@ -237,5 +315,26 @@ class Texture:
             tinted_brush = QBrush(tinted)
             self._brushes[key] = tinted_brush
         brush = QBrush(tinted_brush)
-        brush.setTransform(QTransform.fromTranslate(origin.x(), origin.y()))
+        # The turn is about the row's origin, so the pattern stays fixed to
+        # the row however the adjustment leans it.
+        turn = QTransform.fromTranslate(origin.x(), origin.y())
+        if self.adjust.rotation:
+            turn.rotate(self.adjust.rotation)
+        brush.setTransform(turn)
         return brush
+
+
+def make_texture(pattern: str, venue_svg: bytes | None, adjust: Adjust) -> Texture | None:
+    """The texture for a stored choice, or None when nothing is to be drawn.
+
+    ``none`` and zero opacity draw nothing. ``venue`` is the venue's own
+    shape, the bolts without one; a key that is not offered gives the bolts.
+    """
+    adjust = adjust.clamped()
+    if pattern == "none" or adjust.opacity == 0:
+        return None
+    if pattern == "venue" and venue_svg:
+        return Texture(venue_svg, adjust)
+    svg = pattern_svg(pattern) or pattern_svg(DEFAULT_PATTERN)
+    assert svg is not None
+    return Texture(svg, adjust, builtin=True)

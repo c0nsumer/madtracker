@@ -310,7 +310,7 @@ def _fade(
 def _build_fade_layer(
     texture: tx.Texture, w: float, h: float, color: QColor, u: float, dpr: float, slant: float
 ) -> QImage:
-    """The texture in ``color`` over a ``w`` by ``h`` row's fade, at FADE_SHARE of its alpha.
+    """The texture in ``color`` over a ``w`` by ``h`` row's fade, at the texture's fade share of its alpha.
 
     The layer's top left is the row's, and it reaches as far right as the
     fade does at the row's top.
@@ -325,9 +325,11 @@ def _build_fade_layer(
     image.setDevicePixelRatio(dpr)
     image.fill(Qt.GlobalColor.transparent)
     p = QPainter(image)
-    p.fillRect(reach, texture.brush(u, dpr, color, QPointF(0, 0)))
+    if texture.rotated:
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    p.fillRect(reach, texture.brush(u, dpr, texture.fade_color(color), QPointF(0, 0)))
     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-    p.fillRect(reach, QBrush(_fade(row, color, u, slant, tx.FADE_SHARE)))
+    p.fillRect(reach, QBrush(_fade(row, color, u, slant, texture.fade_share)))
     p.end()
     return image
 
@@ -368,7 +370,7 @@ def paint_band(
     the riders' names carry a dark team (design section 10).
 
     ``texture`` lies on the fade in the row's color, as strong as the
-    fade times FADE_SHARE, and on the solid color one tone darker; it is
+    fade times the texture's opacity, and on the solid color one tone darker; it is
     fixed to the row's top left, so a sweep reveals it and never moves
     it. ``dpr`` is the display's pixel ratio, so it draws pixel for pixel.
     Neither the fade nor the fill reaches the figures, so neither does it.
@@ -393,8 +395,10 @@ def paint_band(
         p.setBrush(c)
         p.drawPath(fill)
         if texture is not None:
-            tone = c.darker(tx.SOLID_DARKER)
-            tone.setAlphaF(tx.SOLID_ALPHA)
+            tone = texture.solid_color(c)
+            tone.setAlphaF(min(1.0, texture.solid_alpha))
+            if texture.rotated:
+                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             p.setBrush(texture.brush(u, dpr, tone, row.topLeft()))
             p.drawPath(fill)
         if 0 < sweep < 1:

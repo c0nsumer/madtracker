@@ -145,6 +145,8 @@ MadTracker is developed by Steve Vigneau ([nuxx.net](https://nuxx.net)), with Cl
 
 This project would not have been possible without the partnership with Glenn OConner, the current scoring wizard at Mad Track Arena. An additional thank-you to Kevin Morrison, whose feedback on scoring methodology guided and polished MadTracker getting it ready for release.
 
+The lightning bolt that tiles the scoreboard's rows is the maintainer's own artwork.
+
 It's built on these open-source components:
 
 | Component | License | Used for |
