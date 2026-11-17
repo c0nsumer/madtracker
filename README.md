@@ -33,17 +33,18 @@ The scoreboard on the second display at 1920 by 1080, after the second sprint of
 <table>
 <tr>
 <td valign="top"><a href="docs/images/scoreboard-elimination.png"><img src="docs/images/scoreboard-elimination.png" alt="The scoreboard as a rider is eliminated" width="400"></a><br>The scoreboard during an Elimination.</td>
+<td valign="top"><a href="docs/images/scoreboard-sprint-result.png"><img src="docs/images/scoreboard-sprint-result.png" alt="The scoreboard's sprint result card" width="400"></a><br>The scoreboard briefly shows sprint results mid-race.</td>
+</tr>
+<tr>
 <td valign="top"><a href="docs/images/scoreboard-madison-two-teams.png"><img src="docs/images/scoreboard-madison-two-teams.png" alt="The scoreboard showing a two-team Madison's standings" width="400"></a><br>A Madison with two teams; one custom and one by color. Row size scales automatically.</td>
-</tr>
-<tr>
 <td valign="top"><a href="docs/images/scoreboard-points-five-riders.png"><img src="docs/images/scoreboard-points-five-riders.png" alt="The scoreboard showing a five-rider Points Race's standings" width="400"></a><br>A Points Race scoreboard with five riders.</td>
+</tr>
+<tr>
 <td valign="top"><a href="docs/images/edit-riders.png"><img src="docs/images/edit-riders.png" alt="The Edit Riders window" width="400"></a><br>File > Edit Riders..., where the venue's riders are added, imported, and edited.</td>
-</tr>
-<tr>
 <td valign="top"><a href="docs/images/multi-race-standings.png"><img src="docs/images/multi-race-standings.png" alt="The Multi-Race Standings window showing a two-night Team Omnium" width="400"></a><br>File > Multi-Race Standings..., with the demo's two-night Team Omnium partway through.</td>
-<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>First page of a final results PDF.</td>
 </tr>
 <tr>
+<td valign="top"><a href="docs/images/results-pdf.png"><img src="docs/images/results-pdf.png" alt="The first page of a night's results PDF" width="400"></a><br>First page of a final results PDF.</td>
 <td valign="top"><a href="docs/images/program-pdf.png"><img src="docs/images/program-pdf.png" alt="The first page of a night's program PDF" width="400"></a><br>First page of a demo race program PDF.</td>
 </tr>
 </table>
@@ -144,8 +145,6 @@ The setup, test, and lint commands are in [Building](docs/building.md), along wi
 MadTracker is developed by Steve Vigneau ([nuxx.net](https://nuxx.net)), with Claude Code, an AI coding tool.
 
 This project would not have been possible without the partnership with Glenn OConner, the current scoring wizard at Mad Track Arena. An additional thank-you to Kevin Morrison, whose feedback on scoring methodology guided and polished MadTracker getting it ready for release.
-
-The lightning bolt that tiles the scoreboard's rows is the maintainer's own artwork.
 
 It's built on these open-source components:
 
