@@ -1302,14 +1302,14 @@ TEAM_PAGE_ROWS = 8
 # page rather than one row the whole height.
 TEAM_FILL_LEAST = 2
 # A team row's total, its largest type, as a share of the row.
-TEAM_FIGURE_SHARE = 0.62
+TEAM_FIGURE_SHARE = 0.76
 # The place beside the total's size: Black weight like the total, a step
 # under it, so the total stays the figure the eye finds first.
 TEAM_PLACE_SCALE = 0.85
 # The widest the place column grows, as a share of the page's width.
 TEAM_PLACE_SHARE = 0.14
 # The laps and the penalty grow with the row, under the total.
-TEAM_LAPS_SHARE = 0.36
+TEAM_LAPS_SHARE = 0.44
 # The laps and the penalty stop growing here, as the surnames do: a lone
 # team's or a pair's tall row would otherwise give their columns the width
 # the surnames need, and the total is the figure the riders read.
@@ -1317,6 +1317,10 @@ TEAM_LAPS_MOST = 96
 # The least the place and the total give way to, so the surnames fit
 # whole beside them; past that a long surname shrinks instead.
 TEAM_FIGURE_LEAST = 84
+# The total gives way to the surnames only down to this many times their
+# size; past it the two step down together, so long surnames never leave
+# the scores smaller than the names beside them.
+TEAM_TOTAL_OVER_SURNAME = 1.45
 # The riders' surnames, side by side on the row, as a share of its height.
 # They stop growing at the start list's largest surname
 # (``team_rows.START_SURNAME_MOST``): surnames set to a lone team's or a
@@ -2783,17 +2787,26 @@ class StandingsPage(Page):
             }
 
         # The place and the total give way to the surnames: they step down
-        # from their share of the row, never under TEAM_FIGURE_LEAST, until
-        # the widest surname fits whole at its size. Only then does the
-        # surnames' shared size shrink. The surnames are what the stands
-        # match to the jerseys, and a small field's growth is for both.
+        # from their share of the row until the widest surname fits whole,
+        # but not under TEAM_TOTAL_OVER_SURNAME times the surnames' size;
+        # past that the surnames step down too, and the total follows them
+        # down to TEAM_FIGURE_LEAST. The surnames are what the stands match
+        # to the jerseys and the totals what the riders race on, so a small
+        # field's growth is for both.
         big_px = rh * TEAM_FIGURE_SHARE
         least = min(big_px, TEAM_FIGURE_LEAST * u)
-        surname_f = t.font(size, t.HEAVY)
+        surname_px = size
         cols = columns(big_px)
-        while big_px > least and widest(lasts, surname_f) > cols["room"]:
-            big_px = max(least, big_px * 0.96)
-            cols = columns(big_px)
+        while widest(lasts, t.font(surname_px, t.HEAVY)) > cols["room"]:
+            keep = max(least, TEAM_TOTAL_OVER_SURNAME * surname_px)
+            if big_px > keep:
+                big_px = max(keep, big_px * 0.96)
+                cols = columns(big_px)
+            elif surname_px > t.MIN_PX * u:
+                surname_px = max(t.MIN_PX * u, surname_px * 0.97)
+            else:
+                break
+        surname_f = t.font(surname_px, t.HEAVY)
         total_f, num, place_f, rank_w = (
             cols["total_f"],
             cols["num"],
@@ -2813,8 +2826,8 @@ class StandingsPage(Page):
         names_x = row_x + pad
         half = max(0.0, (zone_r - names_x) / 2)
         floor_px = round(t.MIN_PX * u)
-        scale = t.fit_scale([(s, room, surname_f) for s in lasts], floor=t.MIN_PX * u / size)
-        surname_f = t.font(max(math.floor(size * scale), floor_px), t.HEAVY)
+        scale = t.fit_scale([(s, room, surname_f) for s in lasts], floor=t.MIN_PX * u / surname_px)
+        surname_f = t.font(max(math.floor(surname_px * scale), floor_px), t.HEAVY)
         # Text width is not exactly linear in pixel size (hinting).
         while surname_f.pixelSize() > floor_px and widest(lasts, surname_f) > room:
             surname_f = t.font(surname_f.pixelSize() - 1, t.HEAVY)

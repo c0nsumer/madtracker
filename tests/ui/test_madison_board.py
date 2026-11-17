@@ -661,12 +661,12 @@ def test_the_madison_table_names_view_shows_surnames_and_no_team_words(qtbot, dr
 
 
 @pytest.mark.parametrize(
-    "teams, row_px, total, surname_px", [(1, 446, 127, 96), (2, 439, 115, 96), (5, 167, 104, 80)]
+    "teams, row_px, total, surname_px", [(1, 446, 135, 93), (2, 439, 127, 87), (5, 167, 113, 75)]
 )
 def test_madison_table_sizes_at_1080(qtbot, drawn, monkeypatch, teams, row_px, total, surname_px):
-    """Design section 10: 5 teams give rows of 167 px, totals of 104 px,
-    and surnames of 80 px; 2 teams 439, 115 and 96; a lone team 446, 127
-    and 96. The rows start at the page's top, the place is 0.85 of the
+    """Design section 10: 5 teams give rows of 167 px, totals of 113 px,
+    and surnames of 75 px; 2 teams 439, 127 and 87; a lone team 446, 135
+    and 93. The rows start at the page's top, the place is 0.85 of the
     total, and the laps are under it."""
     from madtracker.board import pages, team_rows
 
@@ -700,37 +700,35 @@ def table_sizes(qtbot, drawn, data: P.Standings) -> tuple[int, int]:
 def test_a_small_table_never_sets_its_totals_or_surnames_smaller_than_five_teams(
     qtbot, drawn, teams
 ):
-    """Fewer rows get larger type: the totals give way to the surnames in a
-    tall row, but never below the five-team table's, and the usual
-    surnames stand whole at the start list's largest."""
-    from madtracker.board import team_rows
-
+    """Fewer rows get larger type: the totals and the surnames give way to
+    each other in a tall row, but never below the five-team table's, and
+    the usual surnames stand whole."""
     five = table_sizes(qtbot, drawn, standings(5))
     data = standings(teams)
     total, surname_px = table_sizes(qtbot, drawn, data)
     assert total >= five[0] and surname_px >= five[1]
-    assert surname_px == team_rows.START_SURNAME_MOST
     assert set(surnames(data)) <= set(strings(drawn))
     # LAPS stops at its cap, under the total.
     [laps] = sizes(drawn, ["+1L"])
     assert laps <= 96 and laps < total
 
 
-def test_long_surnames_drive_the_figures_to_84_before_they_shrink(qtbot, drawn):
+def test_long_surnames_and_the_figures_give_way_together(qtbot, drawn):
+    """The figures give way to long surnames only down to
+    TEAM_TOTAL_OVER_SURNAME times their size; past that both step down, so
+    the total stays the larger, and never under TEAM_FIGURE_LEAST."""
     from madtracker.board import pages
 
     data = standings(2)
     data.rows[0].entry.names = ["Ada Featherstonehaugh-Rochester", "Bo Montgomery-Blackwood"]
     total, surname_px = table_sizes(qtbot, drawn, data)
-    assert total == pages.TEAM_FIGURE_LEAST
+    assert total >= pages.TEAM_FIGURE_LEAST
+    assert total >= round(pages.TEAM_TOTAL_OVER_SURNAME * surname_px) - 1
     assert pages.TEAM_PLACE_SCALE * total == pytest.approx(
         next(iter(sizes(drawn, ["1", "2"]))), abs=1
     )
-    # The figures went as far as they go; only then did the surnames shrink.
-    assert surname_px < 96
-    # A short pair's surnames give the figures no reason to give way.
-    total, surname_px = table_sizes(qtbot, drawn, standings(2))
-    assert total > pages.TEAM_FIGURE_LEAST and surname_px == 96
+    short_total, short_surname = table_sizes(qtbot, drawn, standings(2))
+    assert surname_px < short_surname and total <= short_total
 
 
 LONG_TEAM = "Corktown and Woodbridge Wheelmen"
