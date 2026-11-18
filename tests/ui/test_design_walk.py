@@ -1901,7 +1901,7 @@ def test_every_visible_control_does_something_in_every_state(make_app, quiet, fm
 
 
 def test_the_task_lines_menu_offers_end_race_and_shorten_race_until_the_final_sprint(app, quiet):
-    """Section 5: the task line's ⋯ holds End Race Now, Result As-Is... and
+    """Section 5: the task line's ⋯ holds End Race Early, Result As-Is... and
     Shorten Race... from the race's first screen, grayed until a sprint is
     recorded; each asks first, Shorten Race in its own box. In the final
     sprint Shorten Race is grayed again, with why. A format with no call of
@@ -1914,14 +1914,14 @@ def test_the_task_lines_menu_offers_end_race_and_shorten_race_until_the_final_sp
     assert s.task_dots.isVisibleTo(s)
     quiet.clear()
     s.task_dots.click()
-    assert quiet == ["menu:End Race Now, Result As-Is...,Shorten Race..."]
+    assert quiet == ["menu:End Race Early, Result As-Is...,Shorten Race..."]
     assert s.screen.race_actions == ()
     for eid in c.live.roster.ids[: c.live.scoring_places(1)]:
         assert c.click(eid)
     assert c.record_sprint()
     quiet.clear()
     s.task_dots.click()
-    assert quiet == ["menu:End Race Now, Result As-Is...,Shorten Race..."]
+    assert quiet == ["menu:End Race Early, Result As-Is...,Shorten Race..."]
     quiet.clear()
     assert not c.race_action("shorten_race")
     assert quiet == ["dialog:Shorten Race"]
@@ -1933,10 +1933,10 @@ def test_the_task_lines_menu_offers_end_race_and_shorten_race_until_the_final_sp
         assert c.record_sprint()
     quiet.clear()
     s.task_dots.click()
-    assert quiet == ["menu:End Race Now, Result As-Is...,Shorten Race..."]
-    assert s.screen.race_actions == (("end_race", "End Race Now, Result As-Is..."),)
+    assert quiet == ["menu:End Race Early, Result As-Is...,Shorten Race..."]
+    assert s.screen.race_actions == (("end_race", "End Race Early, Result As-Is..."),)
     assert s.screen.race_menu[1][2] == (
-        "The final sprint has begun; use End Race Now, Result As-Is... to stop the race."
+        "The final sprint has begun; use End Race Early, Result As-Is... to stop the race."
     )
 
 

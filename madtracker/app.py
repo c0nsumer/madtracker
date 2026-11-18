@@ -176,7 +176,18 @@ OUTCOME_ASKS = {
 # button what the scorer does.
 OUTCOME_VERBS = {"withdrawn": "Withdraw"}
 # The race's own call (USAC 2M6, 2N5), asked in the shape of the others.
-END_RACE_QUESTION = "End the race now? Results will be recorded as-is."
+END_RACE_TITLE = "End Race Early"
+
+
+def end_race_question(recorded: int, count: int | None) -> str:
+    """The question names how short the race is cut, so the scorer sees
+    what ending it leaves out before the result is made."""
+    of = f" of {count}" if count else ""
+    sprints = "sprint" if recorded == 1 and not count else "sprints"
+    return (
+        f"End the race early, after {recorded}{of} {sprints}? "
+        "The results will be calculated from only the sprints recorded."
+    )
 
 
 def _clear_beside(data_file: Path) -> None:
@@ -1844,7 +1855,10 @@ class AppController:
             return self._apply(Outcome(False, f"Unknown action {key!r}."))
         # Ending a race is a result, not a routine entry, so a stray menu
         # pick must not record one.
-        if not ask(self.main, "End Race", END_RACE_QUESTION, verb="End Race"):
+        question = end_race_question(
+            max(self.live.recorded_sprints(), default=0), self.live.sprint_count
+        )
+        if not ask(self.main, END_RACE_TITLE, question, verb=END_RACE_TITLE):
             return False
         return self._apply(self._guard(lambda: self.live.end_race()), overlay=True)
 

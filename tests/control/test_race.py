@@ -2075,7 +2075,7 @@ def test_a_points_race_ended_after_eighty_percent_stands_on_the_sprints_ridden(
     store, make_race, ids, house
 ):
     """USAC 2M6: stopped after 80 percent, the results stand. The task line's
-    ⋯ offers End Race Now, Result As-Is from the first recorded sprint, the
+    ⋯ offers End Race Early, Result As-Is from the first recorded sprint, the
     final sprint included; the race completes on the sprints ridden with
     no doubled final, the staged clicks of the sprint being built are
     dropped, and Undo reopens the race where it was."""
@@ -2085,7 +2085,7 @@ def test_a_points_race_ended_after_eighty_percent_stands_on_the_sprints_ridden(
     clicks(s, ids, 7, 33, 12)
     ok(s.record_sprint())
     assert s.race_actions() == [
-        ("end_race", "End Race Now, Result As-Is..."),
+        ("end_race", "End Race Early, Result As-Is..."),
         ("shorten_race", "Shorten Race..."),
     ]
     assert s.screen().race_actions == tuple(s.race_actions())
@@ -2117,7 +2117,7 @@ def test_a_points_race_ended_after_eighty_percent_stands_on_the_sprints_ridden(
     assert s.state == "running" and not s.standings().is_complete
     assert s.task().kind == "sprint" and s.task().sprint_no == 2
     assert s.race_actions() == [
-        ("end_race", "End Race Now, Result As-Is..."),
+        ("end_race", "End Race Early, Result As-Is..."),
         ("shorten_race", "Shorten Race..."),
     ]
 
@@ -2132,7 +2132,7 @@ def test_results_stand_is_offered_in_the_final_sprint_and_not_during_a_correctio
     clicks(s, ids, 7, 33, 12)
     ok(s.record_sprint())
     assert s.task().kind == "final_sprint"
-    assert s.race_actions() == [("end_race", "End Race Now, Result As-Is...")]
+    assert s.race_actions() == [("end_race", "End Race Early, Result As-Is...")]
     ok(s.reopen_sprint(1))
     assert s.race_actions() == []
     assert s.end_race() == rc.Outcome(False, rc.CORRECTION_OPEN)
@@ -2191,7 +2191,7 @@ def test_a_shortened_points_race_rides_to_its_new_final_sprint(store, make_race,
     assert task.kind == "final_sprint" and not task.record
     assert task.text == "Final sprint: click every rider in order."
     assert s.staged() == [[ids[12]]], "the staged click is the finish's first place"
-    assert s.race_actions() == [("end_race", "End Race Now, Result As-Is...")]
+    assert s.race_actions() == [("end_race", "End Race Early, Result As-Is...")]
     assert s.sprint_columns() == [1, 2, 3]
     assert s.undo_text() == "Undo: race shortened to 3 sprints"
     assert s.log_rows()[-1].text == "Race shortened to 3 sprints"
@@ -2250,10 +2250,10 @@ def test_shorten_race_is_refused_during_a_correction_and_in_the_final_sprint(
     clicks(s, ids, 33, 7, 12)
     ok(s.record_sprint())
     assert s.task().kind == "final_sprint"
-    assert s.race_actions() == [("end_race", "End Race Now, Result As-Is...")]
+    assert s.race_actions() == [("end_race", "End Race Early, Result As-Is...")]
     assert s.shorten_race(2) == rc.Outcome(
         False,
-        "The final sprint has begun; use End Race Now, Result As-Is... to stop the race.",
+        "The final sprint has begun; use End Race Early, Result As-Is... to stop the race.",
     )
     ok(s.end_race())
     assert s.shorten_race(2) == rc.Outcome(False, "The race is already complete.")

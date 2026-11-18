@@ -70,7 +70,7 @@ Riders level on points are split by their places in the final sprint (2M2(g)); i
 
 A rider whose free laps after a mishap run into the last kilometer can't return (2M7). They're placed on the points and laps they held (2M8), and the sheet shows "Out of the finish (mishap)" under the name. The [Madison](#madison-usac-2n) (2N6) and the [Tempo Race](#tempo-race-usac-2p) work the same way.
 
-If the officials stop the race after 80 percent of its distance and let the results stand (2M6), use the ⋯ at the right end of the task line and pick **End Race Now, Result As-Is...**. The ⋯ is there from the start of a Points Race, Madison, or Tempo Race, and its items are grayed until a sprint is recorded (pointing at a grayed item says why). It asks before it records. The race is then complete on the sprints ridden: no sprint doubles, there is no final sprint, and riders level on points share the place. The task line and the results sheet say "Race ended after 2 sprints" (see [The PDF](results.md#the-pdf)). **Undo** reopens the race where it was.
+If the officials stop the race after 80 percent of its distance and let the results stand (2M6), use the ⋯ at the right end of the task line and pick **End Race Early, Result As-Is...**. The ⋯ is there from the start of a Points Race, Madison, or Tempo Race, and its items are grayed until a sprint is recorded (pointing at a grayed item says why). It asks before it records. The race is then complete on the sprints ridden: no sprint doubles, there is no final sprint, and riders level on points share the place. The task line and the results sheet say "Race ended after 2 sprints" (see [The PDF](results.md#the-pdf)). **Undo** reopens the race where it was.
 
 If the Chief Referee shortens the race (1G4(b)), pick **Shorten Race...** from the same ⋯ and give the new number of sprints. It's grayed until a sprint is recorded and again once the final sprint begins. The race keeps going, and the last sprint under the new count is the final sprint, with double points and the tie-break. The task line turns to it at once, and riders already clicked in that sprint stay as the first places of the finish. The results sheet shows the sprints ridden and says "race shortened from 4 to 3 sprints". **Undo** takes the latest shortening back.
 
@@ -88,7 +88,7 @@ A penalty shows in a Penalty column in the standings.
 
 A [Points Race](#points-race-usac-2m) for teams of two (2N1), scored per team: both riders share the team's place. A ruleset sets the Madison's sprint and lap points separately from the Points Race's.
 
-A Madison stopped after 80 percent ends with **End Race Now, Result As-Is...**, as a Points Race does (2N5). A shortened Madison takes **Shorten Race...** the same way. Over two nights, the teams' totals or places add up in a Team Omnium (see [The four kinds](multi-race-standings.md#the-four-kinds)).
+A Madison stopped after 80 percent ends with **End Race Early, Result As-Is...**, as a Points Race does (2N5). A shortened Madison takes **Shorten Race...** the same way. Over two nights, the teams' totals or places add up in a Team Omnium (see [The four kinds](multi-race-standings.md#the-four-kinds)).
 
 On the scoreboard, a Madison while it runs shows each team as a bar of its color with the team's name, laps, penalty, and total on it; the riders' names are on the start list and the results sheet. The decided result is the same table, stamped Provisional or Final.
 
@@ -96,7 +96,7 @@ On the scoreboard, a Madison while it runs shows each team as a bar of its color
 
 A [Points Race](#points-race-usac-2m) where only the first rider across the line scores at each sprint, one point, with no double points for the final sprint (2P2). The final sprint's full order breaks ties on points. A lap is 20 points under the rulebook.
 
-A stopped Tempo Race is restarted with the points it had, or rerun (2P5), so it has no **End Race Now, Result As-Is...**. A shortened Tempo Race takes **Shorten Race...** as a Points Race does, and finishes that much sooner.
+A stopped Tempo Race is restarted with the points it had, or rerun (2P5), so it has no **End Race Early, Result As-Is...**. A shortened Tempo Race takes **Shorten Race...** as a Points Race does, and finishes that much sooner.
 
 ## Chariot (Club)
 

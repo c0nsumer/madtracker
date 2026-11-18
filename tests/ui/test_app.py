@@ -3381,7 +3381,11 @@ def test_end_race_results_stand_asks_first_and_ends_the_race_on_the_sprints_ridd
     assert s.task_dots.isVisibleTo(s)
     assert s.screen.race_actions == (), "nothing stands before a sprint"
     assert s.screen.race_menu == (
-        ("end_race", "End Race Now, Result As-Is...", "Record a sprint first; nothing stands yet."),
+        (
+            "end_race",
+            "End Race Early, Result As-Is...",
+            "Record a sprint first; nothing stands yet.",
+        ),
         ("shorten_race", "Shorten Race...", "Record a sprint first."),
     )
     menus = []
@@ -3398,7 +3402,11 @@ def test_end_race_results_stand_asks_first_and_ends_the_race_on_the_sprints_ridd
     s.task_dots.click()
     assert menus == [
         [
-            ("End Race Now, Result As-Is...", False, "Record a sprint first; nothing stands yet."),
+            (
+                "End Race Early, Result As-Is...",
+                False,
+                "Record a sprint first; nothing stands yet.",
+            ),
             ("Shorten Race...", False, "Record a sprint first."),
         ]
     ]
@@ -3410,12 +3418,12 @@ def test_end_race_results_stand_asks_first_and_ends_the_race_on_the_sprints_ridd
     assert c.record_sprint()
     assert s.task_dots.isVisibleTo(s)
     assert s.screen.race_actions == (
-        ("end_race", "End Race Now, Result As-Is..."),
+        ("end_race", "End Race Early, Result As-Is..."),
         ("shorten_race", "Shorten Race..."),
     )
     s.task_dots.click()
     assert menus[-1] == [
-        ("End Race Now, Result As-Is...", True, ""),
+        ("End Race Early, Result As-Is...", True, ""),
         ("Shorten Race...", True, ""),
     ]
     monkeypatch.setattr(icons, "ask", lambda *a, **k: quiet.append(("ask", a[1], a[2], k)) or False)
@@ -3424,9 +3432,10 @@ def test_end_race_results_stand_asks_first_and_ends_the_race_on_the_sprints_ridd
     assert quiet == [
         (
             "ask",
-            "End Race",
-            "End the race now? Results will be recorded as-is.",
-            {"verb": "End Race"},
+            "End Race Early",
+            f"End the race early, after 1 of {c.live.sprint_count} sprints? "
+            "The results will be calculated from only the sprints recorded.",
+            {"verb": "End Race Early"},
         )
     ]
     assert not c.live.standings().is_complete
@@ -3494,7 +3503,7 @@ def test_shorten_race_asks_for_the_count_and_records_on_enter(make_app, tmp_path
     assert c.live.task().kind == "final_sprint"
     assert s.task.text() == "Final sprint: click every rider in order."
     assert c.main.undo.text() == "Undo: race shortened to 2 sprints"
-    assert s.screen.race_actions == (("end_race", "End Race Now, Result As-Is..."),)
+    assert s.screen.race_actions == (("end_race", "End Race Early, Result As-Is..."),)
     assert s.problem.text() == ""
     assert c.undo()
     assert c.live.sprint_count == 3

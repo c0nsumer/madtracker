@@ -40,7 +40,7 @@ RIDER_ACTIONS: dict[str, str] = {
 # on to a new, earlier finish (USAC 1G4(b)). The ellipsis says the item
 # asks first.
 RACE_ACTIONS: dict[str, str] = {
-    "end_race": "End Race Now, Result As-Is...",
+    "end_race": "End Race Early, Result As-Is...",
     "shorten_race": "Shorten Race...",
 }
 # The menu's key for a penalty carries no number (the dialog asks for

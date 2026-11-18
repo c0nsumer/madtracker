@@ -4,7 +4,7 @@ The Chief Referee may shorten a race (USAC 1G4(b)), and the one fact
 the scorer enters is the new count, so the task line's **Shorten
 Race...** opens this instead of a question. The spin box runs from the
 next sprint up to one below the count in force: a count at or below the
-sprints ridden is a race stopped, which End Race Now, Result As-Is
+sprints ridden is a race stopped, which End Race Early, Result As-Is
 records, and the count in force is no shortening.
 """
 

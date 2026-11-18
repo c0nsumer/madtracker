@@ -1752,7 +1752,7 @@ class LiveRace:
         A Points Race, Madison, or Tempo Race has the menu from its first
         screen, so the task line keeps one height as the race goes; an
         item the race cannot take now is listed with its reason, never
-        left out. End Race Now, Result As-Is is a Points Race or Madison
+        left out. End Race Early, Result As-Is is a Points Race or Madison
         entry, the final sprint included, since a stoppage after 80
         percent can land there (USAC 2M6, 2N5), and never a Tempo Race
         (USAC 2P5 restarts or reruns it). Shorten Race is in all three
