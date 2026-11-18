@@ -144,7 +144,6 @@ FIELD_LABELS = {
     "survivors": "Riders in the final sprint",
     "places": "Places",
     "direction": "Direction",
-    "lapped_riders_placed": "Lapped riders are placed by laps down",
 }
 WORDS_TIP = (
     "Blank means the rulebook's name. The name goes on the program, the scorer's header,"
@@ -195,7 +194,6 @@ class RulesetEditor(QDialog):
             "madison_last_double": QCheckBox(),
             **{key: _spin(*span) for key, span in rulesets.VALUE_RANGES.items()},
             "direction": QComboBox(),
-            "lapped_riders_placed": QCheckBox(),
         }
         # An empty table field shows the rulebook's table in gray, in the
         # form the field takes.
@@ -252,7 +250,10 @@ class RulesetEditor(QDialog):
             lay.addWidget(line)
         reset_row = QHBoxLayout()
         reset_row.addStretch(1)
-        if rulesets.FAMILY_SOURCE[family] == rulesets.RULEBOOK_LABEL:
+        if (
+            rulesets.FAMILY_SOURCE[family] == rulesets.RULEBOOK_LABEL
+            and rulesets.FAMILY_KEYS[family]
+        ):
             # A club format's defaults are a club's, so there is no rulebook
             # to fill its tab from; the tooltips say whose the values are.
             reset = QPushButton(f"Fill {rulesets.RULEBOOK_LABEL} Values")

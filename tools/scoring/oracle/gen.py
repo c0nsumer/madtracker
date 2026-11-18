@@ -338,7 +338,6 @@ def gen_placings(rng, stats, entrants=None, fmt=None):
     no_laps = fmt in NO_LAP_FORMATS
     rules = PlacingsRules(
         laps_count_for_ranking=not no_laps and rng.random() < 0.85,
-        lapped_riders_placed_by_laps=rng.random() < 0.6,
     )
     entrants = list(entrants) if entrants is not None else entrants_for(rng)
     log = Log(fmt, rules, entrants, stats)

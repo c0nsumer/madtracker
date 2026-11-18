@@ -185,8 +185,8 @@ print(
     V("scratch", PlacingsRules(), [1, 2, 3], [Withdrawn(2)], Status(2, "DNF")),
 )
 
-print("11. UCI lapped switch: a withdrawn rider on negative laps")
-U = PlacingsRules(laps_count_for_ranking=True, lapped_riders_placed_by_laps=False)
+print("11. A withdrawn rider on negative laps")
+U = PlacingsRules(laps_count_for_ranking=True)
 show(
     "3 a lap down then withdrawn, finish 1, 2",
     C("scratch", U, [1, 2, 3], [LapLost([3]), Withdrawn(3), FinishOrder([[1], [2]])]),

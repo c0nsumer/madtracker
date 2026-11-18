@@ -966,7 +966,7 @@ def test_the_place_table_is_the_scorers_for_omnium_by_place_and_the_rulebooks_fo
         R.usac_omnium_rules()
     )
     four = multi_race.rules_for(store.add_standings("Four", kind=multi_race.FOUR_RACE))
-    assert four == R.uci_omnium_rules() and four.must_finish_all
+    assert four == R.four_race_omnium_rules() and four.must_finish_all
     assert multi_race.PLACE_KINDS == {multi_race.PLACES, multi_race.OMNIUM}
     assert [multi_race.rider_kind(k) for k in multi_race.KINDS] == [False, False, True, True]
 

@@ -26,8 +26,8 @@ from madtracker.scoring.rules import (
     PlacingsRules,
     SprintPointsRules,
     WinAndOutRules,
+    four_race_omnium_rules,
     team_omnium_rules,
-    uci_omnium_rules,
     usac_omnium_rules,
 )
 
@@ -67,9 +67,7 @@ def run(engine, rules, riders, candidates):
 
 def placings_scenario(rng):
     riders = list(range(1, rng.randint(2, 6) + 1))
-    rules = PlacingsRules(
-        laps_count_for_ranking=rng.random() < 0.7, lapped_riders_placed_by_laps=rng.random() < 0.6
-    )
+    rules = PlacingsRules(laps_count_for_ranking=rng.random() < 0.7)
     cands = []
     for _ in range(rng.randint(0, 5)):
         r = rng.choice(riders)
@@ -243,7 +241,7 @@ def aggregate_scenario(rng):
             usac_omnium_rules(),
             usac_omnium_rules((7, 5, 3)),
             team_omnium_rules(),
-            uci_omnium_rules(),
+            four_race_omnium_rules(),
             AggregateRules(points_by_place=(5, 3, 2, 1), must_finish_all=True),
             AggregateRules(points_by_place=tuple(range(1, 25)), direction="low"),
             AggregateRules(

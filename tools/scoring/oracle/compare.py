@@ -245,10 +245,10 @@ def run_family(family, seeds):
 
 def run_aggregate(seeds):
     """Three kinds: the Team Omnium summed over Madisons, the Team Omnium
-    by Place (7-5-3-2-1), and the UCI omnium (scratch, tempo, elimination,
+    by Place (7-5-3-2-1), and the Four-Race Omnium (scratch, tempo, elimination,
     points; R-OMNI-1 to R-OMNI-4). A race's field is a subset of the
     entrants so absences happen."""
-    from madtracker.scoring.rules import uci_omnium_rules
+    from madtracker.scoring.rules import four_race_omnium_rules
 
     counts = Counter()
     found = {}
@@ -258,7 +258,7 @@ def run_aggregate(seeds):
         entrants = rng.sample(range(1, 60), rng.randint(3, 12))
         kind = rng.choice(("sum", "place", "uci"))
         if kind == "uci":
-            arules = uci_omnium_rules()
+            arules = four_race_omnium_rules()
             plan = [
                 ("placings", "scratch"),
                 ("tempo", None),

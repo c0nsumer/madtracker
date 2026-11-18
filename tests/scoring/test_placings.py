@@ -39,16 +39,6 @@ def test_usac_lapped_rider_who_stays_is_placed_by_laps_down():
     assert standings.by_entrant(2).status is None
 
 
-def test_uci_lapped_rider_ranks_with_the_withdrawn():
-    """UCI 3.2.177: a lapped rider must leave; if recorded, DNF after the finishers."""
-    actions = [LapLost([2]), FinishOrder([[2], [1], [3], [4], [5]])]
-    rules = PlacingsRules(lapped_riders_placed_by_laps=False)
-    standings = placings.compute(rules, RIDERS, actions)
-    two = standings.by_entrant(2)
-    assert two.status == "DNF" and two.rank == 5
-    assert "3.2.177" in two.notes[0]
-
-
 def test_chariot_ignores_laps():
     """A chariot or keirin final is the line only; no lap can be gained."""
     rules = PlacingsRules(laps_count_for_ranking=False)
@@ -108,12 +98,12 @@ def test_validate_rejects_sprints_eliminations_and_a_second_finish():
     ]
 
 
-def test_lapped_gained_and_dq_after_the_line_under_both_switches():
-    """USAC 2C4, 2C5, UCI 3.2.177, 3.2.178, USAC 1M6: 2 gained a lap and
-    wins from second across the line; 1 crossed first and is DQ'd on
-    protest, so is not placed and the rest move up. 5 is a lap down:
-    placed last by laps down under USAC 2C4, or the DNF group under the
-    UCI switch, which takes the same next rank (UCI 3.3.012 A)."""
+def test_lapped_gained_and_dq_after_the_line():
+    """USAC 2C4, 2C5, UCI 3.2.178, USAC 1M6: 2 gained a lap and wins from
+    second across the line; 1 crossed first and is DQ'd on protest, so
+    is not placed and the rest move up. 5 is a lap down and stayed in:
+    placed last by laps down (USAC 2C4), with no status the scorer did
+    not mark."""
     actions = [
         LapGained([2]),
         LapLost([5]),
@@ -123,10 +113,11 @@ def test_lapped_gained_and_dq_after_the_line_under_both_switches():
     usac = placings.compute(placings_rules(), RIDERS, actions)
     assert ranks(usac) == {2: 1, 3: 2, 4: 3, 5: 4, 1: None}
     assert usac.by_entrant(5).status is None
-    uci = placings.compute(PlacingsRules(lapped_riders_placed_by_laps=False), RIDERS, actions)
-    assert ranks(uci) == {2: 1, 3: 2, 4: 3, 5: 4, 1: None}
-    assert uci.by_entrant(5).status == "DNF"
-    assert uci.by_entrant(1).status == "DQ"
+    assert usac.by_entrant(1).status == "DQ"
+    # The officials' reason rides on the row as a note; a mark with none adds nothing.
+    assert usac.by_entrant(1).notes == ("DQ: protest upheld",)
+    bare = placings.compute(placings_rules(), RIDERS, [*actions[:-1], Status(1, "DQ")])
+    assert bare.by_entrant(1).notes == ()
 
 
 def test_dead_heat_for_first_is_a_shared_first_until_re_ridden():
@@ -236,11 +227,10 @@ def test_withdrawn_riders_follow_the_finishers_by_the_moment_whatever_their_laps
     assert [r.entrant_id for r in done.rows] == [3, 1, 2, 5, 4]
 
 
-def test_a_withdrawn_rider_a_lap_down_keeps_the_rank_under_the_uci_lapped_switch():
-    """UCI 3.2.177 turns a lapped rider still recorded at the line into a
-    DNF; a withdrawn rider is placed by the moment of the entry (R-NF-3),
-    which laps never reorder, so the switch leaves them with that rank."""
-    rules = PlacingsRules(laps_count_for_ranking=True, lapped_riders_placed_by_laps=False)
+def test_a_withdrawn_rider_a_lap_down_keeps_the_rank_of_the_moment():
+    """A withdrawn rider is placed by the moment of the entry (R-NF-3),
+    which laps never reorder."""
+    rules = PlacingsRules(laps_count_for_ranking=True)
     actions = [LapLost([3]), Withdrawn(3), FinishOrder([[1], [2]])]
     standings = placings.compute(rules, [1, 2, 3], actions)
     three = standings.by_entrant(3)

@@ -21,7 +21,7 @@ from madtracker.scoring.rules import RULEBOOK_TITLE, RULEBOOK_VERSION
 # A team race's field is its teams: entrants are team ids, and the
 # race dialog builds the field from the teams rather than a group.
 TEAM_FORMATS = frozenset({"madison"})
-# How many riders a team has in each team format (UCI 3.2.077, 3.2.144);
+# How many riders a team has in each team format (USAC 2N1);
 # a format not listed takes two or more.
 TEAM_SIZE = {"madison": 2}
 # Finish-order formats decided on the line alone: a chariot, a keirin

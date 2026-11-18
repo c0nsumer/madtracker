@@ -65,8 +65,8 @@ from madtracker.scoring import compute_aggregate
 from madtracker.scoring.result import Standings
 from madtracker.scoring.rules import (
     AggregateRules,
+    four_race_omnium_rules,
     team_omnium_rules,
-    uci_omnium_rules,
     usac_omnium_rules,
 )
 from madtracker.store import Race, StandingsDef, Store
@@ -88,7 +88,7 @@ DEFAULTS = {
     TOTALS: team_omnium_rules,
     PLACES: usac_omnium_rules,
     OMNIUM: usac_omnium_rules,
-    FOUR_RACE: uci_omnium_rules,
+    FOUR_RACE: four_race_omnium_rules,
 }
 # The kinds whose rows are teams; the others' rows are riders.
 TEAM_KINDS = frozenset({TOTALS, PLACES})

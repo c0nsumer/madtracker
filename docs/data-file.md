@@ -251,7 +251,6 @@ The built-in ruleset isn't a row. Races and the default setting name it by the k
 ```json
 {
   "direction": "forward",
-  "lapped_riders_placed": true,
   "madison_lap_gained": 20,
   "madison_lap_lost": 20,
   "madison_last_double": true,
@@ -289,7 +288,7 @@ The screens, the help, and the code call these Multi-Race Standings; the tables 
 
 A Team Omnium by Points (`team_omnium`) counts every `madison` race in the ticked events, except the left-out ones. It makes one table per race group (`race.group_label`, compared without case or spaces). In each table, a team is its two riders (`team_member`), whatever it's called in each race. It's shown under the name and color it raced under last. Each team's total is the sum of its Madison totals, with `absent_points` (0) for a Madison it didn't ride. Ties go to the most race wins, then the better place in the latest race (USAC 2B19(e)). A Team Omnium by Place (`team_omnium_places`) counts the same races and teams, but each Madison scores the team's place through `points_by_place` (default `[7, 5, 3, 2, 1]`), with `points_beyond_table` (0) past its end, and the same tie-break.
 
-An Omnium by Place (`omnium_places`) counts every race in the ticked events whose format is not `madison`, except the left-out ones, with the same tables per group. A row is a rider (`race_entry.rider_id`, the same rider across events), shown under the bib they raced under last. Every rider who rode any counting race is in the table; a race not ridden adds nothing (`absent_points`, 0). The race scores the rider's place through `points_by_place` as above, with the same tie-break. A Four-Race Omnium (`four_race_omnium`) counts the `chase`, `tempo`, `elimination`, and `points` races of the ticked events, which must be exactly one of each per event and group or the standings is refused with no table. Its values are `uci_omnium_rules()` in `madtracker/scoring/rules.py`: 40 down to 2 by place for the first three, 1 past 20th, the Points Race's total summed raw (`sum_total_races` is set per table to the Points Race columns), `must_finish_all` so a rider out of any race is listed DNF after the ranked rows, and ties by the Points Race's final sprint. The stored `rules_json` is `{}` for it; the scorer sets nothing. A `standings_penalty` row (USAC 2O3(e), 40 points for two laps down) is taken off that rider's total before ranking, for this kind only.
+An Omnium by Place (`omnium_places`) counts every race in the ticked events whose format is not `madison`, except the left-out ones, with the same tables per group. A row is a rider (`race_entry.rider_id`, the same rider across events), shown under the bib they raced under last. Every rider who rode any counting race is in the table; a race not ridden adds nothing (`absent_points`, 0). The race scores the rider's place through `points_by_place` as above, with the same tie-break. A Four-Race Omnium (`four_race_omnium`) counts the `chase`, `tempo`, `elimination`, and `points` races of the ticked events, which must be exactly one of each per event and group or the standings is refused with no table. Its values are `four_race_omnium_rules()` in `madtracker/scoring/rules.py`: 40 down to 2 by place for the first three, 1 past 20th, the Points Race's total summed raw (`sum_total_races` is set per table to the Points Race columns), `must_finish_all` so a rider out of any race is listed DNF after the ranked rows, and ties by the Points Race's final sprint. The stored `rules_json` is `{}` for it; the scorer sets nothing. A `standings_penalty` row (USAC 2O3(e), 40 points for two laps down) is taken off that rider's total before ranking, for this kind only.
 
 A race still in `setup` with no live `race_action` rows is "not yet raced": it adds nothing and isn't a column. The standings is final only when every counting race is final and none is still to race. The code is `madtracker/control/multi_race.py`.
 
@@ -308,7 +307,7 @@ The race dialog offers the keys listed in `madtracker/control/formats.py`, which
 
 `rules_json` is the `to_dict()` of the matching class in `madtracker/scoring/rules.py`, plus an `engine` key:
 
-- `placings`: `laps_count_for_ranking`, `lapped_riders_placed_by_laps`.
+- `placings`: `laps_count_for_ranking`.
 - `sprint_points`: `sprint_count` (required: until it's set, every entry is refused), `intermediate_points`, `final_points` (the sprint numbered `sprint_count` awards these), `points_by_sprint` (null, or a table per sprint), `lap_gained_points`, `lap_lost_points`, `tie_break` (`final_sprint` or `none`), `scored_unit` (`rider` or `team`).
 - `elimination`: `survivors`, `final_by_sprint`.
 - `win_and_out`: `places`, `direction` (`forward` or `reverse`).

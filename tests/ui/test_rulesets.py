@@ -81,13 +81,16 @@ def test_the_editor_has_a_tab_per_family_with_its_values_and_its_formats(qtbot, 
     tip = ed.fields["points_table"].toolTip()
     assert tip.startswith("Points per place, first place first, like 10, 7, 5, 3, 2, 1")
     # Only a tab whose values are the rulebook's can fill from it; the
-    # win-and-out's are a club's, and its tooltips say so.
+    # win-and-out's are a club's, and its tooltips say so. The races
+    # placed at the line have no values to fill, only their names.
     buttons = {
         family: ed.tabs.widget(i).findChild(su.QPushButton, f"reset_{family}")
         for i, family in enumerate(rulesets.FAMILY_LABELS)
     }
-    assert buttons["win_and_out"] is None
-    assert all(b is not None for f, b in buttons.items() if f != "win_and_out")
+    assert buttons["win_and_out"] is None and buttons["placings"] is None
+    assert rulesets.FAMILY_KEYS["placings"] == ()
+    filled = [b for f, b in buttons.items() if f not in ("win_and_out", "placings")]
+    assert all(b is not None for b in filled)
     assert buttons["elimination"].text() == "Fill USAC 2025 Values"
     assert ed.fields["places"].toolTip() == "Club: 3"
     assert ed.fields["survivors"].toolTip() == "USAC 2025: 2"

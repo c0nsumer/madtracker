@@ -1,4 +1,4 @@
-"""Aggregates: team omnium, overall-for-the-day, UCI omnium table."""
+"""Aggregates: team omnium, overall-for-the-day, Four-Race Omnium table."""
 
 from dataclasses import replace
 
@@ -6,8 +6,8 @@ from madtracker.scoring import aggregate
 from madtracker.scoring.result import Standing, Standings
 from madtracker.scoring.rules import (
     AggregateRules,
+    four_race_omnium_rules,
     team_omnium_rules,
-    uci_omnium_rules,
     usac_omnium_rules,
 )
 
@@ -137,10 +137,10 @@ def test_low_points_direction():
     assert ranks(standings) == {1: 1, 2: 2}
 
 
-def test_uci_omnium_table_and_points_race_carried_in():
+def test_four_race_omnium_table_and_points_race_carried_in():
     """UCI 3.2.250, 3.2.251, 3.2.252: 40-38-36 for three races, raw points race
     added on, ties by the points race's final sprint."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     entrants = list(range(1, 23))
     first_three = [race(*((eid, eid, 0) for eid in entrants)) for _ in range(3)]
     # Rider 2 scores 25 raw points in the final points race and overtakes
@@ -161,8 +161,8 @@ def test_uci_omnium_table_and_points_race_carried_in():
     assert ranks(standings)[1] == 2
 
 
-def test_uci_omnium_tie_broken_by_final_sprint_of_points_race():
-    rules = uci_omnium_rules()
+def test_four_race_omnium_tie_broken_by_final_sprint_of_points_race():
+    rules = four_race_omnium_rules()
     first_three = [
         race((1, 1, 0), (2, 2, 0)),
         race((2, 1, 0), (1, 2, 0)),
@@ -207,11 +207,11 @@ def test_team_omnium_dnf_keeps_its_madison_points():
     assert ranks(standings) == {1: 1, 2: 2}
 
 
-def test_uci_omnium_abandon_is_out_and_listed_dnf_after_every_finisher():
+def test_four_race_omnium_abandon_is_out_and_listed_dnf_after_every_finisher():
     """UCI 3.2.251bis, USAC 2O2(c), 2O3(d): a rider who does not start or
     abandons any race is out of the omnium, placed after the last rider as
     DNF, however many points the earlier races gave."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     first_three = [
         race((1, 1, 0), (2, 2, 0), (3, 3, 0)),
         race((1, 1, 0), (2, 2, 0), (3, 3, 0)),
@@ -228,7 +228,7 @@ def test_a_rider_out_of_the_points_race_finish_by_a_mishap_stays_in_the_four_rac
     """USAC 2M7(b), 2M8(a) via 2O2: a rider the mishap rule keeps out of the
     finish is placed by the Points Race on the points held, with no status,
     so the omnium ranks them (2O3(d) covers abandons, which are DNF)."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     first_three = [race((1, 1, 0), (2, 2, 0), (3, 3, 0))] * 3
     out_by_mishap = race((2, 1, 10, None, 1), (3, 2, 4, None, 2), (1, 3, 6))
     out_by_mishap = Standings(
@@ -293,7 +293,7 @@ def test_a_place_the_race_gave_a_dnf_rider_scores_from_the_table():
 def test_the_unranked_tail_lists_the_dnf_group_then_dq():
     """Out of the omnium, the rows follow the finishers as DNF then DQ,
     whatever order the entrants came in (R-NF-2)."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     first = race((1, 1, 0, "DQ"), (2, 2, 0, "DNF"), (3, 3, 0), (4, 4, 0, "DNF"))
     standings = aggregate.compute(rules, [1, 2, 3, 4], [first])
     assert [(r.entrant_id, r.status) for r in standings.rows] == [
@@ -308,7 +308,7 @@ def test_an_omnium_penalty_comes_off_the_total_before_ranking():
     """USAC 2O3(e): 40 omnium points off, the rider staying in; carried as a
     negative adjustment so the sheet can show it, and no race's own result
     changes."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     first_three = [race((1, 1, 0), (2, 2, 0)) for _ in range(3)]
     points_race = race((1, 1, 10, None, 1), (2, 2, 6, None, 2))
     standings = aggregate.compute(rules, [1, 2], first_three + [points_race], {1: 40})
@@ -324,7 +324,7 @@ def test_a_withdrawn_rider_is_placed_by_the_race_and_stays_in_the_four_race_omni
     Scratch Race or Tempo Race and stays in the omnium; the 40 is the
     scorer's Omnium Penalty, never the race's doing (R-OMNI-5). The place
     points follow the rank the race gave."""
-    rules = uci_omnium_rules()
+    rules = four_race_omnium_rules()
     withdrawn = race((2, 1, 0), (3, 2, 0), (1, 3, 0))
     withdrawn = Standings(
         rows=tuple(replace(r, withdrawn=True) if r.entrant_id == 1 else r for r in withdrawn.rows),

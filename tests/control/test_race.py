@@ -369,26 +369,6 @@ def test_place_last_is_refused_outside_its_conditions(store, make_race, ids):
     assert s.place_rest_together().message == rc.FINAL_TEXT
 
 
-def test_a_lap_that_drops_the_last_unplaced_rider_completes_the_finish(store, make_race, ids):
-    """With "Lapped riders are placed by laps down" off, the engine marks a
-    lapped rider DNF; a lap recorded with the rest placed completes the
-    finish rather than leaving the race with no cards and no button."""
-    rules = R.PlacingsRules(laps_count_for_ranking=True, lapped_riders_placed_by_laps=False)
-    s = LiveRace(store, make_race("chase", [7, 12, 33], rules))
-    ok(s.click(ids[7]))
-    ok(s.act(ids[33], "place_last"))
-    ok(s.act(ids[12], "lap_lost"))
-    assert s.state == "provisional"
-    assert [(r.place_text, r.entry.names[0]) for r in s.screen().rows] == [
-        ("1", "Maya Petrakis"),
-        ("2", "Jack Moreau"),
-        ("DNF", "Tess Gallagher"),
-    ]
-    assert s.undo_text() == "Undo: #12 Tess Gallagher lost a lap"
-    ok(s.undo())
-    assert s.state == "setup" and [r.place_text for r in s.screen().rows] == ["1", "3"]
-
-
 def test_empty_field_and_final_race_refuse_clicks(store, make_race, ids):
     s = chase(store, make_race, ())
     assert s.task().kind == "none" and s.task().text == rc.EMPTY_FIELD

@@ -43,8 +43,8 @@ RULEBOOK_EDITION = f"version {RULEBOOK_VERSION} (effective 2025-Aug-19)"
 RULEBOOK_CITATION = f"{RULEBOOK_TITLE}, {RULEBOOK_EDITION}"
 RULEBOOK_YEAR = "2025"
 
-# UCI 3.2.250, USAC 2O3(a): 40, 38, 36 ... 2 for places 1 to 20, then 1.
-UCI_OMNIUM_PLACE_POINTS = tuple(42 - 2 * p for p in range(1, 21))
+# USAC 2O3(a), UCI 3.2.250: 40, 38, 36 ... 2 for places 1 to 20, then 1.
+OMNIUM_PLACE_POINTS = tuple(42 - 2 * p for p in range(1, 21))
 
 # USAC 2M2(f)(ii), UCI 3.2.118: a lap gained or lost is 20 points.
 RULEBOOK_LAP_POINTS = 20
@@ -79,15 +79,13 @@ class PlacingsRules(_Rules):
     laps_count_for_ranking: laps gained sort ahead of finish order
     (USAC 2C5, UCI 3.2.178). Off for chariot, keirin and sprint finals,
     where nobody laps anybody.
-    lapped_riders_placed_by_laps: a rider on negative laps who is still in
-    the finish order is placed by laps down (USAC 2C4, the rulebook
-    value). Off, a lapped rider must leave the track (UCI 3.2.177) and
-    so ranks in the DNF group if the scorer still records them at the line.
+    A rider on negative laps who is still in the finish order is placed
+    by laps down (USAC 2C4); one the officials remove is the scorer's
+    entry, Did Not Finish or Withdrawn (USAC 1M6(d)), never the engine's.
     """
 
     engine: ClassVar[str] = "placings"
     laps_count_for_ranking: bool = True
-    lapped_riders_placed_by_laps: bool = True
 
 
 @dataclass(frozen=True)
@@ -195,11 +193,11 @@ class AggregateRules(_Rules):
 
     ``points_by_place`` None sums each entrant's race totals (a club's
     team madison omnium). A table converts each race rank to points
-    (USAC 2B19(e) omnium scoring; the UCI omnium's 40-38-36 table,
+    (USAC 2B19(e) omnium scoring; the Four-Race Omnium's 40-38-36 table,
     UCI 3.2.250); ``points_beyond_table`` is what ranks past the end of
-    the table score (1 in the UCI omnium). ``sum_total_races`` lists
+    the table score (1 in the Four-Race Omnium). ``sum_total_races`` lists
     race indexes whose raw totals are added instead of converted, which
-    is how the UCI omnium's final points race joins the first three
+    is how the Four-Race Omnium's final points race joins the first three
     (UCI 3.2.251). ``multipliers`` is per race index; None means 1.
 
     Non-finisher points and ``absent_points`` (not entered in a race)
@@ -210,7 +208,7 @@ class AggregateRules(_Rules):
     ``dnf_points`` is only for place tables. ``must_finish_all`` leaves
     anyone with a non-finish or an absence unranked, marked DNF (or DQ
     when disqualified in a race) and listed after the ranked rows
-    (San Diego's rule; the UCI omnium, UCI 3.2.251bis, USAC 2O2(c),
+    (San Diego's rule; the Four-Race Omnium, UCI 3.2.251bis, USAC 2O2(c),
     2O3(d)). ``direction`` "high" or "low"
     (USAC 7C3 junior low-points omnium).
 
@@ -288,7 +286,7 @@ def _check_preset(preset: str) -> str:
 def placings_rules(preset: str = "rulebook") -> PlacingsRules:
     """USAC 2C4: a lapped rider who stays in is placed by laps down."""
     _check_preset(preset)
-    return PlacingsRules(laps_count_for_ranking=True, lapped_riders_placed_by_laps=True)
+    return PlacingsRules(laps_count_for_ranking=True)
 
 
 def points_race_rules(
@@ -333,8 +331,8 @@ def team_omnium_rules() -> AggregateRules:
     return AggregateRules(points_by_place=None)
 
 
-def uci_omnium_rules() -> AggregateRules:
-    """UCI 3.2.250 to 3.2.252 and USAC 2O3: 40-38-36 down to 2 for the
+def four_race_omnium_rules() -> AggregateRules:
+    """USAC 2O3 and UCI 3.2.250 to 3.2.252: 40-38-36 down to 2 for the
     first three races, 1 for 21st and below, then the points race's raw
     points added on, ties by the points race's final sprint. A rider who
     misses or abandons a race is out of the omnium and listed as DNF
@@ -348,7 +346,7 @@ def uci_omnium_rules() -> AggregateRules:
     would change that race's own result.
     """
     return AggregateRules(
-        points_by_place=UCI_OMNIUM_PLACE_POINTS,
+        points_by_place=OMNIUM_PLACE_POINTS,
         points_beyond_table=1,
         sum_total_races=(3,),
         # UCI 3.2.251bis, USAC 2O2(c), 2O3(d): a rider who does not start

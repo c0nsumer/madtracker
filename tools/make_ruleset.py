@@ -51,11 +51,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--survivors", type=int, help="riders in the elimination's final sprint")
     ap.add_argument("--places", type=int, help="win-and-out places awarded")
     ap.add_argument("--direction", choices=["forward", "reverse"], help="win-and-out direction")
-    ap.add_argument(
-        "--lapped-riders-dnf",
-        action="store_true",
-        help="a lapped rider who stays in ranks with the DNFs (UCI 3.2.177) instead of by laps down",
-    )
     ap.add_argument("--out", type=Path, required=True, help="the JSON file to write")
     args = ap.parse_args(argv)
 
@@ -72,7 +67,6 @@ def main(argv: list[str] | None = None) -> int:
         survivors=args.survivors,
         places=args.places,
         direction=args.direction,
-        lapped_riders_placed=False if args.lapped_riders_dnf else None,
     )
     doc["name"] = args.name
     problems = rulesets.validate_ruleset(doc)

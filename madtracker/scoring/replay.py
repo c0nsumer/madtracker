@@ -17,7 +17,7 @@ from .actions import Action, RaceEnded, RaceShortened, decode_action
 from .result import Standings
 from .rules import AggregateRules, _Rules
 
-RULES_VERSION = "2026.10.1"
+RULES_VERSION = "2026.11.1"
 
 ENGINES: dict[str, ModuleType] = {
     "placings": placings,

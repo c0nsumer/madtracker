@@ -538,7 +538,6 @@ def gen_placings(rng):
     entrants = entrants_for(rng)
     rules = PlacingsRules(
         laps_count_for_ranking=rng.random() < 0.8,
-        lapped_riders_placed_by_laps=rng.random() < 0.6,
     )
     fmt = "scratch"
     actions = []
@@ -564,12 +563,6 @@ def oracle_placings(rules, entrants, actions):
     status, gained, lost = sheet_basics(entrants, actions)
     status = dict(status)
     net = {e: gained[e] - lost[e] for e in entrants}
-    if rules.laps_count_for_ranking and not rules.lapped_riders_placed_by_laps:
-        # UCI 3.2.177: a lapped rider leaves the track, so ranks as DNF
-        # (3.3.012 A) even if the scorer saw them at the line.
-        for eid in entrants:
-            if eid not in status and net[eid] < 0:
-                status[eid] = "DNF"
     finish = finish_of(actions)
     racing = [e for e in entrants if e not in status]
     if finish is None:

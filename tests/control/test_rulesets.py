@@ -54,7 +54,7 @@ def test_the_rulebook_is_built_in():
     assert set(doc) == {"name", *rulesets.PAGE_KEYS}
     assert doc["points_table"] == [5, 3, 2, 1] and doc["points_last_double"] is True
     assert {doc[k] for k in rulesets.LAP_KEYS} == {20} and doc["survivors"] == 2
-    assert (doc["places"], doc["direction"], doc["lapped_riders_placed"]) == (3, "forward", True)
+    assert (doc["places"], doc["direction"]) == (3, "forward")
     points = rulesets.rules_for(None, "rulebook", "points", sprint_count=3)
     assert points == R.points_race_rules(sprint_count=3)
     assert rulesets.rules_for(None, "Rulebook", "madison").scored_unit == "team"
@@ -103,13 +103,12 @@ def test_rules_for_a_stored_ruleset_with_per_race_overrides(store):
         rulesets.rules_for(None, "Club", "points")
 
 
-def test_last_sprint_not_doubled_and_lapped_riders_sent_off():
+def test_last_sprint_not_doubled_and_the_other_values_a_venue_changes():
     doc = rulesets.apply_values(
         rulesets.builtin_ruleset(),
         points_last_double=False,
         madison_table=(7, 5, 3, 2, 1),
         tempo_points=2,
-        lapped_riders_placed=False,
         survivors=1,
         places=5,
         direction="reverse",
@@ -120,7 +119,6 @@ def test_last_sprint_not_doubled_and_lapped_riders_sent_off():
     assert formats["points"]["final_points"] == (5, 3, 2, 1)
     assert formats["madison"]["final_points"] == (14, 10, 6, 4, 2)
     assert formats["tempo"]["intermediate_points"] == formats["tempo"]["final_points"] == (2,)
-    assert formats["placings"]["lapped_riders_placed_by_laps"] is False
     assert formats["elimination"]["final_by_sprint"] is False
     assert (formats["win_and_out"]["places"], formats["win_and_out"]["direction"]) == (5, "reverse")
     with pytest.raises(ValueError, match="not ruleset values"):
@@ -277,6 +275,26 @@ def test_a_file_that_opens_with_a_byte_order_mark_imports(store, tmp_path):
     path = tmp_path / "bom.json"
     path.write_bytes(b"\xef\xbb\xbf" + json.dumps(house_doc("Bom")).encode())
     assert rulesets.import_ruleset(store, path).name == "Bom"
+
+
+@pytest.mark.parametrize("value", [True, False, "yes", None])
+def test_a_page_carrying_a_key_the_page_no_longer_has_loads_scores_and_exports_without_it(
+    store, tmp_path, value
+):
+    """A file or a stored page may carry a value the page has dropped: it is
+    read past, a lapped rider is placed by laps down whatever it said (USAC
+    2C4), and an export writes the page's own keys only."""
+    doc = dict(house_doc("Old"), lapped_riders_placed=value)
+    assert rulesets.validate_ruleset(doc) == []
+    assert "lapped_riders_placed_by_laps" not in rulesets.formats_for(doc)["placings"]
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(doc))
+    imported = rulesets.import_ruleset(store, path)
+    assert "lapped_riders_placed" not in imported.doc
+    out = rulesets.export_ruleset(doc, tmp_path / "out.json")
+    assert "lapped_riders_placed" not in json.loads(out.read_text())
+    rules = R.PlacingsRules.from_dict({"lapped_riders_placed_by_laps": False})
+    assert rules == R.PlacingsRules()
 
 
 def test_export_then_import_round_trip_and_name_clash(store, tmp_path):

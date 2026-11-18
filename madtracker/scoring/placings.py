@@ -43,7 +43,6 @@ from .actions import (
     RaceEnded,
     RaceShortened,
     SprintResult,
-    Status,
 )
 from .result import Standing, Standings, rank_groups
 from .rules import PlacingsRules
@@ -67,21 +66,6 @@ def compute(rules: PlacingsRules, entrants: Sequence[int], actions: Sequence[Act
             laps_lost=lost,
             laps_not_counted=cancelled.get(eid, 0),
         )
-
-    # UCI 3.2.177: a lapped rider leaves the track at once. If the scorer
-    # still recorded them at the line, they rank with the withdrawn riders
-    # rather than among the finishers (UCI 3.3.012 A). Under USAC 2C4 the
-    # same rider is placed by laps down, which the sort below does. A
-    # rider marked Withdrawn is placed by that moment already, laps or
-    # not, so the conversion leaves them alone.
-    if rules.laps_count_for_ranking and not rules.lapped_riders_placed_by_laps:
-        for eid in active_entrants(entrants, status):
-            if rows[eid].net_laps < 0 and eid not in gone:
-                status[eid] = Status(
-                    entrant_id=eid,
-                    status="DNF",
-                    reason="lapped, must leave the track (UCI 3.2.177)",
-                )
 
     active = [eid for eid in active_entrants(entrants, status) if eid not in gone]
     if finish is None:

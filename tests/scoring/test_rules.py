@@ -3,20 +3,20 @@
 import pytest
 
 from madtracker.scoring.rules import (
+    OMNIUM_PLACE_POINTS,
     PRESETS,
-    UCI_OMNIUM_PLACE_POINTS,
     AggregateRules,
     EliminationRules,
     PlacingsRules,
     SprintPointsRules,
     WinAndOutRules,
     elimination_rules,
+    four_race_omnium_rules,
     madison_rules,
     placings_rules,
     points_race_rules,
     rules_from_dict,
     tempo_rules,
-    uci_omnium_rules,
     win_and_out_rules,
 )
 
@@ -64,26 +64,26 @@ def test_rulebook_presets_use_twenty_per_lap():
 
 
 def test_rulebook_placings_elimination_and_win_and_out():
-    """USAC 2C4 places a lapped rider who stays in; USAC 2E3(f), UCI 3.2.224
-    ride the final between two; the win-and-out awards three places forward."""
-    assert placings_rules().lapped_riders_placed_by_laps is True
+    """USAC 2C5 ranks by laps, then the line; USAC 2E3(f), UCI 3.2.224 ride
+    the final between two; the win-and-out awards three places forward."""
+    assert placings_rules().laps_count_for_ranking is True
     assert elimination_rules().survivors == 2
     assert elimination_rules(survivors=1).final_by_sprint is False
     assert (win_and_out_rules().places, win_and_out_rules().direction) == (3, "forward")
 
 
-def test_uci_omnium_table():
-    """UCI 3.2.250: 40, 38, ... 2 for places 1 to 20, then 1."""
-    assert UCI_OMNIUM_PLACE_POINTS[:3] == (40, 38, 36)
-    assert UCI_OMNIUM_PLACE_POINTS[-1] == 2
-    assert len(UCI_OMNIUM_PLACE_POINTS) == 20
-    assert uci_omnium_rules().points_beyond_table == 1
+def test_four_race_omnium_table():
+    """USAC 2O3(a), UCI 3.2.250: 40, 38, ... 2 for places 1 to 20, then 1."""
+    assert OMNIUM_PLACE_POINTS[:3] == (40, 38, 36)
+    assert OMNIUM_PLACE_POINTS[-1] == 2
+    assert len(OMNIUM_PLACE_POINTS) == 20
+    assert four_race_omnium_rules().points_beyond_table == 1
 
 
 @pytest.mark.parametrize(
     "rules",
     [
-        PlacingsRules(lapped_riders_placed_by_laps=False),
+        PlacingsRules(laps_count_for_ranking=False),
         SprintPointsRules(sprint_count=4, scored_unit="team"),
         SprintPointsRules(points_by_sprint=((1,), (2, 1), (3, 2, 1))),
         EliminationRules(survivors=3),

@@ -206,16 +206,6 @@ def score_placings(rules, entrants, actions):
         rows[e]["not_counted"] = struck[e]
     net = {e: rows[e]["gained"] - rows[e]["lost"] for e in entrants}
 
-    if rules.laps_count_for_ranking and not rules.lapped_riders_placed_by_laps:
-        # UCI 3.2.177 reading (register "If you race under UCI"): a rider on
-        # negative laps still recorded at the line is marked DNF.
-        # AMBIGUITY: a withdrawn rider on negative laps. The register says
-        # laps never reorder the withdrawn (R-NF-3) and a DNF is refused
-        # for them, so the rank by the moment stands.
-        for e in entrants:
-            if e not in status and e not in gone and net[e] < 0:
-                status[e] = "DNF"
-
     finish = finish_of(actions)
     # A withdrawn rider is out of the field from the entry's moment
     # (R-NF-3), so only the riders still racing take the line.

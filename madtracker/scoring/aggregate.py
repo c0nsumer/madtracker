@@ -3,7 +3,7 @@
 Covers the team madison omnium (each team's madison totals
 summed across the named races), generic overall-for-the-day scoring
 with a points-per-place table and the USAC 2B19(e) tie-break, and the
-UCI omnium table (UCI 3.2.250 to 3.2.252, USAC 2O3). Unlike the other
+Four-Race Omnium table (USAC 2O3, UCI 3.2.250 to 3.2.252). Unlike the other
 engines it takes finished Standings, not actions: the races are scored
 first and this table sits over their results.
 
@@ -136,7 +136,7 @@ def compute(
                     return -1 if pa < pb else 1
                 return 0
         elif rules.tie_break == "last_race_final_sprint" and races:
-            # UCI 3.2.252: the final sprint of the points race decides.
+            # USAC 2O3(g), UCI 3.2.252: the final sprint of the points race decides.
             fa = rows[a].final_sprint_place
             fb = rows[b].final_sprint_place
             if fa != fb:

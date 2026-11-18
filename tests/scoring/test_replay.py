@@ -29,7 +29,7 @@ from madtracker.scoring.rules import (
 
 
 def test_rules_version_is_a_string_the_store_can_record():
-    assert RULES_VERSION == "2026.10.1"
+    assert RULES_VERSION == "2026.11.1"
 
 
 def test_every_format_key_maps_to_an_engine():

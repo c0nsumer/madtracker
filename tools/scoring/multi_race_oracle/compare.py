@@ -81,7 +81,7 @@ def apply_mutant(name: str) -> None:
         ]
     elif name == "twenty-first":
         # R-OMNI-1: 21st scores 0 instead of 1.
-        orig = RU.uci_omnium_rules
+        orig = RU.four_race_omnium_rules
         multi_race.DEFAULTS[multi_race.FOUR_RACE] = lambda: RU.AggregateRules.from_dict(
             {**orig().to_dict(), "points_beyond_table": 0}
         )

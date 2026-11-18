@@ -25,7 +25,6 @@ A ruleset changes numbers, not methods. For example, these are the sort of thing
 - The lap gained and lap lost points for the Points Race, the Madison, and the Tempo Race
 - The [Elimination](#elimination-usac-2e)'s final sprint size
 - The [Win-and-Out](#win-and-out-club) direction
-- Whether a lapped [Scratch Race](#scratch-race-usac-2c) rider is placed by laps down
 
 It can also give a format the venue's own name (**Shown as**), eg: "Devil" for the Elimination.
 
@@ -35,7 +34,7 @@ A sprint points table is typed first place first, eg: "10, 7, 5, 3, 2, 1". Space
 
 ## Scratch Race (USAC 2C)
 
-Riders are placed by net laps first, then by the order across the line. A rider a lap down who stays in is placed behind every rider on the lead lap (2C4). With **Lapped riders are placed by laps down** off in the ruleset, a lapped rider is Did Not Finish instead.
+Riders are placed by net laps first, then by the order across the line. A rider a lap down who stays in is placed behind every rider on the lead lap (2C4). If the officials remove a lapped rider, mark **Did Not Finish**, or **Withdrawn** when the Chief Referee has them placed (1M6(d)).
 
 If the officials call the last places before the rest, use **Place Last** on the rider's ⋯ menu. The rider takes the last open place, counted from the riders still in the race, and the next **Place Last** takes the place above it. If the officials can't separate the riders in the middle, click **Place the Rest Together**. Every unplaced rider then shares the next place, an equal placing under 1M6(a), and the result is complete. **Undo** takes back one place at a time, from either end.
 

@@ -1933,9 +1933,7 @@ class LiveRace:
         # A rider action happens beside the staged order, never instead of
         # it. A rider who left the race (or the finish) leaves the staged
         # order too, and the field may now be fully placed: the finish goes
-        # in with the status. A lap can do the same where a ruleset drops
-        # a lapped rider (the engine marks them DNF), so a lap takes the
-        # same path rather than leaving a race with nobody left to click.
+        # in with the status. A lap never changes who the finish must name.
         after = self.standings([*self.actions(), action])
         groups = self.staged(after)
         tail = self.staged_tail(after)

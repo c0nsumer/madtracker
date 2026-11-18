@@ -19,7 +19,6 @@ A ruleset is one flat page of values, the only ones the engines need
       "survivors": 2,                    # elimination riders in the final
       "places": 3,                       # win-and-out places awarded
       "direction": "forward",            # "forward" or "reverse"
-      "lapped_riders_placed": true,      # a lapped rider who stays in is placed (USAC 2C4)
       "format_names": {"elimination": "Devil"},          # the venue's word, optional
       "format_descriptions": {"elimination": "Last rider over the line every 2 laps is out"}
     }
@@ -145,14 +144,13 @@ PAGE_LABELS: dict[str, str] = {
     "survivors": "Elimination riders in the final sprint",
     "places": "Win-and-Out places",
     "direction": "Win-and-Out direction",
-    "lapped_riders_placed": "Lapped riders are placed by laps down",
 }
 PAGE_KEYS = tuple(PAGE_LABELS)
 # The editor's tabs: the keys each family's tab holds. A lap is priced per
 # sprint format, so each tab says what its own laps are worth; a shared
 # pair above the tabs would not say which race it was for.
 FAMILY_KEYS: dict[str, tuple[str, ...]] = {
-    "placings": ("lapped_riders_placed",),
+    "placings": (),
     "points": ("points_table", "points_last_double", "points_lap_gained", "points_lap_lost"),
     "madison": ("madison_table", "madison_last_double", "madison_lap_gained", "madison_lap_lost"),
     "tempo": ("tempo_points", "tempo_lap_gained", "tempo_lap_lost"),
@@ -295,7 +293,7 @@ def is_builtin(name: str) -> bool:
 
 def builtin_ruleset() -> dict[str, Any]:
     """The rulebook's page: USAC 2M2(f) and UCI 3.2.118 sprint points and
-    lap value, USAC 2E3(f) survivors, USAC 2C4 lapped riders."""
+    lap value, USAC 2E3(f) survivors."""
     points = R.points_race_rules()
     return {
         "name": BUILTIN_LABEL,
@@ -308,7 +306,6 @@ def builtin_ruleset() -> dict[str, Any]:
         "survivors": R.elimination_rules().survivors,
         "places": R.win_and_out_rules().places,
         "direction": R.win_and_out_rules().direction,
-        "lapped_riders_placed": R.placings_rules().lapped_riders_placed_by_laps,
     }
 
 
@@ -329,9 +326,7 @@ def formats_for(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
     survivors = int(doc["survivors"])
     return {
-        "placings": R.PlacingsRules(
-            lapped_riders_placed_by_laps=bool(doc["lapped_riders_placed"])
-        ).to_dict(),
+        "placings": R.PlacingsRules().to_dict(),
         "points": sprint("points", doc["points_table"], bool(doc["points_last_double"])),
         "madison": sprint(
             "madison", doc["madison_table"], bool(doc["madison_last_double"]), "team"
@@ -453,7 +448,7 @@ def validate_ruleset(doc: Any) -> list[str]:
             problems.append(f"{PAGE_LABELS[key]}: must be whole numbers from 0 to {TABLE_MAX}")
         elif len(table) > MAX_COUNT:
             problems.append(f"{PAGE_LABELS[key]}: must be {MAX_COUNT} values or fewer")
-    for key in ("points_last_double", "madison_last_double", "lapped_riders_placed"):
+    for key in ("points_last_double", "madison_last_double"):
         if not isinstance(doc[key], bool):
             problems.append(f"{PAGE_LABELS[key]}: must be yes or no")
     for key, (lo, hi) in VALUE_RANGES.items():
@@ -589,7 +584,10 @@ def export_ruleset(doc: dict[str, Any], path: str | os.PathLike[str]) -> Path:
     """Write one ruleset to a JSON file, readable by eye and by import_ruleset."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # The page's own keys only, as a save writes them: a stored page may
+    # carry a key the page no longer has.
+    page = _page_only(doc)
+    out.write_text(json.dumps(page, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return out
 
 
