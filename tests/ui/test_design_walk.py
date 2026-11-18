@@ -1257,9 +1257,9 @@ WALK["elimination final sprint"] = (
 )
 
 # A withdrawn rider leaves the cards and ranks after every rider still
-# racing, the later withdrawn higher (USAC 2O3(e)): the row has no menu
-# while the race runs, nothing moves into or past it, and once the result
-# is complete it takes the rulings and Disqualify.
+# racing, the later withdrawn higher (USAC 2O3(e)): the row offers
+# Disqualify alone while the race runs, nothing moves into or past it, and
+# once the result is complete it takes the rulings and Disqualify.
 WALK["scratch race withdrawn"] = (
     CHASE,
     [
@@ -1275,7 +1275,7 @@ WALK["scratch race withdrawn"] = (
                 "Undo: #45 Isaac Pell marked Withdrawn",
                 True,
                 CHASE_ACTIONS,
-                {0: PLACED, 1: []},
+                {0: PLACED, 1: [DQ]},
             ),  # fmt: skip
         ),
         Step(
@@ -1289,7 +1289,7 @@ WALK["scratch race withdrawn"] = (
                 "Undo: #51 Hana Yoon marked Withdrawn",
                 True,
                 CHASE_ACTIONS,
-                {0: PLACED, 1: [], 2: []},
+                {0: PLACED, 1: [DQ], 2: [DQ]},
             ),  # fmt: skip
         ),
         Step(
@@ -1344,7 +1344,7 @@ WALK["tempo race withdrawn"] = (
                 "Undo: #45 Isaac Pell marked Withdrawn",
                 True,
                 POINTS_ALL,
-                {0: POINTS_RUNNING, 9: []},
+                {0: POINTS_RUNNING, 9: [DQ]},
                 record_enabled=False,
                 headers_open=True,
             ),  # fmt: skip
@@ -1360,7 +1360,7 @@ WALK["tempo race withdrawn"] = (
                 "Undo: Sprint 2 recorded",
                 True,
                 [DNS, *POINTS_FINAL],
-                {0: POINTS_FINAL, 9: []},
+                {0: POINTS_FINAL, 9: [DQ]},
                 headers_open=True,
             ),  # fmt: skip
         ),
@@ -1375,7 +1375,7 @@ WALK["tempo race withdrawn"] = (
                 "Undo: #51 Hana Yoon marked Withdrawn",
                 True,
                 [DNS, *POINTS_FINAL],
-                {0: POINTS_FINAL, 8: [], 9: []},
+                {0: POINTS_FINAL, 8: [DQ], 9: [DQ]},
                 headers_open=True,
             ),  # fmt: skip
         ),
@@ -1493,7 +1493,7 @@ WALK["points without a bib"] = (
 def quiet(monkeypatch):
     """Every dialog and menu records itself instead of blocking; file pickers pick nothing."""
     opened: list[str] = []
-    monkeypatch.setattr(widgets, "run_menu", lambda menu, where: opened.append("menu:" + ",".join(x.text() for x in menu.actions())))  # fmt: skip
+    monkeypatch.setattr(widgets, "run_menu", lambda menu, where: opened.append("menu:" + ",".join(x.text() for x in menu.actions() if not x.isSeparator())))  # fmt: skip
     monkeypatch.setattr(QDialog, "exec", lambda self: opened.append("dialog:" + self.windowTitle()) or int(QDialog.DialogCode.Rejected))  # fmt: skip
 
     def picker(kind, result):

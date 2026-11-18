@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from madtracker.board.payloads import lap_text, total_text
 from madtracker.control.describe import STATUS_WORDS
 from madtracker.control.race import BREAK_TIE, MOVE_TO, REVIEW_ACTIONS, ResultRow, Screen
+from madtracker.control.race_words import MENU_SECTIONS
 from madtracker.ui import style, widgets
 from madtracker.ui.cards import chip_size, draw_chip
 from madtracker.ui.widgets import (
@@ -733,13 +734,18 @@ class ResultTable(QTableWidget):
         # elimination's menu stays five items long.
         moves = [(k, label.removeprefix("Move to ")) for k, label in items if k.startswith(MOVE_TO)]
         plain = [(k, label) for k, label in items if not k.startswith(MOVE_TO)]
-        fill_menu(menu, [(k, label) for k, label in plain if k != "dq"], slot)
+        fill_menu(
+            menu, [(k, label) for k, label in plain if k != "dq"], slot, sections=MENU_SECTIONS
+        )
         if moves:
             places = menu.addMenu(REVIEW_ACTIONS["move_to"])
             places.setObjectName("touchMenu")
+            places.menuAction().setProperty("section", 0)
             fill_menu(places, moves, slot)
         # Disqualify stays last, after the moves.
-        fill_menu(menu, [(k, label) for k, label in plain if k == "dq"], slot)
+        fill_menu(
+            menu, [(k, label) for k, label in plain if k == "dq"], slot, sections=MENU_SECTIONS
+        )
         if where is None:
             w = self.cellWidget(i, self.columnCount() - 1)
             where = w.mapToGlobal(QPoint(0, w.height())) if w else self.mapToGlobal(QPoint(0, 0))

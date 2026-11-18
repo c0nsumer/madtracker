@@ -33,6 +33,17 @@ RIDER_ACTIONS: dict[str, str] = {
     "lap_not_counted": "Lap Not Counted",
     "dq": "Disqualify",
 }
+# The menu's sections, each set off by a separator: the ways out of the
+# race are one decision, and Disqualify stands apart from all of them, so
+# it is never picked for the item above it. A key not listed is in the
+# section of everything else.
+MENU_SECTIONS: dict[str, int] = {
+    "dns": 1,
+    "dnf": 1,
+    "out_of_finish": 1,
+    "withdrawn": 1,
+    "dq": 2,
+}
 # The race's own menu, on the task line's ⋯: the officials' calls on the
 # race as a whole, not on a rider, which no rider's menu can say. A Points
 # Race or Madison stopped after 80 percent is not restarted and its

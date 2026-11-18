@@ -42,6 +42,7 @@ from shiboken6 import isValid
 
 from madtracker.board.payloads import lap_text, lap_words
 from madtracker.control.race import BREAK_TIE, MOVE_TO, REVIEW_ACTIONS, Card
+from madtracker.control.race_words import MENU_SECTIONS
 from madtracker.ui import style, widgets
 from madtracker.ui.icons import mdi
 from madtracker.ui.widgets import DOTS_PX, OneClickButton, OneClickToolButton, fill_menu
@@ -416,6 +417,7 @@ class RiderCard(OneClickButton):
             self.menu_actions,
             lambda key: self.action.emit(self.card.entrant_id, key),
             fold=(MOVE_TO, REVIEW_ACTIONS["move_to"], "Move to "),
+            sections=MENU_SECTIONS,
         )
         if where is None:
             where = self.dots.mapToGlobal(QPoint(0, self.dots.height()))

@@ -1612,9 +1612,13 @@ class LiveRace:
             if row.status != "DQ" and not self._staged.editing:
                 return [("dq", RIDER_ACTIONS["dq"])]
             return []
-        if (row.out_of_finish or row.withdrawn) and not st.is_complete:
-            # Placed on points, or by the moment of the withdrawal, and
-            # out of the field; Undo is the way back.
+        if row.withdrawn and not st.is_complete:
+            # Out of the field with a place. A DQ replaces the mark, as it
+            # does a status, so a withdrawal entered by mistake for one
+            # has a way out once later entries stand on it.
+            return [("dq", RIDER_ACTIONS["dq"])] if not self._staged.editing else []
+        if row.out_of_finish and not st.is_complete:
+            # Placed on points and out of the field; Undo is the way back.
             return []
         if st.is_complete:
             keys = [*self._ruling_keys(entrant_id, actions), *self._dq_key()]
@@ -2241,9 +2245,11 @@ class LiveRace:
             # A rider out of the race can still be disqualified after a
             # protest; the DQ replaces the earlier mark.
             return [("dq", REVIEW_ACTIONS["dq"])] if row.status != "DQ" else []
-        if (row.out_of_finish or row.withdrawn) and not st.is_complete:
-            # Placed on points, or by the moment of the withdrawal, and
-            # out of the field; Undo is the way back.
+        if row.withdrawn and not st.is_complete:
+            # Out of the field with a place; a DQ replaces the mark, as on the card.
+            return [("dq", REVIEW_ACTIONS["dq"])]
+        if row.out_of_finish and not st.is_complete:
+            # Placed on points and out of the field; Undo is the way back.
             return []
         keys: list[tuple[str, str]] = []
         placed = False

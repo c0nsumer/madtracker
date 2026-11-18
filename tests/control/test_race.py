@@ -2478,7 +2478,8 @@ def test_a_withdrawn_rider_leaves_the_field_and_ranks_after_the_finishers(store,
     assert s.undo_text() == "Undo: #9 Ben Szymanski marked Withdrawn"
     assert s.log_rows()[-1].text == "Withdrawn: #9 Ben Szymanski"
     assert ids[9] not in live_cards(s)
-    assert s.rider_actions(ids[9]) == [] and s.review_actions(ids[9]) == []
+    assert keys_of(s, ids[9]) == ["dq"]
+    assert [k for k, _ in s.review_actions(ids[9])] == ["dq"]
     clicks(s, ids, 33, 7)
     # A rider with a place in the finish crossed the line: the badge first.
     assert "withdrawn" not in keys_of(s, ids[7])
@@ -2525,6 +2526,25 @@ def test_a_disqualify_after_a_withdrawal_wins(store, make_race, ids):
     row = s.standings().by_entrant(ids[12])
     assert row.status == "DQ" and row.rank is None
     assert ranks(s)["Jack Moreau"] == 1 and ranks(s)["Maya Petrakis"] == 2
+
+
+def test_a_withdrawn_rider_is_disqualified_while_the_race_runs(store, make_race, ids, house):
+    """A withdrawal entered by mistake for a disqualification has a way out
+    once later entries stand on it: the DQ replaces the mark mid-race."""
+    s = points_race(store, make_race, house, bibs=(7, 12, 33, 9), sprints=3)
+    clicks(s, ids, 7, 12)
+    ok(s.record_sprint())
+    ok(s.act(ids[12], "withdrawn"))
+    clicks(s, ids, 33, 9)
+    ok(s.record_sprint())
+    assert keys_of(s, ids[12]) == ["dq"]
+    ok(s.act(ids[12], "dq"))
+    row = s.standings().by_entrant(ids[12])
+    assert row.status == "DQ" and row.rank is None
+    assert s.state == "running"
+    assert keys_of(s, ids[12]) == []
+    ok(s.undo())
+    assert s.standings().by_entrant(ids[12]).withdrawn
 
 
 def test_tempo_two_withdrawn_rank_by_the_moment_with_the_points_as_figures(store, make_race, ids):

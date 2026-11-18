@@ -805,6 +805,7 @@ def fill_menu(
     slot: Callable[[str], None],
     fold: tuple[str, str, str] | None = None,
     closed: Mapping[str, str] | None = None,
+    sections: Mapping[str, int] | None = None,
 ) -> None:
     """Add ``items`` to ``menu``; a pick calls ``slot(key)``.
 
@@ -813,23 +814,36 @@ def fill_menu(
     where the first of them was, so a long list of places is one item.
     ``closed`` maps a key to why it cannot be picked now: the item is
     grayed with the reason as its tooltip, so a menu keeps one shape
-    and the scorer sees what will open up.
+    and the scorer sees what will open up. ``sections`` maps a key to
+    its section of the menu (0 when not listed): a separator goes
+    between two items of different sections, the menu's last item
+    before this call included.
     """
     # No icons on menu items: Qt draws them in the check-mark slot.
     sub = None
     if closed:
         menu.setToolTipsVisible(True)
         menu.installEventFilter(_ClosedTips(menu))
+    before = None
+    if sections is not None:
+        last = next((a for a in reversed(menu.actions()) if not a.isSeparator()), None)
+        before = None if last is None else last.property("section")
     for key, label in items:
+        section = 0 if sections is None else sections.get(key, 0)
+        if sections is not None and before is not None and section != before:
+            menu.addSeparator()
+        before = section
         if fold is not None and key.startswith(fold[0]):
             if sub is None:
                 sub = menu.addMenu(fold[1])
+                sub.menuAction().setProperty("section", section)
                 # A submenu is tapped as its parent is.
                 sub.setObjectName(menu.objectName())
             label = label.removeprefix(fold[2])
             action = sub.addAction(label)
         else:
             action = menu.addAction(label)
+        action.setProperty("section", section)
         if closed and key in closed:
             action.setEnabled(False)
             action.setToolTip(closed[key])

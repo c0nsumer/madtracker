@@ -1552,7 +1552,9 @@ def test_dnf_and_dns_ask_first_with_the_bib(
     undo_before = c.live.undo_text()
     assert who.split()[0] == f"#{c.live.roster.get(eid).bibs[0]}"
     assert c.rider_action(eid, key) is answer
-    assert asked == [(title, f"Mark {who} {title}?", title)]
+    name = c.live.name(eid)
+    effect = f" {name} gets no place." if key == "dnf" else ""
+    assert asked == [(title, f"Mark {who} {title}?{effect}", title)]
     got = c.live.standings().by_entrant(eid)
     if answer:
         assert got.status == status
@@ -1576,7 +1578,8 @@ def test_withdrawn_asks_first_with_its_own_verb(make_app, tmp_path, monkeypatch,
     who = c.live.label(eid)
     undo_before = c.live.undo_text()
     assert c.rider_action(eid, "withdrawn") is answer
-    assert asked == [("Withdrawn", f"Mark {who} Withdrawn?", "Withdraw")]
+    placed = f"{c.live.name(eid)} is placed after everyone still racing."
+    assert asked == [("Withdrawn", f"Mark {who} Withdrawn? {placed}", "Withdraw")]
     if answer:
         assert c.live.standings().by_entrant(eid).withdrawn
         assert c.live.undo_text() == f"Undo: {who} marked Withdrawn"
@@ -1596,10 +1599,42 @@ def test_dnf_dns_and_disqualify_name_the_rider_the_same_way(make_app, tmp_path, 
     named = who(e.bibs[0], e.names[0])
     assert named.startswith("#")
     assert asked == [
-        f"Mark {named} Did Not Finish?",
+        f"Mark {named} Did Not Finish? {e.names[0]} gets no place.",
         f"Mark {named} Did Not Start?",
-        f"Disqualify {named}?",
+        f"Disqualify {named}? {e.names[0]} is removed from the result.",
     ]
+
+
+def test_an_elimination_says_a_did_not_finish_is_placed():
+    from madtracker.app import outcome_effect
+
+    assert outcome_effect("dnf", "elimination", "Maya Petrakis") == (
+        " Maya Petrakis is placed as the next rider out."
+    )
+    assert outcome_effect("dnf", "madison", "Red") == " Red gets no place."
+    assert outcome_effect("dns", "placings", "Red") == ""
+
+
+def test_a_cards_menu_sets_the_ways_out_and_disqualify_apart(make_app, tmp_path, monkeypatch):
+    """The ways out of the race are one decision and Disqualify the gravest
+    pick, so a separator stands on each side of the first and before the last."""
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.select_race(c.races[2].race_id)
+    assert c.live.kind == "points"
+    menus = []
+    monkeypatch.setattr(widgets, "run_menu", lambda menu, where: menus.append(menu))
+    c.main.surface.cards.cards[0].open_actions()
+    (menu,) = menus
+    assert [a.text() for a in menu.actions()] == [
+        "Did Not Start",
+        "Did Not Finish",
+        "Withdrawn",
+        "",
+        "Points Penalty...",
+        "",
+        "Disqualify",
+    ]
+    assert [a.isSeparator() for a in menu.actions()].count(True) == 2
 
 
 def test_a_badged_cards_menu_moves_the_badge_through_the_ui(make_app, tmp_path, quiet):
@@ -3090,12 +3125,15 @@ def test_a_result_rows_long_moves_fold_into_one_submenu_before_disqualify(
     table = c.main.surface.table
     assert table.open_row_menu(0)
     (menu,) = menus
+    # Disqualify stands apart from the moves, after a separator.
     assert [a.text() for a in menu.actions()] == [
         "Move Down",
         "Tie with the Rider Below",
         "Move to Place",
+        "",
         "Disqualify",
     ]
+    assert menu.actions()[3].isSeparator()
     sub = menu.actions()[2].menu()
     places = [a.text() for a in sub.actions()]
     assert places[0] == "2nd" and len(places) == len(c.live.roster.ids) - 1

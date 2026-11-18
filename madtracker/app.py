@@ -175,6 +175,25 @@ OUTCOME_ASKS = {
 # The verb where the title is not one: the question names the mark, the
 # button what the scorer does.
 OUTCOME_VERBS = {"withdrawn": "Withdraw"}
+# What the mark does to the place, said in the question: the menu's words
+# alone do not tell a place after the finishers from no place at all.
+OUTCOME_EFFECTS = {
+    "dnf": "{name} gets no place.",
+    "withdrawn": "{name} is placed after everyone still racing.",
+    "dq": "{name} is removed from the result.",
+}
+# An Elimination places a rider who stops as the bell would.
+ELIMINATION_DNF_EFFECT = "{name} is placed as the next rider out."
+
+
+def outcome_effect(key: str, kind: str, name: str) -> str:
+    """The sentence after an outcome's question, with its leading space; "" when it has none."""
+    effect = OUTCOME_EFFECTS.get(key, "")
+    if key == "dnf" and kind == "elimination":
+        effect = ELIMINATION_DNF_EFFECT
+    return f" {effect.format(name=name)}" if effect else ""
+
+
 # The race's own call (USAC 2M6, 2N5), asked in the shape of the others.
 END_RACE_TITLE = "End Race Early"
 
@@ -1819,7 +1838,8 @@ class AppController:
 
         if key == "dq":
             who = self.live.label(entrant_id)
-            if not ask(self.main, "Disqualify", f"Disqualify {who}?", verb="Disqualify"):
+            effect = outcome_effect(key, self.live.kind, self.live.name(entrant_id))
+            if not ask(self.main, "Disqualify", f"Disqualify {who}?{effect}", verb="Disqualify"):
                 return False
         elif key == "points_penalty":
             # The menu names the ruling; the number comes from the dialog,
@@ -1838,7 +1858,8 @@ class AppController:
             title = OUTCOME_ASKS[key]
             who = self.live.label(entrant_id)
             verb = OUTCOME_VERBS.get(key, title)
-            if not ask(self.main, title, f"Mark {who} {title}?", verb=verb):
+            effect = outcome_effect(key, self.live.kind, self.live.name(entrant_id))
+            if not ask(self.main, title, f"Mark {who} {title}?{effect}", verb=verb):
                 return False
         return self._apply(self._guard(lambda: self.live.act(entrant_id, key)))
 
