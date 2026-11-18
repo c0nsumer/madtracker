@@ -8,8 +8,8 @@ a points race reopen that sprint. The Mark final and Reopen button is
 the surface's, not the table's.
 """
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QIcon, QPalette
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QHeaderView,
@@ -26,6 +26,7 @@ from madtracker.board.payloads import lap_text, total_text
 from madtracker.control.describe import STATUS_WORDS
 from madtracker.control.race import BREAK_TIE, MOVE_TO, REVIEW_ACTIONS, ResultRow, Screen
 from madtracker.ui import style, widgets
+from madtracker.ui.cards import chip_size, draw_chip
 from madtracker.ui.widgets import (
     ID_ROLE,
     dots_button,
@@ -52,6 +53,15 @@ STATUS_INK = QColor(style.DIM)
 # its width to the sprint columns on a narrow surface and read "T..."; below
 # the floor the table scrolls sideways instead.
 NAME_MIN_CHARS = 16
+# Why a placed row is not a plain finish ("Withdrawn"), kept on the name's
+# item apart from its text, so the name is measured and elided alone.
+NOTE_ROLE = ID_ROLE + 1
+# The air between a rider's name and the note's chip after it.
+NOTE_GAP = style.MD
+# The air between a team's name and the chip under it.
+UNDER_GAP = style.XS // 2
+# The chip's type against the row's.
+NOTE_CHIP_SCALE = 0.85
 
 
 def medal_tint(row: ResultRow, screen: Screen) -> QColor | None:
@@ -134,6 +144,112 @@ class _LinesDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class _NoteDelegate(QStyledItemDelegate):
+    """Draws a placed row's note as a chip with the name: after a rider's name,
+    or under it where the column has no room, and always under a team's.
+
+    The chip is drawn as the done card's status chip is, so it reads as a
+    label, not as more of the name; its words are the sheet's. A touchscreen has no tooltip, so the word is on
+    the row. Neither the name nor the chip gives way to the other.
+    """
+
+    def __init__(self, parent, *, under: bool) -> None:
+        super().__init__(parent)
+        self._under = under
+
+    def paint(self, painter, option, index) -> None:
+        note = index.data(NOTE_ROLE)
+        if not note:
+            super().paint(painter, option, index)
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        qstyle = widget.style() if widget is not None else QApplication.style()
+        rect = qstyle.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget)
+        swatch = qstyle.subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, opt, widget)
+        text, opt.text = opt.text, ""
+        # A copy: the option hands out its own icon, which the next line empties.
+        icon = QIcon(opt.icon)
+        opt.icon = QIcon()
+        qstyle.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        margin = qstyle.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
+        rect = rect.adjusted(margin, 0, -margin, 0)
+        metrics = QFontMetrics(opt.font)
+        chip = note_chip_size(note)
+        flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        name = text
+        if self._under or metrics.horizontalAdvance(text) + NOTE_GAP + chip.width() > rect.width():
+            step = metrics.lineSpacing()
+            # A long team name wraps to a second line, as on a row with no
+            # note, and the chip goes under both. A rider's name stays on
+            # one line, and its chip goes under only when the column has
+            # no room for it after the name.
+            if self._under:
+                name = "\n".join(two_lines(text, metrics, rect.width()))
+            else:
+                name = metrics.elidedText(text, Qt.TextElideMode.ElideRight, rect.width())
+            lines = name.count("\n") + 1
+            top = rect.center().y() - (lines * step + UNDER_GAP + chip.height()) // 2
+            name_box = QRect(rect.left(), top, rect.width(), lines * step)
+            at = QPoint(rect.left(), top + lines * step + UNDER_GAP)
+            # The team's swatch stays beside its name, as on a row with no
+            # note, not centered on the name and the chip together.
+            swatch.moveCenter(QPoint(swatch.center().x(), top + step // 2))
+        else:
+            name_box = QRect(rect)
+            used = metrics.horizontalAdvance(text) + NOTE_GAP
+            at = QPoint(rect.left() + used, rect.center().y() - chip.height() // 2 + 1)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setClipRect(opt.rect)
+        if not icon.isNull():
+            icon.paint(painter, swatch)
+        painter.setFont(opt.font)
+        painter.setPen(opt.palette.color(QPalette.ColorRole.Text))
+        painter.drawText(name_box, flags, name)
+        # A chip wider than the column is cut to it, so it never runs into
+        # the next column; the name column's floor is the name's alone, since
+        # a wider one would push a long race's totals out of sight.
+        if chip.width() > rect.right() - at.x() + 1:
+            chip.setWidth(max(0, rect.right() - at.x() + 1))
+            inner = chip.width() - 2 * style.SM
+            note = QFontMetrics(note_chip_font()).elidedText(
+                note, Qt.TextElideMode.ElideRight, max(0, inner)
+            )
+        if chip.width() > 2 * style.SM:
+            draw_chip(painter, QRect(at, chip), note, STATUS_INK, note_chip_font())
+        painter.restore()
+
+
+def two_lines(text: str, metrics: QFontMetrics, width: int) -> list[str]:
+    """A team's name in at most two lines, broken between words, the last elided.
+
+    A name that needs a third line, or one word wider than the column,
+    ends in an ellipsis, so a cut name never reads as a whole one.
+    """
+    words, first = text.split(), ""
+    while words and metrics.horizontalAdvance(f"{first} {words[0]}".strip()) <= width:
+        first = f"{first} {words.pop(0)}".strip()
+    if not first:
+        return [metrics.elidedText(text, Qt.TextElideMode.ElideRight, width)]
+    if not words:
+        return [first]
+    return [first, metrics.elidedText(" ".join(words), Qt.TextElideMode.ElideRight, width)]
+
+
+def note_chip_font() -> QFont:
+    """The note chip's type: the row's own face a step smaller and plain, so the
+    chip reads as a label beside the name and never outweighs it. The card's
+    chip type is sized to the card's name, larger than a row's."""
+    return style.ui_font(style.APP_PT * NOTE_CHIP_SCALE)
+
+
+def note_chip_size(note: str) -> QSize:
+    """The note's chip, shaped as the card's status chip is."""
+    return chip_size(note, note_chip_font())
+
+
 def elided_lines(text: str, metrics: QFontMetrics, width: int) -> list[str]:
     """The lines of ``text``, each elided to ``width``.
 
@@ -158,6 +274,8 @@ class ResultTable(QTableWidget):
         self._name_col = 2
         self._dots_delegate = _FullCellDelegate(self)
         self._lines_delegate = _LinesDelegate(self)
+        self._note_after = _NoteDelegate(self, under=False)
+        self._note_under = _NoteDelegate(self, under=True)
         self._place_laps_col: int | None = None
         self._laps_col: int | None = None
         self._penalty_col: int | None = None
@@ -166,6 +284,9 @@ class ResultTable(QTableWidget):
         # menu's own action refilled it under the light.
         self._fills = 0
         self.horizontalHeader().sectionClicked.connect(self._header_clicked)
+        # A note row's height follows its column's width, whatever changed
+        # it: a resize, a scrollbar appearing, the header's own stretch.
+        self.horizontalHeader().sectionResized.connect(self._section_resized)
         self.horizontalHeader().setSectionsClickable(False)
         self.setShowGrid(False)
         setup_table(self, ["Place", "Bib", "Rider"], selectable=False)
@@ -216,6 +337,7 @@ class ResultTable(QTableWidget):
         for i, row in enumerate(screen.rows):
             self._fill_row(i, row, screen)
         self._size_columns()
+        self._fit_note_rows()
         # An elimination fills from the bottom up and a chase adds the
         # newest place last: keep the newest row in view. Standings rank
         # from the top, so the leaders stay in view there.
@@ -279,8 +401,10 @@ class ResultTable(QTableWidget):
             delegate = None
             if col == len(headers) - 1:
                 delegate = self._dots_delegate
-            elif col == self._name_col and screen.team:
-                delegate = self._lines_delegate
+            elif col == self._name_col:
+                delegate = self._lines_delegate if screen.team else self._note_after
+            elif col == 1 and screen.team:
+                delegate = self._note_under
             if self.itemDelegateForColumn(col) is not delegate:
                 self.setItemDelegateForColumn(col, delegate)
         # Headers sit where their cells do: words left, numbers right.
@@ -362,6 +486,16 @@ class ResultTable(QTableWidget):
             # A long team name ("Stars and Stripes") wraps onto the row's
             # second line rather than taking the riders' room.
             cap = self.fontMetrics().averageCharWidth() * TEAM_MAX_CHARS + 2 * style.MD
+            # A team's note has the line under its name, whole: the column
+            # is at least as wide as the widest note's chip beside the swatch.
+            notes = [self.item(r, 1).data(NOTE_ROLE) for r in range(self.rowCount())]
+            widest = max((note_chip_size(n).width() for n in notes if n), default=0)
+            if widest:
+                # The swatch, its gap, and the margin the text is drawn inside.
+                swatch = self.iconSize().width() + 2 * style.SM
+                cap = max(cap, widest + swatch + self._cell_overhead() + 2 * style.XS)
+                if header.sectionSize(1) < cap:
+                    header.resizeSection(1, cap)
             if header.sectionSize(1) > cap:
                 header.resizeSection(1, cap)
         self._fit_name()
@@ -385,6 +519,36 @@ class ResultTable(QTableWidget):
 
     def _name_floor(self) -> int:
         return self.fontMetrics().averageCharWidth() * NAME_MIN_CHARS + 2 * style.SM
+
+    def _section_resized(self, col: int, _old: int, _new: int) -> None:
+        if self.screen is not None and col == (1 if self.screen.team else self._name_col):
+            self._fit_note_rows()
+
+    def _fit_note_rows(self) -> None:
+        """A note row's height for the column as it now is: a line more where a rider's
+        chip goes under the name, or a team's name wraps over its chip."""
+        screen = self.screen
+        if screen is None:
+            return
+        col = 1 if screen.team else self._name_col
+        room = self.columnWidth(col) - self._cell_overhead()
+        if screen.team:
+            room -= self.iconSize().width() + style.SM
+        for r in range(self.rowCount()):
+            item = self.item(r, col)
+            note = item.data(NOTE_ROLE) if item is not None else None
+            if not note:
+                continue
+            metrics = QFontMetrics(item.font())
+            name_w = metrics.horizontalAdvance(item.text())
+            if screen.team:
+                wraps = len(two_lines(item.text(), metrics, room)) == 2
+                height = TEAM_ROW_H + (metrics.lineSpacing() if wraps else 0)
+            else:
+                under = name_w + NOTE_GAP + note_chip_size(note).width() > room
+                height = TEAM_ROW_H if under else ROW_H
+            if self.rowHeight(r) != height:
+                self.setRowHeight(r, height)
 
     def needed_width(self) -> int:
         """The width at which every column shows and the names are at their floor.
@@ -415,8 +579,10 @@ class ResultTable(QTableWidget):
         for row in range(self.rowCount()):
             item = self.item(row, col)
             if item is not None:
+                note = item.data(NOTE_ROLE)
+                after = note_chip_size(note).width() + NOTE_GAP if note else 0
                 for line in item.text().split("\n"):
-                    widest = max(widest, metrics.horizontalAdvance(line))
+                    widest = max(widest, metrics.horizontalAdvance(line) + after)
         name = max(self._name_floor(), widest + self._cell_overhead() + 2 * style.XS)
         return self.needed_width() - self._name_floor() + name
 
@@ -492,22 +658,19 @@ class ResultTable(QTableWidget):
             # or a menu's nested loop never sees a ⋯ on a row without one.
             self.removeCellWidget(i, last)
             dots.hide()
-        if row.status or row.note:
-            # A placed row with a status (an elimination's DNF, out at
-            # that moment) or a note (a mishap kept the rider out of the
-            # final sprint) shows its number; the gray says something
-            # happened and the tip says what.
-            if row.note:
-                tip = row.note
-            else:
-                tip = (
-                    STATUS_WORDS.get(row.status, row.status) if row.place_text != row.status else ""
-                )
+        # A placed row that is not a plain finish (an elimination's DNF,
+        # out at that moment; a mishap that kept the rider out of the
+        # final sprint; a withdrawal) keeps its number and its ink, and
+        # says why in a chip with the name. A row with no place recedes
+        # whole, its status where the place would be.
+        unplaced = bool(row.status) and row.place_text == row.status
+        note = "" if unplaced else row.note or STATUS_WORDS.get(row.status, row.status)
+        self.item(i, 1 if screen.team else self._name_col).setData(NOTE_ROLE, note or None)
+        if unplaced:
             for c in range(self.columnCount()):
                 item = self.item(i, c)
                 if item is not None:
                     item.setForeground(STATUS_INK)
-                    item.setToolTip(tip)
         tint = STAGED_TINT if row.staged else medal_tint(row, screen)
         if tint is not None:
             for c in range(self.columnCount()):

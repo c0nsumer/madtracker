@@ -5,6 +5,8 @@ layout's content is testable as plain data. The same payloads drive the
 board and its preview; the scorer's result table draws from
 ``LiveRace.screen()`` instead and is not fed from here.
 
+A withdrawn rider or team is off the track, so it is off every running
+layout too, and is back at its place once the officials decide the race.
 A rider with a status (DNF, DNS, DQ, DNP) is absent from every running
 layout, without comment: a DNF may be an injury and a DQ a protest still
 being argued, and neither is the TV's to announce. An Elimination DNF
@@ -132,9 +134,18 @@ def _statused(view: RaceView) -> set[int]:
     return {r.entrant_id for r in view.standings.rows if r.status}
 
 
+def _off_track(view: RaceView) -> set[int]:
+    """The withdrawn while the race runs: placed, so on the result, but no
+    longer racing, and a running page shows who is racing."""
+    if view.state in STATE_STATUS:
+        return set()
+    return {r.entrant_id for r in view.standings.rows if r.withdrawn}
+
+
 def pre_race(view: RaceView) -> P.PreRace:
-    # A DNS before the start leaves the start list on the TV in silence.
-    gone = _statused(view)
+    # A DNS before the start leaves the start list on the TV in silence,
+    # and a rider withdrawn from a race placed at the line leaves it too.
+    gone = _statused(view) | _off_track(view)
     shown = [e for e in view.roster.entrants if e.entrant_id not in gone]
     # A lap taken before the finish shows on the start list, the page the
     # stands see until the result is in.
@@ -178,7 +189,9 @@ def standings(view: RaceView, *, overlay: bool = False) -> P.Standings:
     if st.ended:
         # Results stand on the sprints ridden (USAC 2M6, 2N5): no empty columns for the rest.
         columns = max(run, default=0)
+    off = _off_track(view)
     rows = []
+    off_track = []
     for i, r in enumerate(st.rows):
         if r.status:
             continue
@@ -188,7 +201,7 @@ def standings(view: RaceView, *, overlay: bool = False) -> P.Standings:
                 sprints.append(r.sprint_points[j] if j < len(r.sprint_points) else 0)
             else:
                 sprints.append(None)
-        rows.append(
+        (off_track if r.entrant_id in off else rows).append(
             P.StandingRow(
                 rank=_rank(r, i),
                 entry=_entry_for(view, r.entrant_id),
@@ -205,6 +218,7 @@ def standings(view: RaceView, *, overlay: bool = False) -> P.Standings:
         header=header(view),
         sprint_count=columns,
         rows=rows,
+        off_track=off_track,
         current_sprint=max(run) if run else None,
         sprint_result=result,
     )

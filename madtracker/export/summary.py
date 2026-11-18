@@ -63,10 +63,12 @@ class ResultRow:
     word, except where the engine placed the rider by the race's own rule
     (``Standing.placed``: an elimination puts a DNF out at that moment and
     that is a place). Such a row prints its number and carries the status
-    in ``note``, so the sheet says why beside the name. An unranked row
-    with no status is a rider the scorer never placed; it is reported as
-    DNP rather than left blank so the file never carries a rider with no
-    place.
+    in ``note``, so the sheet says why under the name. An unranked row
+    with no status in a decided race is a rider the scorer never placed;
+    it is reported as DNP rather than left blank so the file never
+    carries a rider with no place. While the race runs such a row is a
+    rider still racing, and its place is blank: DNP there would say the
+    race had left them unplaced.
     """
 
     entrant_id: int
@@ -155,16 +157,18 @@ def sprints_run(rules: R._Rules, actions: Sequence[Action]) -> tuple[frozenset[i
     return frozenset(run), final_no
 
 
-def place_text(row: Standing) -> str:
+def place_text(row: Standing, decided: bool = True) -> str:
+    """The Place column's text; ``decided`` is whether the race has a result
+    (Provisional or Final), which is when an unplaced rider is DNP."""
     if row.placed:
         return str(row.rank)
     if row.status:
         return row.status
-    return "DNP"
+    return "DNP" if decided else ""
 
 
 def status_note(row: Standing, reason: str | None) -> str:
-    """Why a placed row is not a plain finish, for beside the name: the
+    """Why a placed row is not a plain finish, for under the name: the
     status it still carries, the mishap that kept the rider out of the
     final sprint (placed on points, USAC 2M8(a)), or the withdrawal that
     placed them by its moment (USAC 2O3(e), 1M6(d))."""
@@ -345,7 +349,7 @@ def build_summary(store: Store, race: Race) -> RaceSummary:
         rows.append(
             ResultRow(
                 entrant_id=st.entrant_id,
-                place=place_text(st),
+                place=place_text(st, race.state in FINISHED_STATES),
                 rank=st.rank,
                 status=st.status,
                 riders=riders,

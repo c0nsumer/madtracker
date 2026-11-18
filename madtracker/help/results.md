@@ -12,7 +12,7 @@ The sheet has the event's name and date, the venue's name or logo from Settings,
 
 - The race's number in the program, its name, and its group, with a tag at the right: FINAL once the race is marked final, PROVISIONAL when complete but not finalized, and IN PROGRESS if the export is run while it's still being scored.
 - A gray line of text with the format, the [ruleset](scoring.md#rulesets), the values the race was scored with, and the time the result first became PROVISIONAL. A race the officials ended early or shortened says so there too, eg: "Race ended after 2 sprints" or "race shortened from 4 to 3 sprints" (see [Points Race](scoring.md#points-race-usac-2m)).
-- The placings in order, with the first three larger: place, bib, name, then for a Points Race, Madison, or Tempo Race each sprint's points under S1, S2, and so on, net laps where there are any, and the total. A Penalty column appears between Laps and Total only when a points penalty was recorded in that race; it shows the points taken, eg: "−5", and the total already has them off. A lap the officials ruled not to count shows "Lap not counted" beside the rider's name, a rider the officials pulled and placed shows "Withdrawn", and a rider a mishap kept out of a points race's finish shows "Out of the finish (mishap)" (see [Rules shared by every format](scoring.md#rules-shared-by-every-format)).
+- The placings in order, with the first three larger: place, bib, name, then for a Points Race, Madison, or Tempo Race each sprint's points under S1, S2, and so on, net laps where there are any, and the total. A Penalty column appears between Laps and Total only when a points penalty was recorded in that race; it shows the points taken, eg: "−5", and the total already has them off. A lap the officials ruled not to count shows "Lap not counted" under the rider's name (under the team's name in a Madison), a rider the officials pulled and placed shows "Withdrawn", and a rider a mishap kept out of a points race's finish shows "Out of the finish (mishap)" (see [Rules shared by every format](scoring.md#rules-shared-by-every-format)).
 - Riders with a status after the placings, with DNS, DNF, or DQ.
 
 A sprint in which a rider scored nothing is blank. The last sprint's figures include the doubling where the race doubles them, so the sprint columns, the laps at the lap value on the gray line, and any penalty add up to the total. A race with more sprints than fit across the page has one Sprints column with the sum instead.
@@ -28,7 +28,7 @@ The results and standings sheets are landscape; the program sheet is portrait.
 The file has the ten columns of the USAC results template:
 
 - Race Date
-- Race Discipline
+- Race discipline
 - Race Category
 - Race Gender
 - Race Class
@@ -38,7 +38,7 @@ The file has the ten columns of the USAC results template:
 - Rider Last Name
 - Rider Place
 
-The discipline comes from the race's format. Category, Gender, Class, and Age Group come from the race's **Category**, **Gender**, **Class**, and **Age group** in Add Race (see [The races](getting-started.md#the-races)). A rider with a status gets DNS, DNF, or DQ as the place; a withdrawn rider has a place, and gets it. Both riders of a Madison team get the team's place.
+The discipline comes from the race's format. Category, Gender, Class, and Age Group come from the race's **Category**, **Gender**, **Class**, and **Age group** in Add Race (see [The races](getting-started.md#the-races)). A rider with a status gets DNS, DNF, or DQ as the place; a withdrawn rider has a place, and gets it, as does a rider an Elimination placed before they were marked Did Not Finish. Both riders of a Madison team get the team's place.
 
 After writing the CSV file the program shows details about the export, including each race written, and names any race that isn't finished (because those are left out). **Copy Details to Clipboard** copies that message to the clipboard as text, and the window stays open; the button then reads **Copied to Clipboard**. The list of races can be pasted into a spreadsheet as a table.
 

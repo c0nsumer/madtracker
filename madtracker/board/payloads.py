@@ -133,6 +133,10 @@ class Standings:
     # which column just changed.
     current_sprint: int | None = None
     sprint_result: SprintResult | None = None
+    # The withdrawn while the race runs: not drawn, since they are off the
+    # track, but they come back at their places on the result, so the page
+    # is sized as though their rows stood and never steps down for them.
+    off_track: list[StandingRow] = field(default_factory=list)
 
 
 @dataclass

@@ -3862,10 +3862,93 @@ def test_a_sprint_column_is_never_narrower_than_its_widest_value(make_app, tmp_p
     assert any("10" in texts for texts in values.values()), values
 
 
+@pytest.mark.parametrize("fmt", ["chase", "madison"])
+def test_a_placed_row_says_why_it_is_not_a_plain_finish_in_words_on_the_row(
+    make_app, tmp_path, quiet, fmt
+):
+    """A touchscreen has no tooltip: a withdrawn rider's or team's row keeps
+    its place and its ink and carries "Withdrawn" for the name's cell to
+    draw as the card's chip, and a team's column is wide enough for the chip
+    whole."""
+    from madtracker.ui.review import NOTE_ROLE, note_chip_size
+
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.select_race(next(r.race_id for r in c.races if r.format == fmt))
+    c.main.show()
+    QApplication.processEvents()
+    table = c.main.surface.table
+    ids = list(c.live.roster.ids)
+    assert c.rider_action(ids[0], "withdrawn")
+    QApplication.processEvents()
+    row = table.row_of(ids[0])
+    col = 1 if fmt == "madison" else table._name_col
+    assert table.itemDelegateForColumn(col) in (table._note_after, table._note_under)
+    assert table.item(row, 0).text().isdigit()
+    assert table.item(row, col).data(NOTE_ROLE) == "Withdrawn"
+    assert table.item(row, col).foreground().style() == Qt.BrushStyle.NoBrush
+    others = [table.item(i, col).data(NOTE_ROLE) for i in range(table.rowCount()) if i != row]
+    assert not any(others)
+    if fmt == "madison":
+        chip = note_chip_size("Withdrawn").width()
+        assert table.columnWidth(1) > chip + table.iconSize().width()
+
+
+def test_a_rider_s_chip_goes_under_the_name_where_the_column_has_no_room(make_app, tmp_path, quiet):
+    """Beside a long race's sprint columns the name column is at its floor:
+    the chip takes the line under the name and the row grows for it, so
+    neither the name nor the chip is cut; with room again it is back after
+    the name on a row of the usual height."""
+    from PySide6.QtWidgets import QHeaderView
+
+    from madtracker.ui.review import NOTE_GAP, ROW_H, TEAM_ROW_H, note_chip_size
+
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.select_race(next(r.race_id for r in c.races if r.format == "chase"))
+    c.main.show()
+    QApplication.processEvents()
+    table = c.main.surface.table
+    ids = list(c.live.roster.ids)
+    assert c.rider_action(ids[0], "withdrawn")
+    QApplication.processEvents()
+    row, col = table.row_of(ids[0]), table._name_col
+    name = table.item(row, col).text()
+    need = table.fontMetrics().horizontalAdvance(name) + NOTE_GAP
+    need += note_chip_size("Withdrawn").width() + table._cell_overhead()
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+    header.resizeSection(col, need - 1)
+    table._fit_note_rows()
+    assert table.rowHeight(row) == TEAM_ROW_H
+    header.resizeSection(col, need)
+    table._fit_note_rows()
+    assert table.rowHeight(row) == ROW_H
+    # The floor is the name's alone: a chip never widens it.
+    assert table._name_floor() < need
+
+
+def test_a_team_name_over_its_chip_is_two_lines_at_most_and_says_when_it_is_cut(qapp):
+    """A name that needs a third line, or one word wider than the column,
+    ends in an ellipsis: a cut name never reads as a whole one."""
+    from PySide6.QtGui import QFontMetrics
+
+    from madtracker.ui.review import two_lines
+
+    metrics = QFontMetrics(qapp.font())
+    wide = metrics.horizontalAdvance("Motor City Velo") + 2
+    assert two_lines("Red", metrics, wide) == ["Red"]
+    assert two_lines("Motor City Velo Club", metrics, wide) == ["Motor City Velo", "Club"]
+    long = two_lines("Motor City Velo Club of Greater Detroit", metrics, wide)
+    assert long[0] == "Motor City Velo" and long[1].endswith("…") and len(long) == 2
+    assert all(metrics.horizontalAdvance(line) <= wide for line in long)
+    (word,) = two_lines("Supercalifragilistic", metrics, metrics.horizontalAdvance("Super"))
+    assert word.endswith("…")
+
+
 def test_a_team_row_keeps_both_riders_on_their_own_lines(make_app, tmp_path, quiet):
     """A rider's name wider than the Riders column is elided on its line
     rather than wrapped onto the second rider's; the cell is drawn by the
-    riders' delegate in a team race and by the stock one otherwise."""
+    riders' delegate in a team race and by the note's otherwise, which
+    draws a row with no note as the stock one does."""
     from PySide6.QtGui import QFontMetrics
 
     from madtracker.ui.review import elided_lines
@@ -3875,7 +3958,7 @@ def test_a_team_row_keeps_both_riders_on_their_own_lines(make_app, tmp_path, qui
     c.select_race(next(r.race_id for r in c.races if r.format == "madison"))
     assert table.itemDelegateForColumn(table._name_col) is table._lines_delegate
     c.select_race(next(r.race_id for r in c.races if r.format == "points"))
-    assert table.itemDelegateForColumn(table._name_col) is None
+    assert table.itemDelegateForColumn(table._name_col) is table._note_after
 
     metrics = QFontMetrics(table.font())
     long = "Maximilian-Alexander Featherstonehaugh-Worthington III"

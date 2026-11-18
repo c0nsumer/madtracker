@@ -182,6 +182,44 @@ def test_finish_recap_notes_a_withdrawn_rider_at_the_place_the_rule_gives(store,
     ]  # fmt: skip
 
 
+def test_a_withdrawn_team_is_off_the_running_table_and_back_on_the_result(store, make_race, house):
+    """A withdrawn team is off the track, so the running table shows only
+    who is racing; the team keeps its place (USAC 1M6(d)), so it is back
+    once the race is decided, and the page is sized on it meanwhile."""
+    s = live(store, make_race, "madison", [3, 24, 5, 36, 8, 12], house.madison(2), teams=TEAMS)
+    teams = {s.name(t): t for t in s.roster.ids}
+    blue, red, orange = teams["Blue"], teams["Red"], teams["Orange"]
+    for team in (blue, red, orange):
+        assert s.click(team).ok
+    assert s.record_sprint().ok
+    assert s.act(orange, "withdrawn").ok
+    layout, payload = bf.board_for(s.view())
+    assert layout == "madison"
+    assert [(r.rank, r.entry.team) for r in payload.rows] == [(1, "Blue"), (2, "Red")]
+    assert [(r.rank, r.entry.team, r.total) for r in payload.off_track] == [(3, "Orange", 2)]
+    for team in (red, blue):
+        assert s.click(team).ok
+    assert s.state == "provisional"
+    _, payload = bf.board_for(s.view())
+    assert [r.entry.team for r in payload.rows] == ["Red", "Blue", "Orange"]
+    assert payload.off_track == []
+
+
+def test_a_withdrawn_rider_leaves_the_start_list_of_a_race_placed_at_the_line(
+    store, make_race, event
+):
+    ids = ids_of(event)
+    s = live(store, make_race, "chase", [7, 9, 12], R.placings_rules())
+    assert s.act(ids[9], "withdrawn").ok
+    layout, payload = bf.board_for(s.view())
+    assert layout == "pre_race"
+    assert [e.bibs[0] for e in payload.roster] == ["7", "12"]
+    clicks(s, ids, 12, 7)
+    layout, payload = bf.board_for(s.view())
+    assert layout == "finish"
+    assert [(p.place, p.entry.bibs[0]) for p in payload.placings] == [(1, "12"), (2, "7"), (3, "9")]
+
+
 def test_between_shows_next_race_and_last_result(store, make_race, event):
     ids = ids_of(event)
     done = live(store, make_race, "chase", [7, 12, 33], R.placings_rules())

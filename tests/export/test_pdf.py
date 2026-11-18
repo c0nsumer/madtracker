@@ -191,6 +191,76 @@ def test_a_madison_of_five_prints_on_one_page_with_the_riders_beside_the_team(
     assert not any("(continued)" in d["text"] for d in drawn)
 
 
+@pytest.mark.parametrize(
+    ("action", "note"),
+    [("withdrawn", "Withdrawn"), ("out_of_finish", "Out of the finish (mishap)")],
+)
+def test_a_madison_team_s_note_prints_under_its_name_whatever_the_names_widths(
+    store, event, tmp_path, drawn, action, note
+):
+    """The team's column is as wide as the table's widest name, so short
+    names leave a note no room after the name: it takes its own line under
+    the name, at the riders' size."""
+    event_id, _ = event
+    rules = R.SprintPointsRules(sprint_count=2, scored_unit="team")
+    race = store.add_race(event_id, "Madison of Three", "madison", rules=rules.to_dict())
+    teams = []
+    for n, color in enumerate(("Red", "Blue", "Green")):
+        team = store.add_team(race.race_id, color, color=color)
+        for k in range(2):
+            rider = store.add_rider("Lane", f"{color}{k}")
+            store.add_entry(event_id, rider.rider_id, 300 + 2 * n + k, local_group="Cat 4")
+            store.add_race_entry(race.race_id, rider.rider_id)
+            store.add_team_member(team.team_id, rider.rider_id)
+        teams.append(team.team_id)
+    s = LiveRace(store, race.race_id)
+    for team in teams:
+        assert s.click(team).ok
+    assert s.record_sprint().ok
+    assert s.act(teams[0], action).ok
+    for team in teams[1:]:
+        assert s.click(team).ok
+    assert s.state == "provisional"
+
+    write_results_pdf(store, event_id, tmp_path / "m.pdf", races=[race.race_id])
+    team = next(d for d in drawn if d["text"] == "Red")
+    under = next(d for d in drawn if d["text"] == note)
+    riders = [next(d for d in drawn if d["text"] == f"Lane Red{k}") for k in range(2)]
+    assert under["x"] == team["x"] and under["y"] == pytest.approx(team["y"] + team["h"])
+    # The note is whole, and the riders start past it.
+    assert under["x"] + under["width"] <= riders[0]["x"]
+    assert under["size"] == riders[0]["size"]
+
+
+@pytest.mark.parametrize(("first", "last"), [("Bo", "Tran"), ("Christopher", "Vandermeerschen")])
+def test_a_rider_s_note_has_the_line_under_the_name(store, event, tmp_path, drawn, first, last):
+    """Beside the name the note reads as part of it, and a long name leaves
+    it no room there: the note is never left off or cut, it has the line
+    under the name, short name or long."""
+    event_id, _ = event
+    race = store.add_race(event_id, "Scratch", "chase", rules=R.placings_rules().to_dict())
+    riders = []
+    for n in range(12):
+        name = (first, last) if n == 3 else ("Lane", f"Rider{n}")
+        rider = store.add_rider(*name)
+        store.add_entry(event_id, rider.rider_id, 400 + n, local_group="Cat 4")
+        store.add_race_entry(race.race_id, rider.rider_id)
+        riders.append(rider.rider_id)
+    s = LiveRace(store, race.race_id)
+    assert s.act(riders[3], "withdrawn").ok
+    for n, rid in enumerate(riders):
+        if n != 3:
+            assert s.click(rid).ok
+    assert s.state == "provisional"
+
+    write_results_pdf(store, event_id, tmp_path / "s.pdf", races=[race.race_id])
+    name = next(d for d in drawn if d["text"] == f"{first} {last}")
+    note = next(d for d in drawn if d["text"] == "Withdrawn")
+    assert note["x"] == name["x"] and note["y"] == pytest.approx(name["y"] + name["h"])
+    assert note["size"] < name["size"]
+    assert note["x"] + note["width"] <= name["x"] + name["w"]
+
+
 def test_a_rider_name_that_would_wrap_beside_puts_every_team_s_riders_under(
     store, event, tmp_path, drawn
 ):
@@ -873,6 +943,25 @@ def test_a_rider_out_of_the_finish_prints_a_numbered_place_with_the_mishap_besid
         ("Tran", "3"),
         ("Łukasik", "4"),
     ]
+
+
+def test_a_rider_still_racing_has_no_place_on_a_running_race_s_sheet(store, event, tmp_path, drawn):
+    """A running race with a place already fixed (a withdrawn rider) prints
+    under IN PROGRESS: the riders still racing are listed with no place.
+    DNP is for a rider a decided race left unplaced."""
+    from madtracker.export.summary import build_summary
+
+    event_id, ids = event
+    race = store.add_race(event_id, "Scratch", "chase", rules=R.placings_rules().to_dict())
+    for bib in (1, 2, 3, 4):
+        store.add_race_entry(race.race_id, ids[bib])
+    s = LiveRace(store, race.race_id)
+    assert s.act(ids[3], "withdrawn").ok
+    rows = build_summary(store, store.race(race.race_id)).rows
+    assert sorted((r.riders[0].bib, r.place) for r in rows) == [(1, ""), (2, ""), (3, "4"), (4, "")]
+    write_results_pdf(store, event_id, tmp_path / "r.pdf", races=[race.race_id])
+    texts = [d["text"] for d in drawn]
+    assert "IN PROGRESS" in texts and "DNP" not in texts and "Withdrawn" in texts
 
 
 @pytest.mark.parametrize("fmt", ["chase", "tempo"])

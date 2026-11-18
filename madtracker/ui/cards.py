@@ -235,22 +235,23 @@ def chip_font() -> QFont:
     return style.ui_font(member_pt(), bold=True)
 
 
-def chip_size(text: str) -> QSize:
+def chip_size(text: str, font: QFont | None = None) -> QSize:
     """A chip around ``text``: SM each side, XS taller than the line."""
-    metrics = QFontMetrics(chip_font())
+    metrics = QFontMetrics(font or chip_font())
     return QSize(metrics.horizontalAdvance(text) + 2 * style.SM, metrics.height() + style.XS)
 
 
-def draw_chip(p: QPainter, rect: QRect, text: str, ink: QColor) -> None:
+def draw_chip(p: QPainter, rect: QRect, text: str, ink: QColor, font: QFont | None = None) -> None:
     """A chip: ``text`` on white in a rounded outline, both in ``ink``, so it reads as a tag.
 
     The lap chip on a live card and the status chip on a done one; the
-    ink is what tells them apart.
+    ink is what tells them apart. ``font`` is the result list's, whose
+    chip is set to its own rows' type.
     """
     p.setPen(QPen(ink, 1))
     p.setBrush(WHITE)
     p.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
-    p.setFont(chip_font())
+    p.setFont(font or chip_font())
     p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), text)
 
 

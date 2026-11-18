@@ -1171,12 +1171,38 @@ class StandingsPage(Page):
         super().set_data(data)
 
     def page_most(self) -> int:
-        teams = self.data is not None and any(r.entry.color for r in self.data.rows)
+        teams = self.data is not None and any(r.entry.color for r in self.sized(self.data).rows)
         return TEAM_PAGE_ROWS if teams else PAGE_ROWS
 
+    def penalized(self) -> bool:
+        """Whether a PENALTY column stands: only while a row drawn carries one. A row off
+        the track opens none, since the column would stand empty."""
+        return any(r.penalty for r in self.data.rows if not r.status)
+
+    def paging(self, d: Standings) -> tuple[int, int, int, bool]:
+        """(pages, rows drawn per page, rows a page is sized for, room for the dots).
+
+        A page is sized for the whole table, the rows off the track
+        included, so their return never steps the rows down. The rows
+        drawn are balanced over pages no fuller than that, so a table
+        with rows away never leaves one rider alone on a last page. The
+        dots keep their room whenever the whole table takes more than a
+        page, so the rows do not give it up when the result needs them.
+        """
+        whole = len(self.sized(d).rows)
+        sized_for = page_rows(whole, self.page_most())
+        per_page = page_rows(len(d.rows), sized_for)
+        pages = max(1, -(-len(d.rows) // per_page))
+        return pages, per_page, max(1, min(whole, sized_for)), pages > 1 or whole > sized_for
+
     def page_count(self) -> int:
-        rows = len(self.data.rows) if self.data is not None else 0
-        return max(1, -(-rows // page_rows(rows, self.page_most())))
+        return self.paging(self.data)[0] if self.data is not None else 1
+
+    @staticmethod
+    def sized(d: Standings) -> Standings:
+        """The table the sizes are decided on: the rows drawn and the rows off the
+        track, which come back on the result."""
+        return replace(d, rows=d.rows + d.off_track) if d.off_track else d
 
     def ordinals(self, d: Standings) -> bool:
         """Whether the places read "1st", "2nd": once the officials have decided the race.
@@ -1195,16 +1221,15 @@ class StandingsPage(Page):
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Standings = self.data
         u = self.u
-        pages = self.page_count()
+        pages, per_page, n, dots = self.paging(d)
         page = self.page % pages
-        per_page = page_rows(len(d.rows), self.page_most())
+        whole = self.sized(d)
         rows = d.rows[page * per_page : (page + 1) * per_page]
-        n = max(1, min(len(d.rows), per_page))
-        bottom = area.bottom() - (32 * u if pages > 1 else 0)
-        if any(r.entry.color for r in d.rows):
-            self.team_table(p, area, d, rows, n, bottom, self.ordinals(d))
+        bottom = area.bottom() - (32 * u if dots else 0)
+        if any(r.entry.color for r in whole.rows):
+            self.team_table(p, area, whole, rows, n, bottom, self.ordinals(d))
         else:
-            self.rider_table(p, area, d, rows, n, bottom)
+            self.rider_table(p, area, whole, rows, n, bottom)
 
         if pages > 1:
             # Page dots, not a "1-8 of 16" footer: they say there is more
@@ -1240,7 +1265,7 @@ class StandingsPage(Page):
         # The feed leaves a status row off the board; a page given one
         # prints the status for a total and no figures, so a penalty on it
         # opens no column.
-        penalized = any(r.penalty for r in d.rows if not r.status)
+        penalized = self.penalized()
         entries = [r.entry for r in d.rows]
         fill = (bottom - rows_top) / max(n, RIDER_FILL_LEAST)
         # The entry takes nearly the whole row, so the bib plate keeps its
@@ -1405,7 +1430,7 @@ class StandingsPage(Page):
         lab = t.label(u)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
-        penalized = any(r.penalty for r in d.rows if not r.status)
+        penalized = self.penalized()
 
         def widest(strings: list[str], f: QFont) -> float:
             return max((t.text_width(s, f) for s in strings if s), default=0.0)

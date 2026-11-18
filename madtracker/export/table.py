@@ -100,6 +100,9 @@ NAME_SHRINK = 0.85
 # puts every team's riders under its name instead, since a wrapped rider
 # beside a name reads as a third rider.
 HEADER_PT = 8.0
+# A rider's note is set smaller than the name, so the name stays the
+# row's first read. A team's note is set as its riders are.
+NOTE_SCALE = 0.72
 # The air between a heading and its header row, and under the header's rule.
 HEAD_TO_TABLE = 1.0
 HEADER_TO_ROWS = 0.5
@@ -242,7 +245,11 @@ def text_w(pdf: P._Doc, text: str, size: float, style: str) -> float:
 
 
 def team_name_width(
-    pdf: P._Doc, room: float, names: Iterable[tuple[str, float]], riders_want: float
+    pdf: P._Doc,
+    room: float,
+    names: Iterable[tuple[str, float]],
+    riders_want: float,
+    notes: Iterable[tuple[str, float]] = (),
 ) -> float:
     """The team name's column in a block ``room`` wide, its riders beside it.
 
@@ -251,8 +258,12 @@ def team_name_width(
     the table's widest name, so the riders line up one GAP after it; when
     the two do not fit side by side, the riders keep their width and the
     name wraps, down to half the block, and past that both wrap.
+    ``notes`` is each team's note with the size it prints at: a note has
+    its own line under the name, so the column is as wide as the widest
+    of those too.
     """
     want = max((text_w(pdf, text, size, "B") for text, size in names), default=0.0)
+    want = max([want] + [text_w(pdf, text, size, "") for text, size in notes if text])
     if want + GAP + riders_want <= room:
         return want
     return min(want, max(room / 2, room - GAP - riders_want))
@@ -282,10 +293,19 @@ class RowText:
     # the riders stand beside the name.
     tier_line: float = 0.0
     beside: bool = False
+    # The row's note, on a line of its own under the name, at ``note_pt``
+    # on a line ``note_line`` high.
+    note: str = ""
+    note_pt: float = 0.0
+    note_line: float = 0.0
+
+    @property
+    def note_h(self) -> float:
+        return self.note_line if self.note else 0.0
 
     @property
     def team_h(self) -> float:
-        return len(self.team.lines) * self.tier_line
+        return len(self.team.lines) * self.tier_line + (self.note_h if self.team.lines else 0.0)
 
     @property
     def riders_h(self) -> float:
@@ -301,14 +321,24 @@ def row_text(
     bib_pt: float,
     *,
     beside: bool = False,
+    note: str = "",
 ) -> RowText:
     """The row's text and its height: the team's lines, then a line or more per rider;
-    ``beside``, the taller of the team's lines and its riders' lines."""
-    text = RowText(team, riders, rider_line, rider_style, bib_pt, 0.0, tier.line, beside)
+    ``beside``, the taller of the team's lines and its riders' lines.
+    ``note`` takes a line of its own, under the team's name as a rider's
+    line is set, or under a rider's name at the note's size."""
+    if team.lines:
+        note_pt, note_line = bib_pt, rider_line
+    else:
+        note_pt, note_line = tier.size * NOTE_SCALE, tier.line * NOTE_SCALE
+    text = RowText(
+        team, riders, rider_line, rider_style, bib_pt, 0.0, tier.line, beside,
+        note, note_pt, note_line,
+    )  # fmt: skip
     if beside and team.lines:
         height = max(text.team_h, text.riders_h)
     else:
-        height = text.team_h + text.riders_h
+        height = text.team_h + text.riders_h + (0.0 if team.lines else text.note_h)
     return replace(text, height=max(tier.line, height))
 
 
@@ -326,22 +356,13 @@ def table_head(heading_h: float, header_h: float) -> float:
     return heading_h + HEAD_TO_TABLE + header_h + HEADER_TO_ROWS
 
 
-def _note_after_name(
-    pdf: P._Doc, note: str, name: str, col: Col, y: float, tier: Tier, style: str
-) -> None:
-    """A placed rider's status, muted, after the name: "3  Avery Quinn  Did not finish".
+def _note_under_name(pdf: P._Doc, text: RowText, col: Col, y: float) -> None:
+    """A placed row's note, muted, on its own line under the name: "Withdrawn".
 
-    The number is the fact the sheet exists for, so the note gives way
-    to it: it takes what the name leaves and is left off a line with no
-    room (the data file's log still has it).
+    Beside the name the words read as part of it, so they never stand there.
     """
-    fitted = pdf.quiet_fit(name, col[1], style, tier.size)
-    used = pdf.get_string_width(fitted) + 2 * pdf.c_margin + 2.0
-    room = col[1] - used
-    if room < 18:
-        return
     pdf.set_text_color(*P.MUTED)
-    P._text(pdf, col[0] + used, y, room, tier.line, note, "L", "", tier.size * 0.72, 6)
+    P._text(pdf, col[0], y, col[1], text.note_h, text.note, "L", "", text.note_pt, 6)
     pdf.set_text_color(*P.INK)
 
 
@@ -354,7 +375,6 @@ def draw_row(
     *,
     place: str,
     color_hex: str | None = None,
-    note: str = "",
     figures: Callable[[float], None] | None = None,
 ) -> float:
     """Draw one row at ``y`` and return its height.
@@ -386,18 +406,20 @@ def draw_row(
         )
     if lead.team is not None:
         put_lines(pdf, lead.team[0], ly, lead.team[1], tier.line, text.team, "L", "B")
-        if note and len(text.team.lines) == 1:
-            _note_after_name(pdf, note, text.team.lines[0], lead.team, ly, tier, "B")
         ly += len(text.team.lines) * tier.line
+        if text.note:
+            _note_under_name(pdf, text, lead.team, ly)
+            ly += text.note_h
     if beside:
         ly = top + (text.height - text.riders_h) / 2
     for n, (bib, name) in enumerate(text.riders):
         if lead.bib is not None:
             P._text(pdf, lead.bib[0], ly, lead.bib[1], text.rider_line, bib, "R", "", text.bib_pt)
         put_lines(pdf, lead.name[0], ly, lead.name[1], text.rider_line, name, "L", text.rider_style)
-        if n == 0 and note and lead.team is None and len(name.lines) == 1:
-            _note_after_name(pdf, note, name.lines[0], lead.name, ly, tier, text.rider_style)
         ly += max(1, len(name.lines)) * text.rider_line
+        if n == 0 and text.note and lead.team is None:
+            _note_under_name(pdf, text, lead.name, ly)
+            ly += text.note_h
     if not status and figures is not None:
         figures(first)
     pdf.set_text_color(*P.INK)

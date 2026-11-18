@@ -928,7 +928,8 @@ def _team_block(
     )
     riders_w = max([T.text_w(pdf, r.name, tier.rider_pt, "") for r, tier in riders], default=0.0)
     names = [(row.team or "", tier.size) for row, tier in rows]
-    name_w = T.team_name_width(pdf, right - left, names, bib_w + T.BIB_GAP + riders_w)
+    notes = [(row.note, tier.rider_pt) for row, tier in rows]
+    name_w = T.team_name_width(pdf, right - left, names, bib_w + T.BIB_GAP + riders_w, notes)
     bib = (left + name_w + T.GAP, bib_w)
     x = bib[0] + bib_w + T.BIB_GAP
     if not T.riders_fit(pdf, right - x, [(r.name, tier.rider_pt) for r, tier in riders]):
@@ -982,7 +983,9 @@ def _row_text(pdf: _Doc, row: ResultRow, cols: _Cols, tier: T.Tier) -> T.RowText
         )
         for r in shown
     )
-    return T.row_text(tier, team, riders, rider_line, rider_style, rider_pt, beside=cols.beside)
+    return T.row_text(
+        tier, team, riders, rider_line, rider_style, rider_pt, beside=cols.beside, note=row.note
+    )
 
 
 def _draw_row(
@@ -1035,7 +1038,6 @@ def _draw_row(
         text,
         place=row.place,
         color_hex=row.color_hex,
-        note=row.note,
         figures=figures,
     )
 

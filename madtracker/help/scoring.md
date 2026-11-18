@@ -52,7 +52,7 @@ The result fills from the bottom up: the first rider out is last, the next is se
 
 A ruleset may allow more than two riders for a final sprint; they're placed in that sprint's order.
 
-A rider who crashes or is pulled between sprints and can't rejoin is eliminated at that moment (2E4): click them out as you would at a bell, and they take the next place. Mark Did Not Finish only for a rider who quits the race. It places them the same way, with "Did not finish" beside the name on the sheet, but in a [Four-Race Omnium](multi-race-standings.md#the-four-kinds) a Did Not Finish is an abandon that puts the rider out of the omnium (2O3(d)), and a rider clicked out stays in. On the scoreboard the rider leaves the race's page and is listed at that place on the result.
+A rider who crashes or is pulled between sprints and can't rejoin is eliminated at that moment (2E4): click them out as you would at a bell, and they take the next place. Mark Did Not Finish only for a rider who quits the race. It places them the same way, with "Did not finish" under the name on the sheet, but in a [Four-Race Omnium](multi-race-standings.md#the-four-kinds) a Did Not Finish is an abandon that puts the rider out of the omnium (2O3(d)), and a rider clicked out stays in. On the scoreboard the rider leaves the race's page and is listed at that place on the result.
 
 If a rider went out and nobody clicked, click them out when you notice, then use the row's ⋯ (**Move Up**, **Move Down**, or **Move to Place**) to put them where they belong. Two riders out at one bell: click both out, then **Tie with the Rider Below** on the upper row or **Tie with the Rider Above** on the lower. Either records the one tie. **Undo** takes a move back.
 
@@ -68,7 +68,7 @@ The rulebook's default values are 5-3-2-1 per sprint, double points for the last
 
 Riders level on points are split by their places in the final sprint (2M2(g)); if neither placed there, they share the place. A lap is points only: a rider a lap down can win on sprints. A lap gained at a sprint scores both (2M3(d)).
 
-A rider whose free laps after a mishap run into the last kilometer can't return (2M7). They're placed on the points and laps they held (2M8), and the sheet shows "Out of the finish (mishap)" beside the name. The [Madison](#madison-usac-2n) (2N6) and the [Tempo Race](#tempo-race-usac-2p) work the same way.
+A rider whose free laps after a mishap run into the last kilometer can't return (2M7). They're placed on the points and laps they held (2M8), and the sheet shows "Out of the finish (mishap)" under the name. The [Madison](#madison-usac-2n) (2N6) and the [Tempo Race](#tempo-race-usac-2p) work the same way.
 
 If the officials stop the race after 80 percent of its distance and let the results stand (2M6), use the ⋯ at the right end of the task line and pick **End Race Now, Result As-Is...**. The ⋯ is there from the start of a Points Race, Madison, or Tempo Race, and its items are grayed until a sprint is recorded (pointing at a grayed item says why). It asks before it records. The race is then complete on the sprints ridden: no sprint doubles, there is no final sprint, and riders level on points share the place. The task line and the results sheet say "Race ended after 2 sprints" (see [The PDF](results.md#the-pdf)). **Undo** reopens the race where it was.
 
@@ -78,7 +78,7 @@ If fewer riders are placed than the sprint calls for, **Record Sprint** asks bef
 
 The officials may take points or a lap from a rider (8D5(b): "loss of points or laps illegally gained"; 8D5(c) and 2N3(e) for a Madison relay). The card's ⋯ offers both, and so does the row's ⋯ once the result is complete. **Points Penalty...** shows the rider's penalty in points and sets it to the number the officials now say. A second ruling, a reversal, or a penalty on the wrong rider is one dialog each: type the new number, or 0 to take the penalty off.
 
-**Lap Not Counted** takes back a lap gained as if it was never recorded, and its points with it. It is offered while a lap gained stands. The sheet shows "Lap not counted" beside the rider's name, so the ruling stays visible after the lap is gone.
+**Lap Not Counted** takes back a lap gained as if it was never recorded, and its points with it. It is offered while a lap gained stands. The sheet shows "Lap not counted" under the rider's name, so the ruling stays visible after the lap is gone.
 
 A penalty shows in a Penalty column in the standings.
 

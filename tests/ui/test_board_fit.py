@@ -207,6 +207,47 @@ def test_long_standings_turn_pages_instead_of_shrinking(qtbot, drawn):
     assert w._pager.isActive()
 
 
+def test_rows_off_the_track_keep_the_page_sized_and_the_pages_balanced(qtbot, drawn):
+    """A withdrawn rider's row is away while the race runs and back on the
+    result: the rows drawn keep the size the whole table gives them, share
+    the pages evenly, never one rider alone on a last page, and the page
+    dots keep their room while the whole table needs two pages."""
+    from dataclasses import replace
+
+    whole = points(riders=30)
+    away = replace(whole, rows=whole.rows[:16], off_track=whole.rows[16:])
+    w = render(qtbot, "sprint_points", whole)
+    page = w.pages["sprint_points"]
+    assert page.paging(whole) == (2, 15, 15, True)
+    sizes = {px for s, _, px, _ in drawn if s == "1000"}
+    drawn.clear()
+    w = render(qtbot, "sprint_points", away)
+    page = w.pages["sprint_points"]
+    assert page.paging(away) == (2, 8, 15, True)
+    seen = strings(drawn)
+    assert "1007" in seen and "1008" not in seen and "1016" not in seen
+    assert {px for s, _, px, _ in drawn if s == "1000"} == sizes
+    # One page of rows drawn still keeps the dots' room for the result's two.
+    few = replace(whole, rows=whole.rows[:10], off_track=whole.rows[10:])
+    assert page.paging(few) == (1, 10, 15, True)
+    # Nothing away: the paging is the table's own.
+    assert page.paging(points(riders=16)) == (1, 16, 16, False)
+
+
+def test_a_penalty_on_a_row_off_the_track_opens_no_penalty_column(qtbot, drawn):
+    """The PENALTY column stands only while a row drawn carries one: a
+    withdrawn rider's would head a column of nothing."""
+    from dataclasses import replace
+
+    whole = points(riders=10)
+    rows = [*whole.rows[:9], replace(whole.rows[9], penalty=-5)]
+    render(qtbot, "sprint_points", replace(whole, rows=rows[:9], off_track=rows[9:]))
+    assert "PENALTY" not in strings(drawn)
+    drawn.clear()
+    render(qtbot, "sprint_points", replace(whole, rows=rows))
+    assert "PENALTY" in strings(drawn)
+
+
 def test_a_full_field_at_166_m_is_one_page(qtbot, drawn):
     """Sixteen riders, the most a 166 m track may start (USAC 2B7), stand
     on one page with every figure and name at the board's minimum or above."""

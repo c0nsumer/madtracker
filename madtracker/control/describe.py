@@ -5,16 +5,16 @@ same way, so a one-digit slip reads back as the wrong person, which is
 the cheapest way to catch it.
 """
 
-# A status code in words, for beside a name: the review's tip, the
-# board's note and the sheet, so the three say it the same way.
+# A status code in words, for a placed row's note: the result list's
+# tag and the sheet, so the two say it the same way.
 STATUS_WORDS = {"DNF": "Did not finish", "DNS": "Did not start", "DQ": "Disqualified"}
 # A rider a mishap kept out of the finish, placed on points (USAC 2M7(b),
-# 2M8(a)): the card's action, the log's line and the note beside the
-# name on the result, the board and the sheet, all the same words.
+# 2M8(a)): the card's action, the log's line and the note with the
+# name on the result list and the sheet, all the same words.
 OUT_OF_FINISH = "Out of the finish (mishap)"
 # A rider withdrawn, or classified as though withdrawn, and placed by the
-# moment of it (USAC 2O3(e), 1M6(d)): the note beside the name on the
-# result, the board and the sheet.
+# moment of it (USAC 2O3(e), 1M6(d)): the note with the name on the
+# result list and the sheet.
 WITHDRAWN = "Withdrawn"
 
 
@@ -38,7 +38,7 @@ def race_shortened_note(from_count: int | None, to_count: int) -> str:
 
 
 def lap_not_counted_note(n: int) -> str:
-    """The ruling beside a rider's name on the sheet and in the table's tip:
+    """The ruling with a rider's name on the sheet and in the result list's tag:
     "Lap not counted", or "2 laps not counted"."""
     if n <= 0:
         return ""
