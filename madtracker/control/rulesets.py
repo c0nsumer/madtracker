@@ -117,13 +117,15 @@ FAMILIES: dict[str, tuple[str, ...]] = {
     "elimination": ("elimination",),
     "win_and_out": ("win_and_out",),
 }
+# In the editor's tab order: the families with values first, so the editor
+# opens on values, and the family that has only names last.
 FAMILY_LABELS = {
-    "placings": "Scratch Race and Others",
     "points": "Points Race",
     "madison": "Madison",
     "tempo": "Tempo Race",
     "elimination": "Elimination",
     "win_and_out": "Win-and-Out (Club)",
+    "placings": "Scratch Race and Others",
 }
 _FAMILY_OF = {key: family for family, keys in FAMILIES.items() for key in keys}
 assert set(_FAMILY_OF) == set(FORMAT_ENGINE), "every format key needs a ruleset family"

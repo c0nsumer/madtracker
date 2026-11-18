@@ -41,12 +41,12 @@ def test_the_editor_has_a_tab_per_family_with_its_values_and_its_formats(qtbot, 
     ed = RulesetEditor(store, house.doc, house.ruleset_id)
     qtbot.addWidget(ed)
     assert [ed.tabs.tabText(i) for i in range(ed.tabs.count())] == [
-        "Scratch Race and Others",
         "Points Race",
         "Madison",
         "Tempo Race",
         "Elimination",
         "Win-and-Out (Club)",
+        "Scratch Race and Others",
     ]
     assert set(FIELD_LABELS) == set(rulesets.PAGE_KEYS)
     # Each value's widget sits on its family's tab, laps included: a lap is
