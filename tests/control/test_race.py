@@ -3566,3 +3566,27 @@ def test_a_rider_on_two_teams_is_refused_and_the_teams_stay(store, make_race, id
         with pytest.raises(DuplicateEntryError):
             store.save_race(event_id, race_id, {}, field, teams)
         assert [(t.team_id, t.name, t.members) for t in store.teams(race_id)] == before
+
+
+@pytest.mark.parametrize("fmt", ["match_sprint", "keirin"])
+def test_a_sprint_or_keirin_final_offers_no_tie(store, make_race, ids, fmt):
+    """USAC 2F12 reruns a dead heat in a Sprint Final with the riders who
+    made it, and 2H2 gives the Keirin the sprint's rules, so the scorer
+    enters the rerun's order: no row, staged or in the result, offers a
+    tie, and a tie asked for anyway is refused."""
+    s = LiveRace(store, make_race(fmt, [7, 12, 33, 9], R.placings_rules(), name="Final"))
+    assert not s.ties_offered
+    clicks(s, ids, 7, 12)
+    staged = {r.entrant_id: [k for k, _ in r.actions] for r in s.screen().rows}
+    assert not {"tie_above", "tie_below"} & set(staged[ids[7]] + staged[ids[12]])
+    assert s.tie_above(ids[12]) == rc.Outcome(
+        False, "A dead heat in this race is rerun (USAC 2F12)."
+    )
+    clicks(s, ids, 33, 9)
+    assert s.state == "provisional"
+    for bib in (7, 12, 33, 9):
+        assert not {"tie_above", "tie_below"} & {k for k, _ in s.review_actions(ids[bib])}
+    # A Scratch Race keeps its ties.
+    c = chase(store, make_race)
+    clicks(c, ids, 7, 12, 33, 9)
+    assert "tie_above" in [k for k, _ in c.review_actions(ids[12])]

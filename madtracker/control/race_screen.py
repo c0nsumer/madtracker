@@ -457,9 +457,9 @@ def _place_rows(
                 # stay among the places clicked from the front.
                 actions = race._moves(groups, i)
                 actions += race._long_moves(groups, i, eid, first - 1)
-                if i > 0 and eid == group[0]:
+                if race.ties_offered and i > 0 and eid == group[0]:
                     actions.append(("tie_above", REVIEW_ACTIONS["tie_above"]))
-                if eid == group[-1] and i + 1 < len(groups):
+                if race.ties_offered and eid == group[-1] and i + 1 < len(groups):
                     actions.append(("tie_below", REVIEW_ACTIONS["tie_below"]))
                 actions += _staged_row_own(race, eid, st, live, task)
                 row = ResultRow(

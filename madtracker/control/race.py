@@ -78,7 +78,7 @@ from madtracker.control.describe import (
     race_shortened_note,
     who,
 )
-from madtracker.control.formats import NO_LAP_FORMATS, TEAM_FORMATS
+from madtracker.control.formats import NO_LAP_FORMATS, NO_TIE_FORMATS, TEAM_FORMATS
 from madtracker.control.race_screen import Card, ResultRow, Screen
 from madtracker.control.race_words import (
     ACTION_CODES,
@@ -1351,12 +1351,19 @@ class LiveRace:
             self._staged = current
         return place
 
+    @property
+    def ties_offered(self) -> bool:
+        """Whether a place can be shared: not where the book reruns a dead heat."""
+        return self.format_key not in NO_TIE_FORMATS
+
     @_store_errors
     def tie_above(self, entrant_id: int) -> Outcome:
         """Tie a staged rider with the one placed above them."""
         self._refresh_race()
         if self.race.state == "final":
             return Outcome(False, FINAL_TEXT)
+        if not self.ties_offered:
+            return Outcome(False, "A dead heat in this race is rerun (USAC 2F12).")
         st = self.standings()
         groups = self.staged(st)
         index = next((i for i, g in enumerate(groups) if entrant_id in g), None)
@@ -2270,12 +2277,13 @@ class LiveRace:
             # of a tied group can join the place above, the rest are tied
             # with the row above already. An out can share a place only
             # with riders the bell put out, not with one who did not finish.
-            if kind in ("finish", "bell") and index > 0 and groups[index][0] == entrant_id:
+            ties = kind in ("finish", "bell") and self.ties_offered
+            if ties and index > 0 and groups[index][0] == entrant_id:
                 if kind != "bell" or self._bell_shown()[index - 1].movable:
                     keys.append(("tie_above", REVIEW_ACTIONS["tie_above"]))
             # The same tie from the row above: offered where the rider
             # leading the place below could tie up to this one.
-            if kind in ("finish", "bell") and groups[index][-1] == entrant_id:
+            if ties and groups[index][-1] == entrant_id:
                 below = self._below(groups, index)
                 if (
                     below is not None

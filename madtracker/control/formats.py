@@ -28,6 +28,10 @@ TEAM_SIZE = {"madison": 2}
 # final and a match sprint final rank no one by laps, so the rider's
 # menu offers no laps and the race is saved with laps off the ranking.
 NO_LAP_FORMATS = frozenset({"chariot", "keirin", "match_sprint"})
+# A dead heat in a Sprint Final is rerun with only the riders who made it
+# (USAC 2F12), and the Keirin takes the sprint's rules (2H2), so these
+# take the rerun's order and offer no tie.
+NO_TIE_FORMATS = frozenset({"keirin", "match_sprint"})
 
 # The usual jersey colors, in the order teams usually get them, and the
 # one hex each is drawn in on the screen, the board and the PDF.

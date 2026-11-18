@@ -58,7 +58,7 @@ If a rider went out and nobody clicked, click them out when you notice, then use
 
 ## Sprint Final (USAC 2F) and Keirin Final (USAC 2H)
 
-One heat, placed by the order across the line. (Tournaments and bracket scoring are not supported.)
+One heat, placed by the order across the line. (Tournaments and bracket scoring are not supported.) A dead heat is rerun with the riders who made it (2F12, 2H2), so these two races offer no tie: enter the order after the rerun.
 
 ## Points Race (USAC 2M)
 
