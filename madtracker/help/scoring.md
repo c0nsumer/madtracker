@@ -115,6 +115,6 @@ The riders still in after the last place is called are placed behind the lap win
 - Forward, the Danish race: the first bell lap wins 1st, the next 2nd, and so on.
 - Reverse, the Belgian race: the first bell lap wins the last of the places, and the last bell lap decides 1st.
 
-The officials name one rider per bell lap. A dead heat they declare shares the place and skips the next one, as in any other finish (1M6(a)): the next bell lap is for the next open place, so the race rings one bell fewer, and a dead heat for 1st is re-ridden (1M4(b)). A lap winner later marked Did Not Finish or Disqualified gives up the place, and the later places close up.
+The officials name one rider per bell lap. A lap winner who is disqualified gives up the place, and the later places close up. In a reverse race, each place shown counts down from the race's **Places**. If fewer riders finish than the race has places, the lap winners move up to close the gap when the finish goes in.
 
 A wrong lap winner is fixed from the result's ⋯. **Move Up** and **Move Down** swap the winners of two laps, and **Disqualify** gives up the place.
