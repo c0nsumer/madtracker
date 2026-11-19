@@ -13,6 +13,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402 (after the platform is set)
 
+from madtracker.app import cache_board_glyphs  # noqa: E402
+
+# The board's large glyphs are cached as the app caches them, before the
+# session's QApplication draws any text.
+cache_board_glyphs()
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _app_look(qapp):

@@ -13,7 +13,6 @@ from madtracker.board.payloads import (
     Header,
     Placing,
     PreRace,
-    SprintResult,
     StandingRow,
     Standings,
 )
@@ -60,7 +59,6 @@ def pre_race() -> PreRace:
         header=Header(
             title="6 Mile Points",
             group="Group B",
-            detail="Points Race",
             status="Start list",
         ),
         roster=[Entry(bibs=[b], names=[n]) for b, n in GROUP_B],
@@ -74,7 +72,6 @@ def elimination() -> Elimination:
         header=Header(
             title="Elimination",
             group="Group A",
-            detail="Elimination",
             status=f"{len(out_order)} of {len(GROUP_A)} out",
         ),
         remaining=remaining,
@@ -109,7 +106,7 @@ def _rows(entries, sprints_by_key, laps_by_key, lap_value, sprint_count, key):
     return _rank(rows)
 
 
-def sprint_points(with_result: bool = False) -> Standings:
+def sprint_points() -> Standings:
     # After Sprint 2 of 3; 10-7-5-3-2-1 per sprint.
     s = {
         "12": [10, 7],
@@ -126,28 +123,15 @@ def sprint_points(with_result: bool = False) -> Standings:
     laps = {"19": 1, "51": -1}
     entries = [Entry(bibs=[b], names=[n]) for b, n in GROUP_B]
     rows = _rows(entries, s, laps, 10, 3, key=lambda e: e.bibs[0])
-    result = None
-    if with_result:
-        order = ["7", "12", "4", "19", "9", "38"]
-        result = SprintResult(
-            number=2,
-            of=3,
-            placings=[
-                (i + 1, _rider(b, GROUP_B), pts)
-                for i, (b, pts) in enumerate(zip(order, [10, 7, 5, 3, 2, 1], strict=True))
-            ],
-        )
     return Standings(
         header=Header(
             title="6 Mile Points",
             group="Group B",
-            detail="Points Race",
             status="After Sprint 2 of 3",
         ),
         sprint_count=3,
         rows=rows,
         current_sprint=2,
-        sprint_result=result,
     )
 
 
@@ -166,7 +150,6 @@ def finish() -> Finish:
         header=Header(
             title="2 Mile Chase",
             group="Group B",
-            detail="12 laps",
             status="Final results",
         ),
         placings=[Placing(i + 1, _rider(b, GROUP_B)) for i, b in enumerate(order)],

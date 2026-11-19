@@ -7,7 +7,6 @@ it goes on (``madtracker.displays``) and reacts to hot-plug signals; the
 scoring side decides what to show and calls ``set_layout``.
 """
 
-import dataclasses
 import sys
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
@@ -17,8 +16,10 @@ from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 from madtracker import APP_NAME
 from madtracker.board import theme as t
 from madtracker.board import wordmark
+from madtracker.board.motion import Clock, default_clock
 from madtracker.board.pages import PAGES, EliminationPage, Page, lap_chip_height
 from madtracker.board.payloads import LAYOUT_PAYLOADS, Header, coerce
+from madtracker.board.texture import Adjust, make_texture
 from madtracker.displays import ScreenInfo, friendly_label
 
 # The board is designed on a 1080-line canvas; every size is a multiple
@@ -30,13 +31,6 @@ TOP_BAR_HEIGHT = 140
 # follows the image's aspect up to this width instead of squeezing it
 # into a square-ish slot where it would print at a third of its height.
 LOGO_MAX_W = 620
-
-# How long a sprint's result card stays up, whatever its length: one
-# time the stands and the announcer can count on, rather than three
-# seconds a place, which would only ever vary for a Tempo Race. The
-# next entry takes it down sooner, so a sprint every lap
-# never waits on it.
-SPRINT_CARD_MS = 10000
 
 
 # The board as an ordinary window on the laptop, for setup and testing:
@@ -204,25 +198,14 @@ class TopBar(QWidget):
         chip_h = lap_chip_height(u)
         gap = 24 * u
         chip_w = t.chip_width(chip_h, h.group) + gap if h.group else 0.0
-        # With no format line under it (an unnamed race, whose title is the
-        # format), the title sits in the middle of the bar, not over a gap.
-        title_y = 12 * u if h.detail else (self.height() - 72 * u) / 2
+        # The title sits in the middle of the bar. A race page names no
+        # format under it: races are named, and the stands know the kind.
+        title_y = (self.height() - 72 * u) / 2
         title_line = QRectF(x, title_y, max(0.0, title_w - chip_w), 72 * u)
         used = t.text(p, title_line, h.title, t.font(58 * u, t.HEAVY), t.TEXT, shrink=True)
         if h.group:
             cx = x + (used + gap if h.title else 0.0)
             t.accent_chip(p, cx, title_line.center().y() - chip_h / 2, chip_h, h.group)
-        if h.detail:
-            # The kind of race, muted under the title: the stands know a
-            # madison from a points race without reading the rules.
-            t.text(
-                p,
-                QRectF(x, 86 * u, title_w, 40 * u),
-                h.detail,
-                t.font(t.MIN_PX * u, t.SEMI),
-                t.MUTED,
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            )
 
         right = QRectF(self.width() - m - status_w, 0, status_w, self.height())
         align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -340,13 +323,12 @@ class BoardCanvas(QWidget):
     these, fed the same calls, so the preview cannot drift from what the
     audience sees. Public surface: ``set_layout``, ``set_live``,
     ``set_logo``, ``set_show_bibs``, ``set_event_name``, ``set_venue_name``,
-    ``layout_name`` and ``page_kind``.
+    ``forget_races``, ``layout_name`` and ``page_kind``.
     """
 
     # How long the loud treatments last before the board settles. These are
     # the only timers on the board; everything else redraws on new data.
     ELIMINATION_HIGHLIGHT_MS = 5000
-    SPRINT_OVERLAY_MS = SPRINT_CARD_MS
     PAGE_MS = 6000
 
     def __init__(
@@ -368,6 +350,8 @@ class BoardCanvas(QWidget):
             page = cls(self.stack)
             self.pages[name] = page
             self.stack.addWidget(page)
+        self.clock: Clock | None = None
+        self.set_clock(default_clock())
 
         # The live board (top bar over a layout) and the logo page are two
         # faces of one window, so flipping between them never moves or
@@ -392,10 +376,13 @@ class BoardCanvas(QWidget):
         # Per race, the riders out in order as the elimination page last
         # showed them, so a payload says whether a rider was just put out.
         self._out_seen: dict[int, tuple[tuple[str, ...], ...]] = {}
+        # Per race, the payload last shown, so a page can play what changed
+        # from it (a Madison's score changes); and the race on screen, since
+        # a race the board turns to from another plays nothing.
+        self._shown: dict[int, object] = {}
+        self._on_screen: int | None = None
         self._highlight = QTimer(self, singleShot=True, interval=self.ELIMINATION_HIGHLIGHT_MS)
         self._highlight.timeout.connect(self._settle_elimination)
-        self._overlay = QTimer(self, singleShot=True, interval=self.SPRINT_OVERLAY_MS)
-        self._overlay.timeout.connect(self._clear_overlay)
         # A standings table longer than a page turns its pages on its own.
         self._pager = QTimer(self, interval=self.PAGE_MS)
         self._pager.timeout.connect(self._turn_page)
@@ -403,6 +390,12 @@ class BoardCanvas(QWidget):
         self._apply_scale()
 
     # Content -----------------------------------------------------------
+
+    def set_clock(self, clock: Clock | None) -> None:
+        """Sets the time source the pages animate by; None draws them at rest."""
+        self.clock = clock
+        for page in self.pages.values():
+            page.clock = clock
 
     def layout_name(self) -> str:
         return self._layout_name
@@ -430,11 +423,6 @@ class BoardCanvas(QWidget):
             self._out_seen[payload.header.race_id] = ()
             self._highlight.stop()
             self.pages["elimination"].fresh = False
-        result = getattr(payload, "sprint_result", None)
-        if result is not None:
-            self._overlay.start(self.SPRINT_OVERLAY_MS)
-        else:
-            self._overlay.stop()
         if payload.header != self.top_bar.header:
             # A new race, or a new sprint, starts a long table on its first
             # page (StandingsPage.set_data), so the page clock starts over
@@ -444,11 +432,34 @@ class BoardCanvas(QWidget):
             # the other, and the two would show different pages until the
             # next turn.
             self._pager.start()
-        page.set_data(payload)
+        race_id = payload.header.race_id
+        prev = self._shown.get(race_id) if race_id == self._on_screen else None
+        if name != self._layout_name:
+            outgoing = self.pages[self._layout_name]
+            outgoing.stop_motion()
+            # The page turned to may turn in from what is on screen.
+            page.outgoing = outgoing
+        try:
+            page.set_data(payload, prev)
+        finally:
+            page.outgoing = None
+        self._shown[race_id] = payload
+        self._on_screen = race_id
         self.top_bar.header = payload.header
         self.top_bar.update()
         self.stack.setCurrentWidget(page)
         self._layout_name = name
+
+    def forget_races(self) -> None:
+        """Drop what the board has shown per race, as another data file opens.
+
+        Race ids are the file's own, so a race in the next file may carry
+        the id of one shown from this one.
+        """
+        self._shown.clear()
+        self._on_screen = None
+        for page in self.pages.values():
+            page.stop_motion()
 
     def set_venue_name(self, name: str) -> None:
         """The venue's name; the board draws the logo, or the app's wordmark, in its place."""
@@ -471,6 +482,16 @@ class BoardCanvas(QWidget):
             self.top_bar.logo = None
         self.top_bar.update()
         self.logo_page.update()
+
+    def set_texture(self, pattern: str, svg: bytes | None, adjust: Adjust) -> None:
+        """The chosen pattern, the venue's SVG, and the adjustments, for every page.
+
+        One Texture is shared, so the pages' caches are shared too.
+        """
+        shared = make_texture(pattern, svg, adjust)
+        for page in self.pages.values():
+            page.texture = shared
+            page.update()
 
     def set_show_bibs(self, show: bool) -> None:
         """Bibs and names, or names only: the two-way form of ``set_rider_label``."""
@@ -529,18 +550,12 @@ class BoardCanvas(QWidget):
 
     def _turn_page(self) -> None:
         page = self.pages[self._layout_name]
+        # A Madison table with a clock turns its pages with its rotation,
+        # after each page's names and color views.
+        if getattr(page, "rotates", lambda: False)():
+            return
         if page.data is not None and hasattr(page, "advance"):
             page.advance()
-
-    def _clear_overlay(self) -> None:
-        # The TV and the preview are handed one payload object. Clearing
-        # the card on it in place would let whichever timer fired first
-        # clear it for both, and the other would find nothing to clear and
-        # never repaint, so each canvas takes a copy without the card.
-        page = self.pages[self._layout_name]
-        if getattr(page.data, "sprint_result", None) is not None:
-            page.data = dataclasses.replace(page.data, sprint_result=None)
-        page.update()
 
     def _apply_scale(self) -> None:
         u = self.height() / DESIGN_HEIGHT

@@ -1,4 +1,4 @@
-"""Venue settings, the Settings dialog, the logo on the board, and overlay pacing."""
+"""Venue settings, the Settings dialog, the logo on the board, and page pacing."""
 
 import pytest
 
@@ -23,40 +23,6 @@ def board(qtbot):
     qtbot.addWidget(w)
     w.resize(1920, 1080)
     return w
-
-
-def test_every_sprint_card_shows_for_ten_seconds_then_the_standings_return(board, qtbot):
-    """One time everyone can count on, whatever the card's length."""
-    for places in (1, 4):
-        data = sample.sprint_points(with_result=True)
-        data.sprint_result.placings = data.sprint_result.placings[:places]
-        board.set_layout("sprint_points", data)
-        assert board._overlay.isActive() and board._overlay.interval() == 10000
-    board._overlay.setInterval(10)
-    board._overlay.start()
-    qtbot.waitUntil(lambda: board.pages["sprint_points"].data.sprint_result is None, timeout=1000)
-    board.set_layout("sprint_points", sample.sprint_points())
-    assert not board._overlay.isActive()
-
-
-def test_the_tv_and_the_preview_each_take_the_card_down(board, qtbot, monkeypatch):
-    """The preview's timer clears its own copy of the card, never the TV's."""
-    from madtracker.board.window import BoardCanvas
-
-    preview = BoardCanvas()
-    qtbot.addWidget(preview)
-    data = sample.sprint_points(with_result=True)
-    for canvas in (preview, board):
-        canvas.set_layout("sprint_points", data)
-    painted = []
-    page = board.pages["sprint_points"]
-    monkeypatch.setattr(page, "update", lambda: painted.append(page.data.sprint_result))
-    # The preview's timer fires first; the TV's card must still be its own.
-    preview._clear_overlay()
-    assert preview.pages["sprint_points"].data.sprint_result is None
-    assert data.sprint_result is not None and page.data.sprint_result is not None
-    board._clear_overlay()
-    assert page.data.sprint_result is None and painted == [None], "the TV repaints without it"
 
 
 def test_the_tv_and_the_preview_turn_a_new_races_pages_together(board, qtbot):
@@ -241,7 +207,8 @@ def test_settings_dialog_previews_and_saves(store, qtbot, tmp_path):
     assert d.preview.pixmap() is not None and not d.preview.pixmap().isNull()
     # The scoreboard display is chosen on the Scoreboard menu only.
     # Its label says what it is; a tooltip repeating it would say nothing.
-    assert [c.toolTip() for c in d.findChildren(QComboBox)] == [""]
+    # The texture row carries the approved row tooltip, so it is excluded.
+    assert [c.toolTip() for c in d.findChildren(QComboBox) if c is not d.texture_combo] == [""]
     # The accent is one of the palette's swatches, named, never a hex code.
     assert [b.toolTip() for b in d.accent_swatches.values()] == [n for n, _h in venue.ACCENTS]
     assert d.accent == venue.DEFAULT_ACCENT and d.accent_name.text() == "Yellow"
@@ -595,3 +562,311 @@ def test_settings_save_refuses_a_folder_too_long_to_look_up(store, qtbot, tmp_pa
     d.backup.setText(str(tmp_path))
     d.exports.setText(str(tmp_path / ("y" * 5000)))
     assert not d.save() and d.error.text() == "The exports folder does not exist."
+
+
+# An invented shape: the venue's own mark never enters the repository.
+CHEVRON = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+)
+
+
+def _settings(store, tmp_path, qtbot):
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(store, tmp_path)
+    qtbot.addWidget(d)
+    return d
+
+
+REFUSAL = "That file has no shape to tile. Choose an SVG file with a filled shape."
+
+
+def _items(d):
+    c = d.texture_combo
+    return [c.itemText(i) for i in range(c.count())]
+
+
+def _empty_svg(tmp_path):
+    bad = tmp_path / "empty.svg"
+    bad.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    return bad
+
+
+def test_the_dropdown_lists_the_patterns_then_add_from_file(store, qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    d = _settings(store, tmp_path, qtbot)
+    assert d.texture_label.text() == "Scoreboard texture"
+    tip = "The pattern tiled faintly across the scoreboard's rows."
+    assert d.texture_label.toolTip() == tip and d.texture_combo.toolTip() == tip
+    assert _items(d) == [
+        "Lightning Bolts",
+        "Slant Strokes",
+        "Chevrons",
+        "Dots",
+        "None",
+        "",
+        "Add from File...",
+    ]
+    assert d.adjust_button.text() == "Adjust..." and d.adjust_button.isEnabled()
+    seen = {}
+
+    def fake(parent, title, start, flt):
+        seen["args"] = (title, flt)
+        return "", ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", fake)
+    d.texture_combo.setCurrentIndex(d.texture_combo.count() - 1)
+    qtbot.waitUntil(lambda: "args" in seen)
+    assert seen["args"] == ("Choose Scoreboard Texture", "SVG Images (*.svg)")
+    # Cancelling the file dialog returns to the previous item, with no red line.
+    assert d.texture_combo.currentData() == "bolts" and d.error.text() == ""
+
+
+def test_a_wheel_over_the_texture_list_changes_nothing(store, qtbot, tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
+    opened = []
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: opened.append(1) or ("", ""))
+    d = _settings(store, tmp_path, qtbot)
+    combo = d.texture_combo
+    combo.setCurrentIndex(combo.count() - 3)
+    before = combo.currentIndex()
+    for dy in (-120, 120, 120, 120, 120):
+        event = QWheelEvent(
+            QPointF(5, 5),
+            QPointF(5, 5),
+            QPoint(0, 0),
+            QPoint(0, dy),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(combo, event)
+    QApplication.processEvents()
+    assert combo.currentIndex() == before and opened == []
+
+
+def test_bolts_is_the_default_for_a_new_file(store, qtbot, tmp_path):
+    from madtracker.board.texture import Adjust
+
+    assert venue.texture_pattern(store) == "bolts" and venue.texture_adjust(store) == Adjust()
+    d = _settings(store, tmp_path, qtbot)
+    assert d.pending_pattern == "bolts" and d.texture_combo.currentText() == "Lightning Bolts"
+    assert d.pending_adjust == Adjust() and d.texture_data is None
+
+
+def test_add_from_file_adds_and_selects_the_venue_shape(store, qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    path = tmp_path / "bolt.svg"
+    path.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
+    d.texture_combo.setCurrentIndex(d.texture_combo.count() - 1)
+    qtbot.waitUntil(lambda: d.texture_file == "bolt.svg")
+    assert _items(d) == [
+        "Lightning Bolts",
+        "Slant Strokes",
+        "Chevrons",
+        "Dots",
+        "None",
+        "bolt.svg",
+        "",
+        "Add from File...",
+    ]
+    assert d.texture_combo.currentText() == "bolt.svg" and d.pending_pattern == "venue"
+    assert d.texture_file == "bolt.svg" and d.error.text() == ""
+    # Nothing is stored until Save.
+    assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
+    assert d.save()
+    kept = venue.texture_setting(store)
+    assert kept is not None and b"<path" in kept
+    assert venue.texture_name(store) == "bolt.svg" and venue.texture_pattern(store) == "venue"
+    again = _settings(store, tmp_path, qtbot)
+    assert again.texture_combo.currentText() == "bolt.svg"
+
+
+def test_a_refused_file_returns_to_the_previous_pattern(store, qtbot, tmp_path):
+    d = _settings(store, tmp_path, qtbot)
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("dots"))
+    junk = tmp_path / "junk.svg"
+    junk.write_bytes(b"not xml")
+    for bad in (_empty_svg(tmp_path), junk, tmp_path / "missing.svg"):
+        assert not d.choose_texture(bad)
+        assert d.error.text() == REFUSAL
+        assert d.texture_combo.currentData() == "dots" and d.pending_pattern == "dots"
+    assert d.texture_data is None
+    assert d.save()
+    assert venue.texture_setting(store) is None and venue.texture_pattern(store) == "dots"
+
+
+def test_a_refused_file_keeps_the_venue_shape_already_chosen(store, qtbot, tmp_path):
+    good = tmp_path / "bolt.svg"
+    good.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    assert d.choose_texture(good)
+    kept = d.texture_data
+    assert not d.choose_texture(_empty_svg(tmp_path))
+    assert d.texture_combo.currentText() == "bolt.svg" and d.texture_data == kept
+    assert d.save()
+    assert venue.texture_name(store) == "bolt.svg" and venue.texture_setting(store) == kept
+
+
+def test_none_draws_nothing_and_keeps_the_adjustments(store, qtbot, tmp_path, board):
+    from madtracker.board.texture import Adjust
+
+    chosen = Adjust(size=150, rotation=20, spacing=80, opacity=60, tone=-30)
+    venue.save(store, name="R", backup="", texture_pattern="slant", texture_adjust=chosen)
+    d = _settings(store, tmp_path, qtbot)
+    assert d.pending_adjust == chosen and d.adjust_button.isEnabled()
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
+    assert d.pending_pattern == "none" and not d.adjust_button.isEnabled()
+    assert d.pending_adjust == chosen
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("dots"))
+    assert d.adjust_button.isEnabled() and d.pending_adjust == chosen
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
+    assert d.save()
+    assert venue.texture_pattern(store) == "none" and venue.texture_adjust(store) == chosen
+    board.set_texture("none", None, chosen)
+    assert all(p.texture is None for p in board.pages.values())
+    board.set_texture("slant", None, chosen)
+    assert all(p.texture is not None and p.texture.adjust == chosen for p in board.pages.values())
+
+
+def test_choosing_a_pattern_changes_nothing_until_save(store, qtbot, tmp_path):
+    d = _settings(store, tmp_path, qtbot)
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("chevrons"))
+    d.reject()
+    assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
+    assert venue.texture_pattern(store) == "bolts"
+
+
+def test_the_pattern_and_adjustments_travel_into_a_new_file(store, tmp_path):
+    from madtracker.board.texture import Adjust
+    from madtracker.control.copying import CopyChoice, copy_venue
+
+    keys = (
+        venue.TEXTURE_PATTERN_KEY,
+        venue.TEXTURE_SIZE_KEY,
+        venue.TEXTURE_ROTATION_KEY,
+        venue.TEXTURE_SPACING_KEY,
+        venue.TEXTURE_OPACITY_KEY,
+        venue.TEXTURE_TONE_KEY,
+    )
+    assert keys[0] == "board/texture_pattern" and keys[-1] == "board/texture_tone"
+    assert all(k in venue.SETTING_KEYS for k in keys)
+    chosen = Adjust(size=120, rotation=-10, spacing=90, opacity=150, tone=40)
+    venue.save(store, name="R", backup="", texture_pattern="chevrons", texture_adjust=chosen)
+    with Store.open(tmp_path / "new.sqlite") as new:
+        copy_venue(store, new, CopyChoice())
+        assert venue.texture_pattern(new) == "chevrons"
+        assert venue.texture_adjust(new) == chosen
+
+
+def test_saving_other_settings_keeps_the_pattern_and_adjustments(store):
+    from madtracker.board.texture import Adjust
+
+    chosen = Adjust(size=80)
+    venue.save(store, name="R", backup="", texture_pattern="dots", texture_adjust=chosen)
+    venue.save(store, name="Riverside", backup="")
+    assert venue.texture_pattern(store) == "dots" and venue.texture_adjust(store) == chosen
+
+
+def test_bad_stored_adjustments_clamp_or_default(store):
+    from madtracker.board.texture import Adjust
+
+    store.set_setting(venue.TEXTURE_SIZE_KEY, 5000)
+    store.set_setting(venue.TEXTURE_ROTATION_KEY, -999)
+    store.set_setting(venue.TEXTURE_SPACING_KEY, "wide")
+    store.set_setting(venue.TEXTURE_OPACITY_KEY, True)
+    store.set_setting(venue.TEXTURE_TONE_KEY, 12.6)
+    assert venue.texture_adjust(store) == Adjust(size=200, rotation=-45, tone=13)
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "swirls")
+    assert venue.texture_pattern(store) == "bolts"
+    # A venue choice with no stored shape is the bolts.
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "venue")
+    assert venue.texture_pattern(store) == "bolts"
+    with pytest.raises(ValueError):
+        venue.save(store, name="R", backup="", texture_pattern="swirls")
+
+
+def test_a_stored_shape_with_no_pattern_opens_on_bolts_and_lists_it(store, qtbot, tmp_path):
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="old.svg", keep_texture=False
+    )
+    assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
+    assert venue.texture_pattern(store) == "bolts"
+    d = _settings(store, tmp_path, qtbot)
+    assert d.texture_combo.currentText() == "Lightning Bolts"
+    assert "old.svg" in _items(d)
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("venue"))
+    assert d.save() and venue.texture_pattern(store) == "venue"
+
+
+def test_the_texture_travels_with_the_file_and_into_a_new_file(store, tmp_path):
+    from madtracker.control.copying import CopyChoice, copy_venue
+
+    assert venue.TEXTURE_KEY == "board/texture_svg"
+    assert venue.TEXTURE_KEY in venue.SETTING_KEYS and venue.TEXTURE_NAME_KEY in venue.SETTING_KEYS
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+    )
+    with Store.open(tmp_path / "new.sqlite") as new:
+        copy_venue(store, new, CopyChoice())
+        assert venue.texture_setting(new) == CHEVRON
+        assert venue.texture_name(new) == "bolt.svg"
+
+
+def test_saving_other_settings_keeps_the_texture(store):
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+    )
+    venue.save(store, name="Riverside", backup="")
+    assert venue.texture_setting(store) == CHEVRON
+    assert venue.texture_name(store) == "bolt.svg"
+
+
+def test_the_board_gives_every_page_the_texture(board):
+    from madtracker.board.texture import Adjust, Texture
+
+    assert all(p.texture.builtin for p in board.pages.values())
+    board.set_texture("venue", CHEVRON, Adjust())
+    shared = {id(p.texture) for p in board.pages.values()}
+    assert len(shared) == 1 and not next(iter(board.pages.values())).texture.builtin
+    board.set_texture("bolts", None, Adjust())
+    assert all(isinstance(p.texture, Texture) and p.texture.builtin for p in board.pages.values())
+
+
+def test_choosing_a_texture_then_cancelling_saves_nothing(store, qtbot, tmp_path):
+    path = tmp_path / "bolt.svg"
+    path.write_bytes(CHEVRON)
+    d = _settings(store, tmp_path, qtbot)
+    assert d.choose_texture(path)
+    d.reject()
+    assert store.get_setting(venue.TEXTURE_KEY) is None
+    assert store.get_setting(venue.TEXTURE_NAME_KEY) is None
+    # A texture already kept stays as it was through a cancelled change.
+    venue.save(
+        store, name="R", backup="", texture=CHEVRON, texture_name="old.svg", keep_texture=False
+    )
+    d = _settings(store, tmp_path, qtbot)
+    d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
+    d.reject()
+    assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == "old.svg"
+    assert venue.texture_pattern(store) == "bolts"
+
+
+def test_a_stored_shape_without_a_name_is_no_venue_shape(store, qtbot, tmp_path):
+    venue.save(store, name="R", backup="", texture=CHEVRON, texture_name="", keep_texture=False)
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "venue")
+    assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == ""
+    assert venue.texture_pattern(store) == "bolts"
+    d = _settings(store, tmp_path, qtbot)
+    assert d.texture_combo.currentText() == "Lightning Bolts"
+    assert d.texture_combo.findData("venue") == -1
+    assert d.save() and venue.texture_setting(store) == CHEVRON

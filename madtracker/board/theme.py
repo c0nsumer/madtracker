@@ -27,13 +27,15 @@ MUTED = QColor("#8f9aab")
 DIM = QColor("#646d7e")
 PLATE = QColor("#f7f7f2")
 PLATE_TEXT = QColor("#0b0d11")
-# A team's total sits on a plate edged in the gray a Black block's ring
-# shows (TEAM_RING over Black), one edge for every outline on the board.
-FIGURE_PLATE_EDGE = QColor("#686a6c")
 # A plate for a rider already out: present but plainly not in the race,
 # its digits still 6:1 against the plate.
 PLATE_OUT = QColor("#262c36")
 PLATE_OUT_TEXT = QColor("#b4bdcb")
+# The board's one slant, as horizontal run per unit of height, leaning as
+# italic type does (the top right of the bottom): the score chip's sides
+# and the Madison rows' swatch and color edges, on the start list and the
+# table, share it, so the chip lands at the angle the rows are cut to.
+SLANT = 0.18
 # The venue's accent (design section 11): the one color for emphasis.
 DEFAULT_ACCENT = "#ffc83d"
 ACCENT = QColor(DEFAULT_ACCENT)
@@ -172,8 +174,15 @@ def text(
     fm = QFontMetricsF(f)
     width = fm.horizontalAdvance(s)
     if shrink and width > rect.width() > 0:
+        least = scaled(f, NAME_FLOOR).pixelSize()
         f = scaled(f, max(NAME_FLOOR, rect.width() / width))
         fm = QFontMetricsF(f)
+        # Hinted advances do not scale in step with the pixel size, so the
+        # scaled line can still be a fraction too wide and lose its last
+        # character to the ellipsis; a pixel at a time brings it inside.
+        while fm.horizontalAdvance(s) > rect.width() and f.pixelSize() > least:
+            f.setPixelSize(f.pixelSize() - 1)
+            fm = QFontMetricsF(f)
     p.setFont(f)
     p.setPen(color)
     shown = fm.elidedText(s, Qt.TextElideMode.ElideRight, rect.width())
@@ -358,20 +367,6 @@ def team_block(
         team_ink(fill),
         Qt.AlignmentFlag.AlignCenter,
     )
-
-
-def figure_plate(p: QPainter, rect: QRectF, block_h: float) -> None:
-    """The plate a team's total sits on inside its block.
-
-    A mid-tone block such as Blue or Red gives its own ink only 4 to
-    4.5:1, so the total, the figure the riders race on, is set dark on a
-    plate that reads the same on every color. The edge is the width of a
-    Black block's ring, so a plate on White or Yellow still has an edge.
-    """
-    p.setPen(QPen(FIGURE_PLATE_EDGE, max(1.0, block_h * 0.03)))
-    p.setBrush(QColor(PLATE))
-    r = rect.height() * 0.14
-    p.drawRoundedRect(rect, r, r)
 
 
 CHIP_TYPE = 0.56

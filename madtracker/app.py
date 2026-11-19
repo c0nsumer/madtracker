@@ -312,6 +312,9 @@ class AppController:
         self.races: list = []
         self.live = None
         self._known_state: dict[int, str] = {}
+        # The log each race's board last drew, so the feed can tell one new
+        # scoring entry from a correction.
+        self._board_actions: dict[int, tuple] = {}
         # A result's backup waiting for its timer; see _run_result_backup.
         self._backup_pending = False
         self._notice: str | None = None
@@ -823,8 +826,12 @@ class AppController:
         # app's wordmark as vectors, sharp on any TV, instead of the PNG.
         data = venue.logo_setting(self.store)
         name = venue.venue_name(self.store, self.event.venue if self.event else "")
+        pattern = venue.texture_pattern(self.store)
+        texture_svg = venue.texture_setting(self.store)
+        adjust = venue.texture_adjust(self.store)
         for b in self.boards:
             b.set_logo_bytes(data)
+            b.set_texture(pattern, texture_svg, adjust)
             b.set_rider_label(venue.rider_label(self.store))
             b.set_accent(venue.accent(self.store))
             b.set_venue_name(name)
@@ -1501,6 +1508,9 @@ class AppController:
         self.races = []
         self.live = None
         self._known_state = {}
+        self._board_actions = {}
+        for b in self.boards:
+            b.forget_races()
         self.settings.remove(EVENT_KEY)
         self.main.set_event("", "")
         self.main.set_races([], None)
@@ -1677,7 +1687,7 @@ class AppController:
         self._show_program()
         return False
 
-    def refresh(self, overlay: bool = False) -> None:
+    def refresh(self) -> None:
         """Recompute from the log and redraw the surface, the program, the TV and the board."""
         from madtracker.control import board_feed
 
@@ -1690,7 +1700,10 @@ class AppController:
         self.main.set_undo(screen.undo_text, screen.undo_enabled, screen.undo_who)
         self._reload_races()
         self._show_program()
-        self._set_board(*board_feed.board_for(self.live.view(), overlay=overlay))
+        view = self.live.view()
+        before = self._board_actions.get(screen.race_id)
+        self._board_actions[screen.race_id] = view.actions
+        self._set_board(*board_feed.board_for(view, before=before))
         # A result just became provisional or final: back it up, the
         # moment it would hurt most to lose (design section 12). After the
         # redraw has reached the screen, so the screen and the board
@@ -1736,7 +1749,7 @@ class AppController:
 
     # Clicks ------------------------------------------------------------
 
-    def _apply(self, outcome, *, overlay: bool = False) -> bool:
+    def _apply(self, outcome) -> bool:
         """Show a refusal in the red line, or redraw everything after a change."""
         from madtracker.store import StoreError, disk_refusal
 
@@ -1769,7 +1782,7 @@ class AppController:
             self.main.show_problem(outcome.message)
             return False
         self.main.show_problem(None)
-        self.refresh(overlay=overlay)
+        self.refresh()
         slow = self.store is not None and self.store.last_commit_ms > SLOW_COMMIT_MS
         if slow:
             applog.warning(f"Slow commit: {self.store.last_commit_ms:.0f} ms")
@@ -1824,10 +1837,7 @@ class AppController:
         )
 
     def click(self, entrant_id: int) -> bool:
-        before = self.live.state if self.live else None
-        outcome = self._guard(lambda: self.live.click(entrant_id))
-        overlay = self.live is not None and before != self.live.state
-        return self._apply(outcome, overlay=overlay)
+        return self._apply(self._guard(lambda: self.live.click(entrant_id)))
 
     def rider_action(self, entrant_id: int, key: str) -> bool:
         if self.live is None:
@@ -1881,7 +1891,7 @@ class AppController:
         )
         if not ask(self.main, END_RACE_TITLE, question, verb=END_RACE_TITLE):
             return False
-        return self._apply(self._guard(lambda: self.live.end_race()), overlay=True)
+        return self._apply(self._guard(lambda: self.live.end_race()))
 
     def _shorten_race(self) -> bool:
         """Shorten Race...: the new sprint count from its box, then the entry (USAC 1G4(b))."""
@@ -1921,10 +1931,10 @@ class AppController:
             if cancelled is not None:
                 return self._apply(cancelled)
             self.refresh()
-        return self._apply(outcome, overlay=True)
+        return self._apply(outcome)
 
     def place_rest_together(self) -> bool:
-        return self._apply(self._guard(lambda: self.live.place_rest_together()), overlay=True)
+        return self._apply(self._guard(lambda: self.live.place_rest_together()))
 
     def row_action(self, entrant_id: int, key: str) -> bool:
         if self.live is None:
@@ -2541,6 +2551,18 @@ def _say(lines: list[str]) -> None:
         pass
 
 
+# The largest glyph, in pixels, Qt's raster engine keeps as a bitmap. Above
+# Qt's own 64 it draws a glyph as a path on every paint, and the board's
+# totals, places and names at 4K are larger than that, so a slam would
+# spend most of each frame filling outlines.
+GLYPH_CACHE_PX = 256
+
+
+def cache_board_glyphs() -> None:
+    """Raise the glyph cache's size limit; Qt reads it once, at the first text it draws."""
+    os.environ.setdefault("QT_MAX_CACHED_GLYPH_SIZE", str(GLYPH_CACHE_PX))
+
+
 def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
@@ -2575,6 +2597,7 @@ def main(argv: list[str] | None = None) -> int:
         _say(lines)
         return 1 if failures else 0
 
+    cache_board_glyphs()
     app = QApplication.instance() or QApplication([sys.argv[0], *qt_args])
     app.setApplicationName(APP_NAME)
     from madtracker.assets import app_icon, sets_window_icon

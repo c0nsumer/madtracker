@@ -2077,6 +2077,7 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     assert form_labels(d) == [
         "Venue name",
         "Scoreboard logo",
+        "Scoreboard texture",
         "Riders on the scoreboard",
         "Accent color",
         "Backup folder",
@@ -2085,9 +2086,144 @@ def test_settings_dialog_lists_the_venue_values_and_save_rightmost(app):
     ]
     rows = button_rows(d)
     assert rows[0] == ["Choose...", "Use Default"]
+    texture_row = next(r for r in rows if "Adjust..." in r)
+    assert texture_row == ["Adjust..."], "the adjustments button ends the texture row"
+    assert rows.index(texture_row) == 1, "the first button row after the logo's Choose..."
     assert ["Rulesets..."] in rows
     assert rows[-1] == ["Cancel", "Save"]
     d.close()
+
+
+def test_settings_texture_dropdown_lists_the_patterns_and_opens_on_bolts(app):
+    """The patterns in order, a separator, then Add from File; a fresh file opens on the bolts."""
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(app.store, app.data_dir, app.main)
+    d.show()
+    combo = d.texture_combo
+    items = [
+        "separator" if combo.itemData(i) is None else combo.itemText(i)
+        for i in range(combo.count())
+    ]
+    assert items == [
+        "Lightning Bolts",
+        "Slant Strokes",
+        "Chevrons",
+        "Dots",
+        "None",
+        "separator",
+        "Add from File...",
+    ]
+    assert combo.currentText() == "Lightning Bolts" and combo.currentData() == "bolts"
+    d.close()
+
+
+def test_settings_adjust_button_is_off_only_for_none(app):
+    """Nothing to adjust on a board without a texture; every pattern has adjustments."""
+    from madtracker.ui.settings import SettingsDialog
+
+    d = SettingsDialog(app.store, app.data_dir, app.main)
+    d.show()
+    combo, adjust = d.texture_combo, d.adjust_button
+    assert adjust.text() == "Adjust..." and adjust.isVisibleTo(d)
+    for key in ("bolts", "slant", "chevrons", "dots", "none"):
+        combo.setCurrentIndex(combo.findData(key))
+        assert adjust.isEnabled() == (key != "none"), key
+    combo.setCurrentIndex(combo.findData("bolts"))
+    assert adjust.isEnabled(), "a pattern again re-enables it"
+    d.close()
+
+
+def test_scoreboard_texture_dialog_lists_its_controls(app):
+    """Section 11: five sliders with their ranges, defaults, and readouts; Reset apart from Cancel and OK."""
+    from madtracker.board.texture import Adjust
+    from madtracker.ui.texture_dialog import TextureDialog
+
+    d = TextureDialog("bolts", None, Adjust(), app.main)
+    d.show()
+    assert d.windowTitle() == "Scoreboard Texture"
+    assert form_labels(d) == ["Size", "Rotation", "Spacing", "Opacity", "Tone"]
+    assert [(d.tone_ends[0].text(), d.tone_ends[1].text())] == [("Darker", "Lighter")]
+    table = {
+        "size": (50, 200, 100, "100%"),
+        "rotation": (-45, 45, 0, "0°"),
+        "spacing": (60, 200, 100, "100%"),
+        "opacity": (0, 200, 100, "100%"),
+        "tone": (-100, 100, 0, "0"),
+    }
+    assert list(d.sliders) == list(table)
+    for key, (lo, hi, default, shown) in table.items():
+        s = d.sliders[key]
+        assert (s.minimum(), s.maximum(), s.value()) == (lo, hi, default), key
+        assert d.readouts[key].text() == shown, key
+    assert button_rows(d)[-1] == ["Reset", "Cancel", "OK"]
+    assert d.ok_button.isDefault()
+    d.close()
+
+
+def test_every_control_in_the_scoreboard_texture_dialog_does_something(app, quiet):
+    """The sweep for the Scoreboard Texture dialog: each control moves a readout, the preview, or closes it."""
+    from PySide6.QtWidgets import QApplication
+
+    from madtracker.board.texture import Adjust
+    from madtracker.ui.texture_dialog import TextureDialog
+
+    start = Adjust(size=120, rotation=10, spacing=90, opacity=80, tone=-20)
+
+    def build():
+        d = TextureDialog("bolts", None, start, app.main)
+        d.show()
+        d.results = []
+        d.finished.connect(d.results.append)
+        QApplication.processEvents()
+        return d
+
+    def snap(d) -> tuple:
+        return (
+            d.adjust(),
+            tuple(r.text() for r in d.readouts.values()),
+            d.preview.grab().toImage(),
+            tuple(d.results),
+        )
+
+    def controls(d) -> list[tuple[str, Callable]]:
+        out = [
+            (
+                f"{key} slider",
+                lambda s=s: s.setValue(
+                    s.minimum() + 1 if s.value() != s.minimum() + 1 else s.maximum()
+                ),
+            )  # fmt: skip
+            for key, s in d.sliders.items()
+        ]
+        out += [
+            ("Reset", d.reset_button.click),
+            ("Cancel", d.cancel_button.click),
+            ("OK", d.ok_button.click),
+        ]
+        return out
+
+    names = [name for name, _press in controls(build())]
+    assert names == [f"{k} slider" for k in start.__dataclass_fields__] + ["Reset", "Cancel", "OK"]
+    for k, name in enumerate(names):
+        d = build()
+        _name, press = controls(d)[k]
+        before = snap(d)
+        press()
+        QApplication.processEvents()
+        after = snap(d)
+        assert after != before, f"{name} was silent"
+        if name.endswith("slider"):
+            assert after[1] != before[1], f"{name}: the readout did not move"
+        if name in ("size slider", "rotation slider", "Reset"):
+            assert after[2] != before[2], f"{name}: the preview did not redraw"
+        if name == "Cancel":
+            assert after[3] == (int(QDialog.DialogCode.Rejected),)
+        if name == "OK":
+            assert after[3] == (int(QDialog.DialogCode.Accepted),)
+        if name == "Reset":
+            assert d.adjust() == Adjust()
+        d.close()
 
 
 def test_rulesets_dialog_buttons_in_order_and_close_last(app):
@@ -2774,6 +2910,78 @@ def test_a_chase_lap_before_the_finish_is_on_the_card_then_in_a_laps_column(app)
     row = next(i for i in range(t.rowCount()) if t.item(i, rider).text() == name)
     assert t.item(row, laps).text() == "+1"
     assert t.item(row, laps).textAlignment() & Qt.AlignmentFlag.AlignRight
+
+
+def _shown(c):
+    """The standings or start-list payload the board last took for the race on screen."""
+    return c.board._shown[c.live.race_id]
+
+
+def test_the_madison_board_has_a_start_list_then_a_table_that_plays_scoring(app):
+    c = app
+    c.set_board_live(True)
+    select(c, MADISON)
+    # The start list is the layout before any score, with nothing scored.
+    assert c.board.layout_name() == "pre_race"
+    assert getattr(_shown(c), "scored", None) is None
+
+    click("Blue", "Red")(c)
+    record(c)
+    # Record Sprint turns the board to the table, which plays the sprint
+    # itself.
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.scored.kind == "sprint"
+    assert list(data.scored.keys) == [
+        tuple(str(b) for b in c.live.roster.get(c.live.roster.resolve(t)).bibs)
+        for t in ("Blue", "Red")
+    ]
+
+    lap("Orange")(c)
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.scored.kind == "lap_gained"
+
+    c.rider_action(c.live.roster.resolve("Yellow"), "lap_lost")
+    assert c.board.layout_name() == "madison"
+    data = _shown(c)
+    assert data.scored.kind == "lap_lost"
+
+    # Undo takes the score back and the board keeps the table, with
+    # nothing new to play.
+    assert c.undo()
+    assert c.board.layout_name() == "madison"
+    assert _shown(c).scored is None
+
+
+@pytest.mark.parametrize("row", [POINTS, TEMPO], ids=["points", "tempo"])
+def test_the_points_board_has_a_start_list_then_a_table_that_plays_scoring(app, row):
+    c = app
+    c.set_board_live(True)
+    select(c, row)
+    assert c.board.layout_name() == "pre_race"
+    assert getattr(_shown(c), "scored", None) is None
+    click("12", "7")(c)
+    record(c)
+    # Record Sprint turns the board to the table, which plays the sprint
+    # itself: each rider that scored, by bib, in place order (a Tempo
+    # Race's sprint scores its winner alone).
+    assert c.board.layout_name() == "sprint_points"
+    data = _shown(c)
+    awarded = [("12",), ("7",)] if row == POINTS else [("12",)]
+    assert data.scored.kind == "sprint" and list(data.scored.keys) == awarded
+    # The chip the table plays reads the rider's sprint points: a Tempo
+    # Race's winner scores +1.
+    winner = next(r for r in data.rows if r.entry.bibs == ["12"])
+    assert [s for s in winner.sprints if s is not None][-1] == (1 if row == TEMPO else 10)
+    lap("33")(c)
+    data = _shown(c)
+    assert data.scored.kind == "lap_gained" and list(data.scored.keys) == [("33",)]
+    # Undo takes the lap back and the board keeps the table, with
+    # nothing new to play.
+    assert c.undo()
+    assert c.board.layout_name() == "sprint_points"
+    assert _shown(c).scored is None
 
 
 def test_a_madison_team_card_has_the_lap_buttons_and_an_elimination_card_does_not(app):

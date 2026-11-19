@@ -516,6 +516,7 @@ NO_TEXT_INPUT = {
     "NameDialog": "fuzzed as New Group and Rename group, which are built on it",
     "SettingsDialog": "fuzzed as Settings",
     "RulesetEditor": "fuzzed as New ruleset",
+    "TextureDialog": "five sliders, each bounded by its range",
 }
 FUZZED_CLASSES = {
     "SetupScreen",

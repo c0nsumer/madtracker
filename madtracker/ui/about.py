@@ -295,6 +295,9 @@ class AboutDialog(QDialog):
         top.setAlignment(heading, Qt.AlignmentFlag.AlignVCenter)
 
         self.author = _rich_label(f"Developed by Steve Vigneau ({_link(AUTHOR_URL, 'nuxx.net')})")
+        self.artwork = _rich_label(
+            "The scoreboard's lightning bolt texture is Steve Vigneau's own artwork."
+        )
         project = PROJECT_URL.removeprefix("https://")
         self.project = _rich_label(f"Project: {_link(PROJECT_URL, project)}")
         self.license = _rich_label(
@@ -323,6 +326,7 @@ class AboutDialog(QDialog):
         lay.addLayout(top)
         lay.addSpacing(style.MD)
         lay.addWidget(self.author)
+        lay.addWidget(self.artwork)
         lay.addWidget(self.project)
         lay.addWidget(self.license)
         lay.addWidget(self.usac)

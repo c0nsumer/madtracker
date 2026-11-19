@@ -15,7 +15,16 @@ ROSTER = [
     P.Entry(bibs=["704"], names=["Dov Ristanen"]),
 ]
 BIBS = {"701", "702", "703", "704"}
-HEADER = P.Header(title="Test Race", group="Cat 3", detail="Rules", status="Racing")
+# The same riders as two Madison teams, for the team start list.
+TEAMS = [
+    P.Entry(
+        bibs=["701", "702"], names=ROSTER[0].names + ROSTER[1].names, team="Blue", color="#2f6bff"
+    ),
+    P.Entry(
+        bibs=["703", "704"], names=ROSTER[2].names + ROSTER[3].names, team="Red", color="#e5323b"
+    ),
+]
+HEADER = P.Header(title="Test Race", group="Cat 3", status="Racing")
 
 
 def _layouts() -> list[tuple[str, object]]:
@@ -26,6 +35,7 @@ def _layouts() -> list[tuple[str, object]]:
     placings = [P.Placing(i + 1, e) for i, e in enumerate(ROSTER)]
     return [
         ("pre_race", P.PreRace(header=HEADER, roster=ROSTER)),
+        ("pre_race", P.PreRace(header=HEADER, roster=TEAMS)),
         (
             "elimination",
             P.Elimination(
@@ -42,9 +52,6 @@ def _layouts() -> list[tuple[str, object]]:
                 sprint_count=1,
                 rows=rows,
                 current_sprint=1,
-                sprint_result=P.SprintResult(
-                    number=1, placings=[(1, ROSTER[0], 3), (2, ROSTER[1], 2)]
-                ),
             ),
         ),
         ("finish", P.Finish(header=HEADER, placings=placings)),
@@ -191,3 +198,82 @@ def test_a_rider_without_a_bib_is_named_with_no_plate(board, drawn, monkeypatch,
     board.grab()
     assert "Bo Nobib" in drawn
     assert plates == ([] if label == "names" else ["701"]), "no empty plate"
+
+
+@pytest.mark.parametrize("label", ["bibs_names", "bibs", "names"])
+def test_a_team_rider_without_a_bib_is_named_with_no_plate(board, drawn, monkeypatch, label):
+    """A Madison start list still waiting for a bib names that rider in every mode."""
+    from madtracker.board import theme
+
+    plates: list[str] = []
+    plate = theme.plate
+    monkeypatch.setattr(theme, "plate", lambda p, r, bib: plates.append(bib) or plate(p, r, bib))
+    team = P.Entry(
+        bibs=["701"], names=["Ada Quillfeather", "Bo Nobib"], team="Blue", color="#2f6bff"
+    )
+    board.set_rider_label(label)
+    board.set_layout("pre_race", P.PreRace(header=HEADER, roster=[team]))
+    board.grab()
+    assert "Nobib" in drawn
+    assert plates == ([] if label == "names" else ["701"]), "no empty plate"
+
+
+# Three-digit bibs, the widest a plate holds.
+WIDE_BIBS = ["100", "188", "888", "999"]
+
+
+@pytest.mark.parametrize(
+    "size", [(1366, 768), (1920, 1080), (3840, 2160)], ids=lambda s: f"{s[0]}x{s[1]}"
+)
+@pytest.mark.parametrize("name", ["sprint_points", "pre_race"])
+def test_three_digit_bibs_show_whole_on_their_plates_at_every_field_size(
+    board, monkeypatch, name, size
+):
+    """Every plate reads its whole bib, never "1…", from 2 riders to 24."""
+    from PySide6.QtGui import QPainter
+
+    from madtracker.board import theme
+    from madtracker.board.pages import page_rows
+
+    shown: list[tuple[str, str]] = []
+    inside: list[str] = []
+    draw, plate = QPainter.drawText, theme.plate
+
+    def record_draw(self, *args):
+        if inside and len(args) == 3 and isinstance(args[2], str):
+            shown.append((inside[-1], args[2]))
+        return draw(self, *args)
+
+    def record_plate(p, rect, bib, out=False):
+        inside.append(bib)
+        try:
+            return plate(p, rect, bib, out)
+        finally:
+            inside.pop()
+
+    monkeypatch.setattr(QPainter, "drawText", record_draw)
+    monkeypatch.setattr(theme, "plate", record_plate)
+    board.resize(*size)
+    cut: dict[int, list[str]] = {}
+    for n in range(2, 25):
+        roster = [
+            P.Entry(bibs=[WIDE_BIBS[i % 4]], names=[f"Rider {chr(65 + i)} Quillfeather"])
+            for i in range(n)
+        ]
+        if name == "pre_race":
+            data = P.PreRace(header=HEADER, roster=roster)
+        else:
+            rows = [
+                P.StandingRow(rank=i + 1, entry=e, sprints=[n - i, None, None], total=n - i)
+                for i, e in enumerate(roster)
+            ]
+            data = P.Standings(header=HEADER, sprint_count=3, rows=rows, current_sprint=1)
+        shown.clear()
+        board.set_layout(name, data)
+        board.grab()
+        # A points table longer than a page shows its first page.
+        assert len(shown) == (n if name == "pre_race" else page_rows(n)), (n, shown)
+        wrong = [s for bib, s in shown if bib != s]
+        if wrong:
+            cut[n] = wrong
+    assert not cut, f"bibs cut at {sorted(cut)} riders"

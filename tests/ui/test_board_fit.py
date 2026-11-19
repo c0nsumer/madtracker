@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QRectF
 
 from madtracker.board import payloads as P
+from ui.board_helpers import render, strings
 
 # Invented riders, long on purpose. The first word is the first name.
 LONG = [
@@ -78,48 +79,44 @@ def finish(n: int = 16) -> P.Finish:
     )
 
 
-@pytest.fixture
-def drawn(monkeypatch):
-    """Every string the board paints, with its rect, pixel size and color."""
-    from madtracker.board import theme
-
-    seen: list[tuple[str, object, int, str]] = []
-    text = theme.text
-
-    def record(p, rect, s, f, color, *args, **kwargs):
-        seen.append((s, rect, f.pixelSize(), color.name()))
-        return text(p, rect, s, f, color, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "text", record)
-    return seen
-
-
-def render(qtbot, layout, data, size=(1920, 1080), bibs=True):
-    from madtracker.board.window import ScoreboardWindow
-
-    w = ScoreboardWindow("Test Velodrome", "Test Event")
-    qtbot.addWidget(w)
-    w.set_show_bibs(bibs)
-    w.resize(*size)
-    w.set_layout(layout, data)
-    w.grab()
-    return w
-
-
-def strings(drawn) -> list[str]:
-    return [s for s, *_ in drawn]
-
-
 def test_a_race_page_header_holds_the_status_alone_and_not_the_event(qtbot, drawn):
     """The event's name is the logo page's: a race page's header carries the
-    race, its group and format, and the status centered in the bar."""
+    race, its group, and the status centered in the bar."""
     import dataclasses
 
-    header = P.Header(title="8 Mile Madison", group="Group A", detail="Madison", status="Racing")
+    header = P.Header(title="8 Mile Madison", group="Group A", status="Racing")
     w = render(qtbot, "madison", dataclasses.replace(madison(teams=5), header=header))
     assert "Test Event" not in strings(drawn)
     status = next(r for s, r, *_ in drawn if s == "Racing")
     assert status.center().y() == pytest.approx(w.top_bar.height() / 2, abs=1)
+
+
+@pytest.mark.parametrize(
+    "layout", ["pre_race", "elimination", "sprint_points", "madison", "finish"]
+)
+def test_no_race_pages_top_bar_draws_the_format(qtbot, drawn, layout):
+    """Races are named, so the bar carries no format line under the title:
+    the title, its group, and the status, with the title in the middle of
+    the bar. An unnamed race's title is its format, and that is all."""
+    from madtracker.board import sample
+    from madtracker.control import formats
+
+    data = {
+        "pre_race": sample.pre_race,
+        "elimination": sample.elimination,
+        "sprint_points": sample.sprint_points,
+        "madison": lambda: madison(teams=5),
+        "finish": sample.finish,
+    }[layout]()
+    w = render(qtbot, layout, data)
+    drawn.clear()
+    w.top_bar.grab()
+    h = data.header
+    seen = strings(drawn)
+    assert set(seen) <= {h.title, h.group, h.status, h.status.upper()}
+    assert not (set(formats.FORMAT_LABELS.values()) - {h.title}) & set(seen)
+    title = next(r for s, r, *_ in drawn if s == h.title)
+    assert title.center().y() == pytest.approx(w.top_bar.height() / 2, abs=1)
 
 
 # fit_name -----------------------------------------------------------------
@@ -339,31 +336,6 @@ def test_start_list_rows_never_overlap(qtbot, drawn, n):
             assert y2 - y1 >= px * 1.21, (y1, y2, px)
 
 
-def test_madison_team_names_share_one_size_and_no_rider_is_drawn(qtbot, drawn):
-    data = madison()
-    render(qtbot, "madison", data)
-    # Each team's name on its block, every one at one size; the riders'
-    # names are not on the page while the race runs.
-    teams = {r.entry.team for r in data.rows}
-    sizes = {px for s, _r, px, _c in drawn if s in teams}
-    assert len(sizes) == 1, sizes
-    seen = strings(drawn)
-    assert not any("  /  " in s for s in seen)
-    assert not any(_last(name) in s for r in data.rows for name in r.entry.names for s in seen)
-    assert "S1" not in seen
-
-
-def test_a_long_team_name_is_drawn_whole_on_the_madison_board(qtbot, drawn):
-    """ "Stars and Stripes" has the room, with no sprint columns to squeeze it."""
-    data = madison(teams=8)
-    data.rows[2].entry.team = "Stars and Stripes"
-    render(qtbot, "madison", data)
-    seen = strings(drawn)
-    assert "Stars and Stripes" in seen
-    # The block is the row up to the figures, one width for every team.
-    assert len({px for s, _r, px, _c in drawn if s in {r.entry.team for r in data.rows}}) == 1
-
-
 def test_elimination_cards_share_one_size_and_initial_first_names(qtbot, drawn):
     data = elimination(remaining=6)
     render(qtbot, "elimination", data)
@@ -373,6 +345,115 @@ def test_elimination_cards_share_one_size_and_initial_first_names(qtbot, drawn):
     assert len(card_sizes) <= 2
     assert "M. Vanderbilt-Rochester" in seen
     assert not [s for s in seen if s.startswith("Maximiliana") and s.endswith("…")]
+
+
+# The least a card's plate is, in design units, with two to six riders
+# left, on each board shape: a narrow board's cards keep their plates
+# beside the bar.
+LEAST_CARD_PLATES = {
+    (1920, 1080): {2: 170, 3: 170, 4: 170, 5: 115, 6: 115},
+    (1280, 720): {2: 170, 3: 170, 4: 170, 5: 115, 6: 115},
+    (1440, 1080): {2: 170, 3: 115.9, 4: 170, 5: 115, 6: 115},
+    (1024, 768): {2: 170, 3: 115.9, 4: 170, 5: 115, 6: 115},
+    (1000, 900): {2: 115.9, 3: 60.7, 4: 115.9, 5: 115, 6: 115},
+}
+
+
+@pytest.mark.parametrize("size", list(LEAST_CARD_PLATES))
+def test_card_plates_keep_their_size_and_never_shrink_as_riders_go_out(qtbot, monkeypatch, size):
+    """On every board shape the cards' plates hold their least size, and
+    from six left to two a plate is never smaller than the one before it,
+    so the race's climax never steps the bibs down."""
+    from madtracker.board import theme
+
+    plates: list = []
+    plate = theme.plate
+
+    def record(p, rect, bib, out=False):
+        plates.append((rect.height(), bib, out))
+        return plate(p, rect, bib, out)
+
+    monkeypatch.setattr(theme, "plate", record)
+    heights = []
+    for n in range(6, 1, -1):
+        plates.clear()
+        w = render(qtbot, "elimination", elimination(remaining=n), size=size)
+        u = w.pages["elimination"].u
+        still = {round(h / u, 1) for h, bib, out in plates if not out and bib != str(n + 1)}
+        assert len(still) == 1, (n, still)
+        heights.append(still.pop())
+        assert heights[-1] >= LEAST_CARD_PLATES[size][n] - 0.1, (n, heights[-1])
+    assert heights == sorted(heights), heights
+
+
+def _mid_elimination(remaining: int) -> P.Elimination:
+    """Riders with names of a usual length, which shrink only when their cards narrow."""
+    es = [P.Entry(bibs=[str(i + 1)], names=[MID[i]]) for i in range(remaining + 1)]
+    return P.Elimination(header=HEADER, remaining=es[:remaining], last_eliminated=es[remaining])
+
+
+def _still_racing(drawn, names: list[str]) -> list[tuple[str, QRectF, int]]:
+    """The strings a page drew for the riders still in: their names, whole or in part."""
+    from madtracker.board import theme
+
+    whole = names + [theme.initialed(n) or n for n in names]
+    return [
+        (s, r, px)
+        for s, r, px, _c in drawn
+        if s.rstrip("…") and any(s.rstrip("…") in n for n in whole)
+    ]
+
+
+@pytest.mark.parametrize("bibs", [True, False], ids=["bibs_and_names", "names_only"])
+@pytest.mark.parametrize("size", [(1920, 1080), (3840, 2160), (1440, 1080), (1024, 768)])
+def test_elimination_names_and_plates_never_shrink_as_riders_go_out(
+    qtbot, monkeypatch, drawn, size, bibs
+):
+    """From six left to the winner the names and the plates of the riders
+    still in only ever grow: three left keep four's two columns, two and
+    one, rather than three narrower cards across."""
+    from madtracker.board import theme
+
+    plates: list = []
+    plate = theme.plate
+
+    def record(p, rect, bib, out=False):
+        plates.append((rect.height(), bib, out))
+        return plate(p, rect, bib, out)
+
+    monkeypatch.setattr(theme, "plate", record)
+    names, heights = [], []
+    for n in range(6, 0, -1):
+        plates.clear()
+        drawn.clear()
+        render(qtbot, "elimination", _mid_elimination(n), size=size, bibs=bibs)
+        still = _still_racing(drawn, MID[:n])
+        assert still, n
+        names.append(min(px for _s, _r, px in still))
+        if bibs:
+            heights.append(min(h for h, bib, out in plates if not out and bib != str(n + 1)))
+    assert names == sorted(names), names
+    assert heights == sorted(heights), heights
+
+
+@pytest.mark.parametrize("bibs", [True, False], ids=["bibs_and_names", "names_only"])
+@pytest.mark.parametrize("size", [(1920, 1080), (3840, 2160), (1440, 1080), (1024, 768)])
+def test_three_left_center_the_third_card_under_the_two(qtbot, monkeypatch, size, bibs):
+    from madtracker.board import team_rows
+
+    cards: list[QRectF] = []
+    band = team_rows.paint_band
+
+    def record(p, card, color, *args, **kwargs):
+        if color == team_rows.RIDER_BAR:
+            cards.append(QRectF(card))
+        return band(p, card, color, *args, **kwargs)
+
+    monkeypatch.setattr(team_rows, "paint_band", record)
+    render(qtbot, "elimination", _mid_elimination(3), size=size, bibs=bibs)
+    a, b, c = cards
+    assert abs(a.y() - b.y()) < 0.5 and c.y() >= a.bottom(), "two over one"
+    assert abs(c.center().x() - (a.left() + b.right()) / 2) < 0.5
 
 
 @pytest.mark.parametrize("size", [(1920, 1080), (1440, 900)])
@@ -643,98 +724,6 @@ def test_longest_name_on_the_board_in_names_only_mode(qtbot, drawn, layout):
     assert len(data.remaining) > 6 and "E. Featherstonehaugh" in seen
 
 
-@pytest.mark.parametrize(
-    ("number", "of", "title"),
-    [(2, 3, "Sprint 2 of 3"), (3, 3, "Final sprint"), (4, None, "Sprint 4")],
-)
-def test_sprint_card_title_counts_like_the_header(qtbot, drawn, number, of, title):
-    data = points(riders=4, sprints=3, done=2)
-    data.sprint_result = P.SprintResult(
-        number=number, of=of, placings=[(1, data.rows[0].entry, 10)]
-    )
-    render(qtbot, "sprint_points", data)
-    assert title in strings(drawn)
-    assert not any("result" in s for s in strings(drawn))
-
-
-@pytest.mark.parametrize("teams", [True, False], ids=["teams", "riders"])
-def test_sprint_card_sets_its_points_one_gap_after_the_entry_and_keeps_to_its_content(
-    qtbot, drawn, monkeypatch, teams
-):
-    """The points sit beside the block or the rider, one right-aligned
-    column, and the card is no wider than what it shows: a "+5" at the
-    far end of a wide card is read with the wrong team."""
-    from madtracker.board import pages, theme
-
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
-    data = madison(teams=5) if teams else points(riders=5, sprints=3, done=2)
-    if teams:
-        data.rows[1].entry.team = "Stars and Stripes"
-    data.sprint_result = P.SprintResult(
-        number=2,
-        of=3,
-        placings=[
-            (i + 1, r.entry, v)
-            for i, (r, v) in enumerate(zip(data.rows[:4], [10, 3, 2, 1], strict=True))
-        ],
-    )
-    layout = "madison" if teams else "sprint_points"
-    w = render(qtbot, layout, data)
-    page = w.pages[layout]
-    u = page.u * page.card_scale
-    figs = [r for s, r, *_ in drawn if s in ("+10", "+3", "+2", "+1")]
-    assert len(figs) == 4
-    # One column, right edges together.
-    assert len({round(r.right(), 2) for r in figs}) == 1
-    if teams:
-        card_blocks = blocks[-4:]
-        assert len({round(r.width(), 2) for r in card_blocks}) == 1
-        for b, fig in zip(card_blocks, figs, strict=True):
-            assert fig.x() - b.right() == pytest.approx(pages.SPRINT_GAP * u)
-        # The block holds the widest name whole.
-        assert "Stars and Stripes" in strings(drawn)
-    else:
-        # Every rider's last name is whole beside its plate.
-        for r in data.rows[:4]:
-            assert any(_last(r.entry.names[0]) in s for s in strings(drawn))
-    # The card ends where its content does: the title's rect spans the
-    # card less its margins, and its right edge is the points'.
-    title = next(r for s, r, *_ in drawn if s == "Sprint 2 of 3")
-    assert title.right() == pytest.approx(figs[0].right())
-    assert title.width() < pages.SPRINT_CARD_MOST * u
-
-
-@pytest.mark.parametrize(("places", "at_cap"), [(4, True), (8, False)])
-def test_the_sprint_card_is_as_large_as_fits_the_page(qtbot, drawn, places, at_cap):
-    """A four-place card takes the cap; a longer table takes a smaller unit
-    so every place stays on the page."""
-    from madtracker.board import pages
-
-    data = points(riders=10, sprints=3, done=2)
-    table = [10, 7, 5, 3, 2, 1, 1, 1][:places]
-    data.sprint_result = P.SprintResult(
-        number=2,
-        of=3,
-        placings=[
-            (i + 1, r.entry, v)
-            for i, (r, v) in enumerate(zip(data.rows[:places], table, strict=True))
-        ],
-    )
-    w = render(qtbot, "sprint_points", data)
-    page = w.pages["sprint_points"]
-    assert (page.card_scale == pages.SPRINT_CARD_SCALE) is at_cap
-    figs = [r for s, r, *_ in drawn if s.startswith("+")]
-    assert len(figs) == places
-    assert all(0 <= r.top() and r.bottom() <= w.height() for r in figs)
-
-
 def test_a_penalty_on_a_status_row_opens_no_column_and_a_negative_total_shares_the_minus(
     qtbot, drawn
 ):
@@ -840,132 +829,81 @@ def test_a_black_team_block_keeps_the_light_ring(qapp):
     assert edge <= middle
 
 
-def test_the_team_page_shows_place_team_laps_and_total_and_no_riders_or_sprint_pts(
-    qtbot, drawn, monkeypatch
-):
-    """Riders read the board at speed for team, place and points, and
-    want less: no riders' names while the race runs, and the bar is the
-    row from the place to the page's edge, carrying the figures. The
-    Points Race page keeps SPRINT PTS (its test is above)."""
-    from PySide6.QtGui import QColor
-
-    from madtracker.board import pages, theme
-
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
-    data = madison(teams=5)
-    for i, row in enumerate(data.rows):
-        row.sprints = [7] * 4 + [None] * 2
-        row.total = 50 - i
-    data.rows[1].laps = 1
-    w = render(qtbot, "madison", data)
-    seen = strings(drawn)
-    assert "TEAM" in seen and "LAPS" in seen and "TOTAL" in seen and "+1" in seen
-    assert "SPRINT PTS" not in seen
-    assert "28" not in seen, "no sprint points figure: the total is what they race on"
-    # No rider's name anywhere on the page.
-    assert not any("  /  " in s for s in seen)
-    assert not any(_last(name) in s for r in data.rows for name in r.entry.names for s in seen)
-    # The team name on its block, in the block's ink: Team 1 is white.
-    assert next(c for s, _r, _px, c in drawn if s == "Team 1") == theme.PLATE_TEXT.name()
-    # The place and the total share the row's largest type, and the team
-    # name on the block is set as large as the block holds.
-    place = {px for s, _r, px, _c in drawn if s in {str(r.rank) for r in data.rows}}
-    total = {px for s, _r, px, _c in drawn if s in {str(r.total) for r in data.rows}}
-    assert place == total and len(place) == 1
-    big = place.pop()
-    rh = next(r for s, r, *_ in drawn if s == "1").height()
-    assert big == round(pages.TEAM_FIGURE_SHARE * rh)
-    assert {px for s, _r, px, _c in drawn if s == "Team 1"} == {round(pages.TEAM_NAME_SHARE * rh)}
-    # One bar width for the list, the row from the place to the page's
-    # edge, with the lap figure inside its right end in the bar's ink: a
-    # green "+1" on a green bar would vanish.
-    widths = {round(r.width()) for r in blocks}
-    assert len(widths) == 1 and widths.pop() > w.pages["madison"].width() * 0.8
-    assert blocks[0].right() == pytest.approx(w.pages["madison"].margin_rect().right())
-    lap = next(r for s, r, _px, _c in drawn if s == "+1")
-    assert blocks[1].center().x() < lap.x() and lap.right() < blocks[1].right()
-    ink = theme.team_ink(QColor(data.rows[1].entry.color)).name()
-    assert next(c for s, _r, _px, c in drawn if s == "+1") == ink
-
-
-def test_the_team_bar_carries_laps_penalty_and_total_under_their_headings(
-    qtbot, drawn, monkeypatch
-):
-    """The figures sit inside the bar's right end, LAPS, then PENALTY
-    while one stands, then TOTAL, each heading over its figures with the
-    right edges together, as every figure column on the board is."""
-    from PySide6.QtGui import QColor
-
+def test_a_team_tables_figures_stand_in_their_columns(qtbot, drawn):
+    """The laps, then the penalty while one stands, then the total, each
+    column's figures right-aligned to one edge and clear of the next
+    column's, with no heading over them. The figures sit on the dark row,
+    so the laps and the penalty take the gain and loss colors and the
+    total is white."""
     from madtracker.board import theme
 
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
     data = madison(teams=6)
     for i, row in enumerate(data.rows):
         row.total = 40 - 3 * i
     data.rows[1].laps = 1
     data.rows[2].penalty = -20
-    w = render(qtbot, "madison", data)
-    at = {s: r for s, r, *_ in drawn if s in ("LAPS", "PENALTY", "TOTAL", "+1", "−20", "40", "34")}
-    # Headings are drawn right-aligned in wide rects; the words themselves
-    # stand clear of each other, in order.
-    lab = theme.label(w.pages["madison"].u)
-    left = {s: at[s].right() - theme.text_width(s, lab) for s in ("PENALTY", "TOTAL")}
-    assert at["LAPS"].right() < left["PENALTY"] and at["PENALTY"].right() < left["TOTAL"]
-    # Text rects are drawn right-aligned, so each figure's right edge is
-    # its heading's.
-    assert at["+1"].right() == pytest.approx(at["LAPS"].right())
-    assert at["−20"].right() == pytest.approx(at["PENALTY"].right())
-    assert at["40"].right() == pytest.approx(at["TOTAL"].right())
-    # Every figure ends inside its row's bar, the total short of the bar's end.
-    for s, bar in (("40", blocks[0]), ("+1", blocks[1]), ("−20", blocks[2]), ("34", blocks[2])):
-        assert bar.x() < at[s].x() and at[s].right() < bar.right(), s
-        assert bar.top() <= at[s].center().y() <= bar.bottom(), s
-    # No riders' names beside the figures, and the penalty in the bar's ink.
-    ink = theme.team_ink(QColor(data.rows[2].entry.color)).name()
-    assert next(c for s, _r, _px, c in drawn if s == "−20") == ink
+    render(qtbot, "madison", data)
+    assert not {"#", "LAPS", "PENALTY", "TOTAL"} & set(strings(drawn))
+    at = {s: (r, px) for s, r, px, _c in drawn if s in ("+1L", "−20", "40", "34")}
+
+    def ink_left(s: str, weight) -> float:
+        rect, px = at[s]
+        return rect.right() - theme.text_width(s, theme.font(px, weight, tabular=True))
+
+    # Text rects are drawn right-aligned, so a rect's right edge is its figure's.
+    assert at["+1L"][0].right() < ink_left("−20", theme.BOLD)
+    assert at["−20"][0].right() < ink_left("40", theme.HEAVY)
+    assert at["40"][0].right() == pytest.approx(at["34"][0].right())
+    color = {s: c for s, _r, _px, c in drawn}
+    assert color["+1L"] == theme.GAIN.name() and color["−20"] == theme.LOSS.name()
+    assert color["40"] == color["34"] == theme.TEXT.name()
 
 
 @pytest.mark.parametrize("teams", [1, 2, 3, 5, 8])
-def test_team_rows_share_the_page_and_their_type_grows_with_them(qtbot, drawn, teams):
+def test_team_rows_share_the_page_and_their_type_grows_with_them(qtbot, drawn, monkeypatch, teams):
     """A small field reads from the track as large as the page allows: the
     rows share its height whatever the count, a lone team half of it, and
-    the place, total, and team name are shares of the row."""
-    from madtracker.board import pages
+    the place and total are shares of the row, giving way to the surnames
+    no further than TEAM_FIGURE_LEAST; the surnames are a share of the row
+    too, up to the start list's largest."""
+    from madtracker.board import pages, team_rows
 
+    rows: list[QRectF] = []
+    band = team_rows.paint_band
+
+    def record(p, row, *args, **kwargs):
+        rows.append(QRectF(row))
+        return band(p, row, *args, **kwargs)
+
+    monkeypatch.setattr(team_rows, "paint_band", record)
     data = madison(teams=teams)
-    # Short names, so the figures have no reason to give way to them.
-    for i, row in enumerate(data.rows):
-        row.entry.team = f"T{i + 1}"
     data.rows[0].laps = 1
     w = render(qtbot, "madison", data)
     page = w.pages["madison"]
+    u = page.u
+    assert len(rows) == teams
+    assert len({round(r.height(), 3) for r in rows}) == 1
+    rh = rows[0].height()
+    room = page.margin_rect().bottom() - rows[0].top()
+    gap = team_rows.ROW_GAP * u
+    assert rh * max(teams, pages.TEAM_FILL_LEAST) + (teams - 1) * gap == pytest.approx(room, abs=1)
+    [big] = {px for s, _r, px, _c in drawn if s == "0"}
+    share = rh * pages.TEAM_FIGURE_SHARE
+    assert min(share, pages.TEAM_FIGURE_LEAST * u) - 1 <= big <= round(share)
     ranks = {str(r.rank) for r in data.rows}
-    rects = sorted((r for s, r, *_ in drawn if s in ranks), key=lambda r: r.y())
-    assert len(rects) == teams
-    assert len({round(r.height(), 3) for r in rects}) == 1
-    rh = rects[0].height()
-    room = page.margin_rect().bottom() - rects[0].y()
-    assert rh == pytest.approx(room / max(teams, pages.TEAM_FILL_LEAST), abs=1)
-    big = {px for s, _r, px, _c in drawn if s in ranks}
-    assert big == {round(rh * pages.TEAM_FIGURE_SHARE)}
-    # LAPS grows with the row and stays under the total.
-    lap = next(px for s, _r, px, _c in drawn if s == "+1")
-    assert lap >= round(rh * pages.TEAM_LAPS_SHARE) - 1
-    assert lap < big.pop()
+    [place] = {px for s, _r, px, _c in drawn if s in ranks}
+    assert place == pytest.approx(big * pages.TEAM_PLACE_SCALE, abs=1)
+    # The surnames share one size, no larger than their share of the row
+    # or the start list's largest.
+    lasts = {_last(n) for r in data.rows for n in r.entry.names}
+    [surname] = {px for s, _r, px, _c in drawn if s in lasts}
+    most = min(rh * pages.TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
+    assert surname <= round(most)
+    # LAPS keeps pace with the total, up to TEAM_LAPS_MOST, and stays under it.
+    lap = next(px for s, _r, px, _c in drawn if s == "+1L")
+    laps_share = big * pages.TEAM_LAPS_SHARE / pages.TEAM_FIGURE_SHARE
+    assert lap >= min(laps_share, pages.TEAM_LAPS_MOST * u) - 1
+    assert lap <= round(pages.TEAM_LAPS_MOST * u) and lap < big
     assert pages.TEAM_PAGE_ROWS == 8
 
 
@@ -994,58 +932,11 @@ def test_a_decided_field_of_two_keeps_its_ordinals_to_a_share_of_the_page(qtbot,
     assert widest <= page.margin_rect().width() * pages.TEAM_PLACE_SHARE
 
 
-@pytest.mark.parametrize("size", [(1920, 1080), (1440, 1080), (1024, 768)])
-@pytest.mark.parametrize("status", ["Racing", "Final"])
-def test_a_small_madisons_figures_give_way_to_its_team_names(
-    qtbot, drawn, monkeypatch, size, status
-):
-    """Two teams with long names, laps, and a penalty: the figures shrink
-    before a name does, so a name is under TEAM_NAME_LEAST only once the
-    figures are at TEAM_FIGURE_LEAST, every name is drawn whole, and
-    nothing runs out of the bar into the place column, on a 16:9 board or
-    a 4:3 one."""
-    from madtracker.board import pages, theme
-
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
-    data = madison(teams=2)
-    data.header = P.Header("Madison", status=status)
-    long_names = ["Stars and Stripes Racing", "Motor City Velo Club"]
-    for row, name, laps, pen, total in zip(
-        data.rows, long_names, [1, -1], [0, -20], [45, -8], strict=True
-    ):
-        row.entry.team, row.laps, row.penalty, row.total = name, laps, pen, total
-    w = render(qtbot, "madison", data, size=size)
-    u = w.pages["madison"].u
-    total_px = next(px for s, _r, px, _c in drawn if s == "45")
-    for name in long_names:
-        rect, px = next((r, px) for s, r, px, _c in drawn if s == name)
-        if px < round(pages.TEAM_NAME_LEAST * u) - 1:
-            assert total_px == round(pages.TEAM_FIGURE_LEAST * u)
-        assert theme.text_width(name, theme.font(px, theme.BOLD)) <= rect.width() + 0.5
-    bar_x = blocks[0].x()
-    for s in ("+1", "−1", "−20", "LAPS", "PENALTY"):
-        # Right-aligned in its box, so the text starts where its width ends.
-        r, px = next((r, px) for t, r, px, _c in drawn if t == s)
-        bold = theme.font(px, theme.BOLD, tabular=True)
-        start = r.right() - theme.text_width(s, bold)
-        assert start >= bar_x - 0.5, s
-    places = {"1st", "2nd"} if status == "Final" else {"1", "2"}
-    for r in (r for t, r, *_ in drawn if t in places):
-        assert r.right() <= bar_x + 0.5
-
-
 @pytest.mark.parametrize("size", [(1920, 1080), (1366, 768)])
 def test_a_small_madisons_totals_hold_still_through_its_first_lap_and_penalty(qtbot, size):
     """The page's size is decided as though a lap and a penalty stood, so
-    the first lap gained or penalty given never steps the totals down
-    while the riders are reading them."""
+    the first lap gained or penalty given never steps the totals or the
+    surnames down while the riders are reading them."""
     from madtracker.board import theme
 
     def total_px(laps, penalty):
@@ -1067,64 +958,11 @@ def test_a_small_madisons_totals_hold_still_through_its_first_lap_and_penalty(qt
             render(qtbot, "madison", data, size=size)
         finally:
             theme.text = text
-        return next(px for s, px in seen if s == "30")
+        return next(px for s, px in seen if s == "30"), next(px for s, px in seen if s == "Quill")
 
     start = total_px(0, 0)
     assert total_px(1, 0) == start
     assert total_px(1, -5) == start
-
-
-@pytest.mark.parametrize("size", [(1440, 1080), (1280, 1024), (1024, 768)])
-def test_a_small_madisons_figures_stay_inside_the_bar_whatever_the_names(
-    qtbot, drawn, monkeypatch, size
-):
-    """The figures step down until they start inside the bar on a narrow
-    board, even when the names ask for no room (a bare color block)."""
-    from madtracker.board import theme
-
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
-    data = madison(teams=2)
-    for row in data.rows:
-        row.entry.team = ""
-    data.rows[0].laps, data.rows[1].laps, data.rows[1].penalty = 1, -1, -20
-    render(qtbot, "madison", data, size=size)
-    bar_x = blocks[0].x()
-    for s in ("+1", "−1", "−20", "LAPS", "PENALTY"):
-        # Right-aligned in its box, so the text starts where its width ends.
-        r, px = next((r, px) for t, r, px, _c in drawn if t == s)
-        bold = theme.font(px, theme.BOLD, tabular=True)
-        start = r.right() - theme.text_width(s, bold)
-        assert start >= bar_x - 0.5, s
-
-
-def test_a_small_madisons_plate_keeps_to_its_figures(qtbot, drawn, monkeypatch):
-    """When the figures give way, the total's plate shrinks with them
-    rather than standing the bar's full height behind a smaller figure."""
-    from madtracker.board import theme
-
-    plates: list[object] = []
-    plate = theme.figure_plate
-
-    def record(p, rect, *args, **kwargs):
-        plates.append(rect)
-        return plate(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "figure_plate", record)
-    data = madison(teams=2)
-    for row, name in zip(
-        data.rows, ["Stars and Stripes Racing", "Motor City Velo Club"], strict=True
-    ):
-        row.entry.team, row.laps, row.penalty = name, 1, -5
-    render(qtbot, "madison", data, size=(1440, 1080))
-    total = next((r, px) for s, r, px, _c in drawn if s == str(data.rows[0].total))
-    assert plates and plates[0].height() < total[1] * 1.3
 
 
 @pytest.mark.parametrize("penalty", [0, -20])
@@ -1132,6 +970,8 @@ def test_a_small_rider_fields_names_and_totals_grow_together(qtbot, drawn, penal
     """A long name stops the growth at the size where it fits whole at the
     table's own name size: the names are never shrunk while the figures
     grow, so they keep the base table's proportion to the totals."""
+    from madtracker.board import pages
+
     data = points(riders=5, sprints=3, done=1)
     for i, row in enumerate(data.rows):
         row.entry.names = [SHORT[i % len(SHORT)]]
@@ -1142,7 +982,7 @@ def test_a_small_rider_fields_names_and_totals_grow_together(qtbot, drawn, penal
     names = {px for s, _r, px, _c in drawn if s in {row.entry.names[0] for row in data.rows}}
     assert len(totals) == 1 and len(names) == 1
     total_px, name_px = totals.pop(), names.pop()
-    assert name_px >= round(total_px * 46 / 60) - 1
+    assert name_px >= round(total_px * 46 / pages.RIDER_TOTAL) - 1
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
 
@@ -1171,7 +1011,7 @@ def test_a_small_rider_field_grows_its_rows_type_and_columns_as_one(qtbot, drawn
     fill = room / max(riders, pages.RIDER_FILL_LEAST)
     assert rh <= fill + 1
     assert rh == pytest.approx(min(fill, pages.RIDER_ROW_FULL * g), abs=1)
-    assert {px for _r, px in totals} == {round(min(60 * g, rh * 0.84))}
+    assert {px for _r, px in totals} == {round(min(pages.RIDER_TOTAL * g, rh * 0.84))}
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
 
@@ -1180,13 +1020,15 @@ def test_a_small_rider_field_grows_its_rows_type_and_columns_as_one(qtbot, drawn
 def test_a_small_field_of_long_names_grows_only_while_every_name_fits_whole(qtbot, drawn, riders):
     """The larger figures take the names' room, so the growth stops where
     a name would give up its first name, and never goes under the base."""
+    from madtracker.board import pages
+
     data = points(riders=riders, sprints=3, done=1)
     w = render(qtbot, "sprint_points", data)
     u = w.pages["sprint_points"].u
     seen = strings(drawn)
     assert all(row.entry.names[0] in seen for row in data.rows)
     totals = {px for s, _r, px, _c in drawn if s in {str(row.total) for row in data.rows}}
-    assert len(totals) == 1 and totals.pop() >= round(60 * u)
+    assert len(totals) == 1 and totals.pop() >= round(pages.RIDER_TOTAL * u)
 
 
 @pytest.mark.parametrize("riders", [9, 10, 16])
@@ -1293,47 +1135,26 @@ def test_last_result_long_teams_show_as_whole_blocks(qtbot, drawn, painted):
     assert not _cut(painted)
 
 
-@pytest.mark.parametrize("laps", [False, True], ids=["plain", "laps"])
-def test_a_start_list_of_eight_long_teams_keeps_every_team_name_whole(qtbot, drawn, painted, laps):
-    """Held at TEAM_SHARE of a half-width column, the block would cut every
-    team name at the floor; a team name has no initial to give up, so
-    the riders give way first and never a team name."""
-    from madtracker.board import theme
-
-    roster = _long_teams()
-    lap_list = [1, 0, 0, -1, 0, 0, 0, 2] if laps else []
-    render(qtbot, "pre_race", P.PreRace(header=HEADER, roster=roster, laps=lap_list))
-    seen = strings(drawn)
-    assert set(LONG_TEAMS) <= set(seen)
-    assert not _cut(painted)
-    sizes = {px for s, _r, px, _c in drawn if s in LONG_TEAMS}
-    assert min(sizes) >= theme.MIN_PX
-
-
-def test_team_standings_keep_one_block_width_when_the_page_turns(qtbot, monkeypatch):
-    """Nine teams turn pages of five and four; the block is measured over
-    every row, so the riders never move as the page turns."""
-    from madtracker.board import theme
-
-    widths: list[float] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        widths.append(round(rect.width(), 2))
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
+def test_team_standings_keep_their_sizes_and_columns_when_the_page_turns(qtbot, drawn):
+    """Nine teams turn pages of five and four; the surnames are measured over
+    every row, so their size and columns hold as the page turns."""
     data = madison(teams=9)
-    # The widest team name on the second page only.
-    data.rows[7].entry.team = "Orange and Yellow"
+    # The longest surname on the second page only.
+    data.rows[7].entry.names = ["Ada Featherstonehaugh-Rochester", "Bo Lin"]
     w = render(qtbot, "madison", data)
     page = w.pages["madison"]
     assert page.page_count() == 2
-    first = set(widths)
-    widths.clear()
+    lasts = {_last(n) for r in data.rows for n in r.entry.names}
+
+    def seen():
+        px = {px for s, _r, px, _c in drawn if s in lasts}
+        return px, sorted({round(r.x(), 2) for s, r, *_ in drawn if s in lasts})
+
+    first = seen()
+    drawn.clear()
     page.advance()
     w.grab()
-    assert set(widths) == first and len(first) == 1
+    assert seen() == first and len(first[0]) == 1 and len(first[1]) == 2
 
 
 @pytest.mark.parametrize("layout", ["madison", "finish"])
@@ -1354,10 +1175,16 @@ def test_a_long_hyphenated_pair_is_stacked_or_given_room_never_cut(qtbot, drawn,
     render(qtbot, layout, data)
     assert not _cut(painted)
     seen = strings(drawn)
-    # The team page shows no riders while the race runs; the podium shows
-    # its three pairs whole.
-    shown = [] if layout == "madison" else entries[:3]
-    for e in shown:
+    if layout == "madison":
+        # The team table names every rider by surname, whole; the team
+        # names wait for its color view.
+        for e in entries:
+            for name in e.names:
+                assert _last(name) in seen, name
+        assert not set(LONG_TEAMS) & set(seen)
+        return
+    # The podium shows its three pairs whole.
+    for e in entries[:3]:
         for name in e.names:
             assert any(_last(name) in s for s in seen), name
     assert set(LONG_TEAMS[: len(entries)]) <= set(seen)
@@ -1375,26 +1202,13 @@ def decided_madison(teams: int, status: str = "Provisional") -> P.Standings:
     return data
 
 
-def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(
-    qtbot, drawn, monkeypatch
-):
+def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(qtbot, drawn):
     """A Madison's result is the table the stands watched while it ran:
     once the header carries the stamp the places read as ordinals, the
     winner alone in the accent as on the podium page, and each team's
-    laps, penalty and total stay inside its bar under the headings, the
-    total dark on its plate."""
-    from PySide6.QtGui import QColor
-
+    laps, penalty and total stay in their columns."""
     from madtracker.board import theme
 
-    blocks: list[object] = []
-    block = theme.team_block
-
-    def record(p, rect, *args, **kwargs):
-        blocks.append(rect)
-        return block(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "team_block", record)
     data = decided_madison(5)
     render(qtbot, "madison", data)
     seen = strings(drawn)
@@ -1404,14 +1218,12 @@ def test_a_decided_team_table_words_its_places_as_ordinals_under_the_stamp(
     assert not {"1", "2", "3", "4", "5"} & set(seen), "no bare place numbers once decided"
     assert "PROVISIONAL" in seen
     at = {s: r for s, r, *_ in drawn}
-    for heading, fig, row in (("LAPS", "+1", 0), ("PENALTY", "−20", 2), ("TOTAL", "60", 2)):
-        assert at[fig].right() == pytest.approx(at[heading].right()), heading
-        bar = blocks[row]
-        assert bar.x() < at[fig].x() and at[fig].right() < bar.right(), fig
-        ink = theme.team_ink(QColor(data.rows[row].entry.color))
-        assert color[fig] == (theme.PLATE_TEXT if fig == "60" else ink).name(), fig
-    # No riders and no lap chips: the bar carries the laps.
-    assert not any(_last(n) in s for r in data.rows for n in r.entry.names for s in seen)
+    inks = (("+1L", theme.GAIN), ("−20", theme.LOSS), ("60", theme.TEXT))
+    assert at["+1L"].right() < at["−20"].right() < at["60"].right()
+    for fig, ink in inks:
+        assert color[fig] == ink.name(), fig
+    # The riders' surnames still lead, and no lap chips: the laps column carries the laps.
+    assert {_last(n) for n in data.rows[0].entry.names} <= set(seen)
     assert not any("lap" in s for s in seen)
 
 
@@ -1471,12 +1283,20 @@ def test_the_result_stamp_is_at_the_floor(qtbot, drawn, status):
     assert stamp and min(stamp) >= round(theme.MIN_PX * u)
 
 
+def _podium_width(page) -> float:
+    """The width of a podium entry of teams, inside its row, at the page's growth."""
+    from madtracker.board import pages
+
+    big = pages.FINISH_PLANS[0][0]
+    return page.podium_rect(page.margin_rect(), 0, big, page.g, teams=True).width()
+
+
 def test_one_long_team_name_does_not_widen_every_block(qtbot, monkeypatch, painted):
-    """One 30-character name never makes all five blocks 910 px: the block
-    is capped at TEAM_SHARE of the row and the long name shrinks inside its
-    own block, whole. On the start list, where
-    the riders sit beside the block, the fill then gives the block
-    TEAM_FILL of the row and no more."""
+    """One 30-character name never makes all three podium blocks 910 px:
+    the block is capped at TEAM_SHARE of the row and the long name shrinks
+    inside its own block, whole. On the podium, where the riders sit
+    beside the block, the fill then gives the block TEAM_FILL of the row
+    and no more."""
     from madtracker.board import pages, theme
 
     widths: set[float] = set()
@@ -1487,23 +1307,24 @@ def test_one_long_team_name_does_not_widen_every_block(qtbot, monkeypatch, paint
         return block(p, rect, *args, **kwargs)
 
     monkeypatch.setattr(theme, "team_block", record)
-    roster = [r.entry for r in madison(teams=5).rows]
-    roster[2].team = "The Fast and the Furious Crew!"
-    w = render(qtbot, "pre_race", P.PreRace(header=HEADER, roster=roster))
+    entries = [r.entry for r in madison(teams=3).rows]
+    entries[2].team = "The Fast and the Furious Crew!"
+    data = P.Finish(header=HEADER, placings=[P.Placing(i + 1, e) for i, e in enumerate(entries)])
+    w = render(qtbot, "finish", data)
     assert len(widths) == 1
     width = widths.pop()
-    page = w.pages["pre_race"]
-    assert page.width() * pages.TEAM_SHARE < width <= page.width() * pages.TEAM_FILL
+    row = _podium_width(w.pages["finish"])
+    assert row * pages.TEAM_SHARE < width <= row * pages.TEAM_FILL + 0.5
     assert "The Fast and the Furious Crew!" in painted
     assert not _cut(painted)
 
 
-def test_a_start_list_block_takes_the_spare_room_but_never_a_riders_full_name(
+def test_a_podium_block_takes_the_spare_room_but_never_a_riders_full_name(
     qtbot, monkeypatch, drawn
 ):
-    """Bars and names are not left small in an empty row: a list with
-    room gives the block TEAM_FILL of the row, and
-    a list without gives it only what the riders' full names leave."""
+    """Bars and names are not left small in an empty row: a podium with
+    room gives the block TEAM_FILL of the row, and one without gives it
+    only what the riders' full names leave."""
     from madtracker.board import pages, theme
 
     widths: list[float] = []
@@ -1514,14 +1335,12 @@ def test_a_start_list_block_takes_the_spare_room_but_never_a_riders_full_name(
         return block(p, rect, *args, **kwargs)
 
     monkeypatch.setattr(theme, "team_block", record)
-    short = [P.Entry(bibs=["1", "2"], names=SHORT[:2], team="Blue", color=COLORS[0])]
-    w = render(qtbot, "pre_race", P.PreRace(header=HEADER, roster=short))
-    page = w.pages["pre_race"]
-    assert widths and widths[0] >= page.width() * pages.TEAM_FILL * 0.9
+    short = P.Entry(bibs=["1", "2"], names=SHORT[:2], team="Blue", color=COLORS[0])
+    w = render(qtbot, "finish", P.Finish(header=HEADER, placings=[P.Placing(1, short)]))
+    page = w.pages["finish"]
+    assert widths and widths[0] >= _podium_width(page) * pages.TEAM_FILL * 0.9
     # A stacked pair that the fill would cut: the block gives up the fill
     # to it, and the pair keeps its full names.
-    from PySide6.QtCore import QRectF
-
     long = P.Entry(bibs=["1", "2"], names=HYPHENATED[:2], team="Blue", color=COLORS[0])
     u = page.u
     row = QRectF(0, 0, 1600 * u, 100 * u)
@@ -1542,41 +1361,8 @@ def test_a_madison_status_row_shows_its_status_and_no_figures(qtbot, drawn):
     out.status, out.laps, out.penalty = "DNF", -2, -20
     render(qtbot, "madison", data)
     seen = strings(drawn)
-    assert "DNF" in seen and "+1" in seen
-    assert "−2" not in seen and "−20" not in seen and "PENALTY" not in seen
-
-
-def test_a_madison_total_plate_keeps_one_width_from_the_first_lap(qtbot, drawn, monkeypatch):
-    """The plates are sized for three figures from the start, so they never widen as
-    the totals grow or a status appears, and three figures sit with the same air on
-    both sides; a status row has no plate."""
-    from madtracker.board import theme
-
-    plates: list[object] = []
-    plate = theme.figure_plate
-
-    def record(p, rect, *args, **kwargs):
-        plates.append(rect)
-        return plate(p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(theme, "figure_plate", record)
-    widths = set()
-    for totals, status in (([0] * 5, ""), ([128, 97, 41, 22, 0], "DNF")):
-        plates.clear()
-        drawn.clear()
-        data = madison(5)
-        for row, total in zip(data.rows, totals, strict=True):
-            row.total = total
-        data.rows[-1].status = status
-        render(qtbot, "madison", data)
-        assert len(plates) == (4 if status else 5)
-        widths |= {round(r.width(), 3) for r in plates}
-    assert len(widths) == 1
-    at = {s: (r, px) for s, r, px, _c in drawn}
-    rect, px = at["128"]
-    figure_w = theme.text_width("128", theme.font(px, theme.HEAVY, tabular=True))
-    left = rect.right() - figure_w - plates[0].left()
-    assert left == pytest.approx(plates[0].right() - rect.right(), abs=1)
+    assert "DNF" in seen and "+1L" in seen
+    assert "−2L" not in seen and "−2" not in seen and "−20" not in seen and "PENALTY" not in seen
 
 
 def test_a_rider_table_status_row_shows_its_status_and_no_figures(qtbot, drawn):
@@ -1602,21 +1388,6 @@ def _start(names, laps=()):
     )
 
 
-def _team_start(n, names=None):
-    return P.PreRace(
-        header=HEADER,
-        roster=[
-            P.Entry(
-                bibs=[str(i + 1), str(i + 41)],
-                names=[SHORT[(2 * i) % 4], SHORT[(2 * i + 1) % 4]],
-                team=(names or [f"Team {k + 1}" for k in range(n)])[i],
-                color=COLORS[i % len(COLORS)],
-            )
-            for i in range(n)
-        ],
-    )
-
-
 def _name_rows(drawn, names):
     return [(r, px) for s, r, px, _c in drawn if s in set(names)]
 
@@ -1637,7 +1408,7 @@ def test_a_small_start_list_shares_the_page_and_its_names_grow(qtbot, drawn, n):
     # Every row is the room shared by the least field, no larger.
     tops = sorted({round(r.center().y()) for r, _px in rows})
     pitch = tops[1] - tops[0]
-    room = bottom - page.margin_rect().y() - 64 * page.u
+    room = bottom - page.margin_rect().y()
     assert pitch <= room / max(n, pages.RIDER_FILL_LEAST) + 1
     assert pitch >= 128 * page.u
 
@@ -1693,52 +1464,19 @@ def test_seven_riders_take_one_column_when_it_sets_them_larger(qtbot, drawn):
     assert len({round(r.x()) for r, _px in _name_rows(drawn, short)}) == 2
 
 
-@pytest.mark.parametrize("n", [2, 3, 4])
-@pytest.mark.parametrize("size", [(1920, 1080), (1920, 1200)])
-def test_a_small_team_start_list_grows_and_keeps_its_riders_inside_their_rows(
-    qtbot, drawn, monkeypatch, n, size
-):
-    """Two to four teams grow past the base list, and each team's two
-    riders stand inside its own row: no line reaches the next team's."""
-    from madtracker.board import pages
-
-    bands = []
-    entry_line = pages.Page.entry_line
-
-    def record(self, p, rect, *args, **kwargs):
-        bands.append(rect)
-        return entry_line(self, p, rect, *args, **kwargs)
-
-    monkeypatch.setattr(pages.Page, "entry_line", record)
-    data = _team_start(n)
-    w = render(qtbot, "pre_race", data, size=size)
-    u = w.pages["pre_race"].u
-    teams = [(r, px) for s, r, px, _c in drawn if s in {e.team for e in data.roster}]
-    assert len(teams) == n
-    riders = [(s, r) for s, r, *_ in drawn if s in set(SHORT)]
-    assert len(riders) == 2 * n
-    # The riders past the base list's 45 px.
-    assert min(px for s, _r, px, _c in drawn if s in set(SHORT)) > 45 * u
-    from PySide6.QtGui import QFontMetricsF
-
-    from madtracker.board import theme
-
-    px = next(px for s, _r, px, _c in drawn if s in set(SHORT))
-    fm = QFontMetricsF(theme.font(px, theme.SEMI))
-    assert len(bands) == n
-    for k, band in enumerate(bands):
-        top, bottom = riders[2 * k][1], riders[2 * k + 1][1]
-        # The ink, capitals to descenders, inside the row's band: the
-        # entry's rect and the band's padding around it, 8 px at most.
-        ink_top = top.y() + fm.ascent() - fm.capHeight()
-        ink_bottom = bottom.y() + fm.ascent() + fm.descent()
-        assert band.y() - 8 * u <= ink_top and ink_bottom <= band.bottom() + 8 * u
-
-
-def test_a_start_list_of_one_counts_one_rider(qtbot, drawn):
-    render(qtbot, "pre_race", _start(["Ada Quill"]))
-    seen = strings(drawn)
-    assert "1 RIDER" in seen and "1 RIDERS" not in seen
+@pytest.mark.parametrize("n", [1, 6, 12, 24])
+def test_a_rider_start_list_draws_no_count_label(qtbot, drawn, n):
+    """The list shows the field, as a Madison's does, so no "12 riders"
+    label takes its first row's height."""
+    data = _laid_out("pre_race", n)
+    w = render(qtbot, "pre_race", data)
+    page = w.pages["pre_race"]
+    assert not [s for s in strings(drawn) if re.search(r"riders?", s, re.IGNORECASE)]
+    names = {e.names[0] for e in data.roster} | {
+        f"{e.names[0][0]}. {_last(e.names[0])}" for e in data.roster
+    }
+    top = min(r.y() for s, r, *_ in drawn if s in names)
+    assert top < page.margin_rect().y() + 64 * page.u
 
 
 FINAL = P.Header(title="Test Race", group="Pro", status="Final")
@@ -1811,7 +1549,7 @@ def test_a_grown_start_list_never_sets_its_rows_shorter_than_the_base_list(
     names = [_name(i) if long else f"{MID[i % len(MID)]} {i}" for i in range(n)]
     w = render(qtbot, "pre_race", _start(names), size=size)
     page = w.pages["pre_race"]
-    room = page.margin_rect().height() - 64 * page.u
+    room = page.margin_rect().height()
     tops = sorted({round(b.y(), 3) for b in bands})
     pitch = tops[1] - tops[0]
     # The base list: two columns from seven riders.
@@ -1848,9 +1586,9 @@ def test_a_grown_result_never_sets_its_rows_below_the_podium_shorter(qtbot, draw
     assert pages.FINISH_FILL_LEAST == 5
 
 
-def test_an_empty_start_list_paints_its_count_alone(qtbot, drawn):
+def test_an_empty_start_list_paints_no_count(qtbot, drawn):
     render(qtbot, "pre_race", _start([]))
-    assert "0 RIDERS" in strings(drawn)
+    assert not [s for s in strings(drawn) if "RIDER" in s.upper()]
 
 
 @pytest.mark.parametrize("riders", [2, 5, 8])
@@ -1901,35 +1639,12 @@ def test_a_madison_holds_its_names_and_totals_when_it_is_decided(qtbot, teams):
         data = madison(teams=teams)
         data.header = P.Header(title="Test Race", group="Pro", status=status)
         for i, row in enumerate(data.rows):
-            row.entry.team, row.total = ["Red", "Blue", "Orange", "Yellow"][i], 30 - i
+            row.total = 30 - i
         theme.text = record
         try:
             render(qtbot, "madison", data)
         finally:
             theme.text = text
-        return next(px for s, px in seen if s == "Red"), next(px for s, px in seen if s == "30")
+        return next(px for s, px in seen if s == "Quill"), next(px for s, px in seen if s == "30")
 
     assert sizes("Final") == sizes("Racing")
-
-
-@pytest.mark.parametrize("size", [(1000, 900), (1200, 1080), (1920, 1200)])
-def test_the_sprint_card_stays_on_a_narrow_board(qtbot, monkeypatch, size):
-    """A board narrower than 16:9 (a window) sets the card in a smaller
-    unit before a card of long names runs off its sides."""
-    from PySide6.QtGui import QPainter
-
-    cards = []
-    rounded = QPainter.drawRoundedRect
-
-    def record(self, rect, *args, **kwargs):
-        cards.append(QRectF(rect))
-        return rounded(self, rect, *args, **kwargs)
-
-    monkeypatch.setattr(QPainter, "drawRoundedRect", record)
-    data = points(riders=8, sprints=4, done=2)
-    data.sprint_result = P.SprintResult(
-        2, [(i + 1, data.rows[i].entry, [5, 3, 2][i]) for i in range(3)], 4
-    )
-    w = render(qtbot, "sprint_points", data, size=size)
-    card = max(cards, key=lambda r: r.width())
-    assert card.left() >= 0 and card.right() <= w.width()

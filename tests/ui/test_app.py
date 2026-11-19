@@ -4053,3 +4053,159 @@ def test_the_platform_keys_undo_close_the_help_and_open_it(make_app, tmp_path, q
     assert QKeySequence(Qt.Key.Key_F1).toString() in keys
     assert QKeySequence(QKeySequence.StandardKey.HelpContents).toString() in keys
     assert win.settings_action.shortcut() == QKeySequence(QKeySequence.StandardKey.Preferences)
+
+
+def test_a_madison_sprint_reaches_the_board_as_scored_and_undo_does_not(make_app, tmp_path):
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[3].race_id)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append((layout, payload)), draw(layout, payload))
+    _play_in_app(c, [("click", "Blue"), ("click", "Red"), ("record", None)])
+    layout, payload = next(x for x in reversed(sent) if x[0] == "madison")
+    assert payload.scored is not None and payload.scored.kind == "sprint"
+    assert [len(k) for k in payload.scored.keys] == [2, 2]
+    sent.clear()
+    assert c.undo(), c.main.surface.problem.text()
+    assert all(getattr(p, "scored", None) is None for _, p in sent)
+
+
+def test_a_madison_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
+    """The first scorer's change slams onto its total on the TV; an Undo stops the play."""
+    from madtracker.board import pages, scorebug
+    from madtracker.board.motion import ManualClock
+    from madtracker.board.payloads import PreRace
+
+    chips: list[str] = []
+    chip = pages.score_chip
+    monkeypatch.setattr(
+        pages,
+        "score_chip",
+        lambda p, rect, s, *a, **k: chips.append(s) or chip(p, rect, s, *a, **k),
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[3].race_id)
+    clock = ManualClock()
+    c.board.set_clock(clock)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append(payload), draw(layout, payload))
+    _play_in_app(c, [("click", "Blue"), ("click", "Red"), ("record", None)])
+    page = c.board.pages["madison"]
+    new = sent[-1]
+    first = new.scored.keys[0]
+    before = next(p for p in reversed(sent[:-1]) if p.header.race_id == new.header.race_id)
+    old = {tuple(r.entry.bibs): r.total for r in getattr(before, "rows", [])}
+    gain = next(r.total for r in new.rows if tuple(r.entry.bibs) == first) - old.get(first, 0)
+    if isinstance(before, PreRace):
+        # The start list turns into the table before the first score plays.
+        rows = min(page.per_page(), len(new.rows))
+        clock.advance(scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS)
+    clock.advance(100)
+    c.board.grab()
+    assert page.scoring_now() and chips == [f"+{gain}"]
+    assert c.undo(), c.main.surface.problem.text()
+    chips.clear()
+    c.board.grab()
+    assert not page.scoring_now() and not chips
+
+
+def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp_path, monkeypatch):
+    """Record Sprint on the demo's Points Race: the start list clears and
+    the table comes in, then plays each rider's points on their total,
+    1st first, with no card; an Undo stops the play."""
+    from madtracker.board import pages, scorebug
+    from madtracker.board.motion import ManualClock
+
+    chips: list[str] = []
+    chip = pages.score_chip
+    monkeypatch.setattr(
+        pages,
+        "score_chip",
+        lambda p, rect, s, *a, **k: chips.append(s) or chip(p, rect, s, *a, **k),
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    c.set_board_live(True)
+    c.select_race(c.races[2].race_id)
+    assert c.live.format_key == "points"
+    clock = ManualClock()
+    c.board.set_clock(clock)
+    sent = []
+    draw = c._set_board
+    c._set_board = lambda layout, payload: (sent.append((layout, payload)), draw(layout, payload))
+    _play_in_app(c, [("click", "12"), ("click", "7"), ("record", None)])
+    layout, new = sent[-1]
+    assert layout == "sprint_points" and c.board.layout_name() == "sprint_points"
+    assert new.scored.kind == "sprint" and list(new.scored.keys) == [("12",), ("7",)]
+    totals = {r.entry.bibs[0]: r.total for r in new.rows}
+    page = c.board.pages["sprint_points"]
+    # The start list clears and the table comes in before the first score plays.
+    rows = min(page.per_page(), len(new.rows))
+    clock.advance(scorebug.INTRO_CLEAR_MS + scorebug.intro_ms(rows) + scorebug.INTRO_HOLD_MS + 100)
+    c.board.grab()
+    assert page.scoring_now() and chips == [f"+{totals['12']}"]
+    clock.advance(scorebug.STEP_MS)
+    c.board.grab()
+    assert chips[-1] == f"+{totals['7']}"
+    assert c.undo(), c.main.surface.problem.text()
+    chips.clear()
+    c.board.grab()
+    assert not page.scoring_now() and not chips
+
+
+def test_the_app_gives_every_canvas_the_chosen_pattern(make_app, tmp_path):
+    from madtracker.board.texture import Adjust
+    from madtracker.control import venue
+
+    shape = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    pages = [p for b in c.boards for p in b.pages.values()]
+    assert len(c.boards) == 2 and all(p.texture.builtin for p in pages)
+    # A stored shape alone changes nothing: the chosen pattern says to draw it.
+    venue.save(
+        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+    )
+    c.apply_venue()
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
+    chosen = Adjust(size=150, rotation=15, opacity=80)
+    venue.save(c.store, name="R", backup="", texture_pattern="venue", texture_adjust=chosen)
+    c.apply_venue()
+    pages = [p for b in c.boards for p in b.pages.values()]
+    assert all(not p.texture.builtin and p.texture.adjust == chosen for p in pages)
+    venue.save(c.store, name="R", backup="", texture_pattern="none")
+    c.apply_venue()
+    assert all(p.texture is None for b in c.boards for p in b.pages.values())
+    venue.save(c.store, name="R", backup="", texture_pattern="dots")
+    c.apply_venue()
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
+
+
+def test_a_file_with_no_texture_puts_the_bolts_back(make_app, tmp_path):
+    from madtracker.control import venue
+
+    shape = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<path d="M0 0 L50 0 L100 50 L50 100 L0 100 L50 50 Z" fill="#f00"/></svg>'
+    )
+    c = make_app(demo=True, data_dir=tmp_path / "data")
+    venue.save(
+        c.store,
+        name="R",
+        backup="",
+        texture=shape,
+        texture_name="bolt.svg",
+        keep_texture=False,
+        texture_pattern="venue",
+    )
+    c.apply_venue()
+    assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
+    # The next file has no shape stored, so a venue choice is the bolts.
+    venue.save(c.store, name="R", backup="", texture=None, keep_texture=False)
+    assert c.store.get_setting(venue.TEXTURE_KEY) is None
+    c.apply_venue()
+    assert all(p.texture.builtin for b in c.boards for p in b.pages.values())

@@ -8,14 +8,26 @@ knows how standings are computed.
 
 import copy
 import math
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QWidget
 
+from madtracker.board import rotation, scorebug, team_rows
 from madtracker.board import theme as t
+from madtracker.board.motion import Clock, Ticker, ease_back, ease_in, ease_out, phase
 from madtracker.board.payloads import (
     Between,
     Elimination,
@@ -23,109 +35,64 @@ from madtracker.board.payloads import (
     Finish,
     Placing,
     PreRace,
-    SprintResult,
+    StandingRow,
     Standings,
     lap_text,
     lap_words,
     ordinal,
     total_text,
 )
+from madtracker.board.scorebug import Frame, Key, Play, ScoreQueue, Step
+from madtracker.board.texture import Adjust, Texture, make_texture
+
+_default_texture: Texture | None = None
+
+
+def default_texture() -> Texture | None:
+    """The bolts at default adjustments, built once for every page."""
+    global _default_texture
+    if _default_texture is None:
+        _default_texture = make_texture("bolts", None, Adjust())
+    return _default_texture
+
 
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter
 
-# A team's total plate is set in from its bar by this share of the bar's
-# height on the top, right, and bottom, so the color shows evenly around it.
-PLATE_MARGIN = 0.12
-# The air inside the plate on each side of the widest total, in ems of
-# the total's type.
-PLATE_PAD = 0.32
-# What the plate is sized for from the first lap, so the plates never
-# change width as the race goes on: three figures (the figures are
+# What a team table's total column is sized for from the first lap, so it
+# never widens as the race goes on: three figures (the figures are
 # tabular, so 888 is as wide as any) and a negative two.
-PLATE_SAMPLES = ("888", total_text(-88))
+TOTAL_SAMPLES = ("888", total_text(-88))
 # What a team page's size is decided for, beside the race's own figures: a
 # lap and a penalty, so the first lap gained or penalty given never steps
 # the totals down partway through a race.
-LAP_SAMPLES = ("+8", lap_text(-8))
+LAP_SAMPLES = ("+8L", f"{lap_text(-8)}L")
 PENALTY_SAMPLES = (lap_text(-88),)
-# Between two figure columns inside a bar.
+
+
+def team_laps_text(n: int) -> str:
+    """The Madison table's laps, "+1L" or "−1L": it has no headings, so the L
+    keeps a lap apart from a penalty, which stays a bare "−5"."""
+    return f"{lap_text(n)}L" if n else ""
+
+
+# Between two figure columns on a team row.
 FIGURE_GAP = 40
-# The sprint card's points sit this far after the widest team block or rider.
-SPRINT_GAP = 28
-# The widest the sprint card grows, in the card's own unit.
-SPRINT_CARD_MOST = 1200
-# The card is drawn in a unit larger than the page's, up to this much,
-# since it is up for a few seconds and must be read from the stands at a
-# glance; a card with more places takes a smaller unit so it stays on
-# the page with this much air above and below it.
-SPRINT_CARD_SCALE = 1.5
-SPRINT_CARD_AIR = 40
-# The card's height in its unit: the title band, the rows, the foot.
-SPRINT_ROW_H = 84
-SPRINT_HEAD_H = 130
-SPRINT_FOOT_H = 30
-# The table behind the card is dimmed to this alpha: dark enough that
-# the card is what the eye finds, light enough to show the table is there.
-SPRINT_VEIL = 235
-
-
-def sprint_card_scale(rows: int, area_h: float, u: float) -> float:
-    """The card's unit over the page's: the largest up to the cap that fits ``area_h``."""
-    h = (SPRINT_HEAD_H + rows * SPRINT_ROW_H + SPRINT_FOOT_H) * u
-    fit = (area_h - 2 * SPRINT_CARD_AIR * u) / h
-    return max(0.0, min(SPRINT_CARD_SCALE, fit))
-
-
-def figure(p: QPainter, rect: QRectF, s: str, f: QFont, color: QColor, align=RIGHT) -> float:
-    """One line centered on ``rect`` by its capitals; return the width it used.
-
-    A team block centers its name by the capitals (``t.stacked_lines``),
-    so figures set beside or on a block are centered the same way and
-    share the name's baseline.
-    """
-    [line] = t.stacked_lines(rect, f, 1)
-    return t.text(p, QRectF(rect.x(), line.y(), rect.width(), line.height()), s, f, color, align)
-
-
-def block_name(p: QPainter, rect: QRectF, color: str, name: str, f: QFont, floor_px: float) -> None:
-    """A team's name in its color's ink, centered in ``rect``, a part of its block.
-
-    ``t.team_block`` centers a name in the whole block; a block that also
-    carries figures centers its name in the part the figures leave. The
-    name shrinks as ``t.team_block`` shrinks it, never under ``floor_px``.
-    """
-    if not name:
-        return
-    pad = f.pixelSize() * t.TEAM_PAD
-    room = rect.width() - 2 * pad
-    w = t.text_width(name, f)
-    if w > room > 0:
-        least = floor_px / f.pixelSize() if floor_px else t.NAME_FLOOR
-        f = t.scaled(f, min(1.0, max(least, room / w)))
-    shown = QRectF(rect.x() + pad, rect.y(), room, rect.height())
-    figure(p, shown, name, f, t.team_ink(QColor(color)), CENTER)
-
-
-def name_zone(bar: QRectF, names: list[str], f: QFont, figures_x: float, u: float) -> QRectF:
-    """Where a bar's name is centered: the whole bar, or the part left of its figures.
-
-    The whole bar while the widest name clears the figures, so the names
-    sit in the middle of the row; one answer for the list, so the names
-    stay one column.
-    """
-    gap = 24 * u
-    pad = f.pixelSize() * t.TEAM_PAD
-    half = max((t.text_width(n, f) for n in names), default=0.0) / 2 + pad
-    if bar.center().x() + half <= figures_x - gap:
-        return bar
-    return QRectF(bar.x(), bar.y(), max(0.0, figures_x - gap - bar.x()), bar.height())
 
 
 def lap_chip_height(u: float) -> float:
     """A lap chip whose type is the board's floor, so it reads from the stands."""
     return t.MIN_PX * u / t.CHIP_TYPE
+
+
+def band_gap(pitch: float, u: float) -> float:
+    """The space between two rows of a list ``pitch`` apart.
+
+    It gives way in a dense list, so the plate keeps its size rather than
+    the air around it.
+    """
+    return min(12 * u, pitch * 0.12)
 
 
 class Page(QWidget):
@@ -140,7 +107,12 @@ class Page(QWidget):
         super().__init__(parent)
         self.data = None
         self.u = 1.0
+        # The canvas sets the time source; None leaves the page at rest.
+        self.clock: Clock | None = None
         self.rider_label = "bibs_names"
+        # The venue's texture, shared by every page of every board until
+        # the window sets one.
+        self.texture = default_texture()
         # The team column of the list being drawn and how its riders are
         # set beside it (``entry_scale`` sets both, see ``team_layout``).
         self.team_w = 0.0
@@ -151,6 +123,9 @@ class Page(QWidget):
         # to spare gives it to the block rather than leave small bars and
         # names in an empty row.
         self.team_fill = 0.0
+        # The page the board turns from while ``set_data`` runs, so a page
+        # can turn in from what was on screen; None at any other time.
+        self.outgoing: Page | None = None
         # The page paints its whole rect, so Qt can skip clearing it.
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
 
@@ -162,9 +137,13 @@ class Page(QWidget):
     def bibs_only(self) -> bool:
         return self.rider_label == "bibs"
 
-    def set_data(self, data) -> None:
+    def set_data(self, data, prev=None) -> None:
+        """Show ``data``; ``prev`` is the payload the board last showed for the same race, if any."""
         self.data = data
         self.update()
+
+    def stop_motion(self) -> None:
+        """Drop any motion still to play, as the board turns to another page."""
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
@@ -237,7 +216,7 @@ class Page(QWidget):
             # Without the plate the name is the whole row, so it takes the
             # weight the plate had.
             return [(rect, name, t.font(k, t.BOLD), "name")]
-        x = rect.x() + t.plate_width(self.plate_height(h)) + 26 * u
+        x = rect.x() + t.plate_width(self.plate_height(h)) + PLATE_NAME_GAP * u
         return [(QRectF(x, rect.y(), rect.right() - x, h), name, t.font(k, t.SEMI), "name")]
 
     def team_px(self, k: float, size: float, h: float) -> float:
@@ -336,14 +315,8 @@ class Page(QWidget):
         return max(k * 0.8, min(k, t.MIN_PX * self.u))
 
     def plate_height(self, h: float) -> float:
-        """A bib plate's height in an entry ``h`` tall.
-
-        Three quarters of the row when the row is roomy; in a dense list
-        the plate takes more of its row, up to nearly all of it, so its
-        digits stay near the board's minimum instead of shrinking with the
-        row. The digits are 0.68 of the plate (``t.plate``).
-        """
-        return min(h * 0.92, max(h * 0.74, t.MIN_PX * self.u / 0.68))
+        """A bib plate's height in an entry ``h`` tall (``plate_height``)."""
+        return plate_height(h, self.u)
 
     def lap_room(self, laps: int) -> float:
         """The width a lap chip takes at the end of an entry, its gap included."""
@@ -490,29 +463,88 @@ class Page(QWidget):
         """One scale for a list of single-line names drawn bold at ``px``."""
         return t.fit_scale((n, width, t.font(px, t.BOLD)) for n in names)
 
-    def block_scale(self, names: list[str], width: float, px: float) -> float:
+    def line_start(self, line: QRectF, f: QFont, card: QRectF | None) -> float:
+        """Where a line of ``f`` set in ``line`` may start: on ``card``, clear of its bar.
+
+        The bar leans nearest the line at its capitals' top
+        (``team_rows.bar_clear``).
+        """
+        if card is None:
+            return line.left()
+        return max(line.left(), team_rows.bar_clear(card, caps_top(line, f), self.u))
+
+    def line_room(self, line: QRectF, f: QFont, card: QRectF | None) -> float:
+        """How wide a line of ``f`` set in ``line`` may be: on ``card``, what its bar leaves."""
+        return max(0.0, line.right() - self.line_start(line, f, card))
+
+    def card_axis(self, card: QRectF, top: float, right: float) -> float:
+        """The axis a card's content is centered on: the middle of what the card's bar leaves.
+
+        ``top`` is the content's highest point at its largest, where the
+        bar leans nearest it, and ``right`` its right limit; the content
+        reads centered in the card's open room rather than under the bar.
+        """
+        return (team_rows.bar_clear(card, top, self.u) + right) / 2
+
+    def card_line(
+        self,
+        p: QPainter,
+        line: QRectF,
+        s: str,
+        f: QFont,
+        color: QColor,
+        card: QRectF | None = None,
+        axis: float | None = None,
+    ) -> None:
+        """One line centered in ``line``; on ``card``, centered on ``axis`` and clear of its bar.
+
+        A line too wide to center there keeps to the bar's clearance on
+        the left and ``line``'s right edge, so it has the whole room the
+        bar leaves rather than a centered share of it.
+        """
+        if card is None:
+            t.text(p, line, s, f, color, CENTER)
+            return
+        start = self.line_start(line, f, card)
+        w = t.text_width(s, f)
+        x = max(start, min((line.center().x() if axis is None else axis) - w / 2, line.right() - w))
+        t.text(p, QRectF(x, line.y(), line.right() - x, line.height()), s, f, color, LEFT)
+
+    def block_scale(
+        self, names: list[str], rect: QRectF, px: float, card: QRectF | None = None
+    ) -> float:
         """One scale for a grid of ``name_block`` cards.
 
         Each name may use one line or two (first name over the rest), so
         its own best scale is the better of the two; the grid takes the
-        smallest of those so every card matches.
+        smallest of those so every card matches. On ``card`` each line
+        has the room the bar leaves it (``line_room``).
         """
         f = t.font(px, t.BOLD)
+
+        def rooms(g: QFont) -> tuple[float, list[float]]:
+            one = self.line_room(t.stacked_lines(rect, g, 1)[0], g, card)
+            return one, [self.line_room(r, g, card) for r in t.stacked_lines(rect, g, 2)]
+
+        one_w, two_w = rooms(f)
         scale = 1.0
         for name in names:
-            one = t.fit_scale([(name, width, f)], floor=0.0)
+            one = t.fit_scale([(name, one_w, f)], floor=0.0)
             first, sep, rest = name.strip().partition(" ")
-            two = t.fit_scale([(first, width, f), (rest, width, f)], floor=0.0) if sep else 0.0
+            two = (
+                t.fit_scale([(first, two_w[0], f), (rest, two_w[1], f)], floor=0.0) if sep else 0.0
+            )
             scale = min(scale, max(one, two))
         scale = max(t.NAME_FLOOR, scale)
 
         def fits(scale: float) -> bool:
             g = t.scaled(f, scale)
+            one_w, two_w = rooms(g)
             for name in names:
                 first, sep, rest = name.strip().partition(" ")
-                if t.text_width(name.strip(), g) <= width:
+                if t.text_width(name.strip(), g) <= one_w:
                     continue
-                if sep and t.text_width(first, g) <= width and t.text_width(rest, g) <= width:
+                if sep and t.text_width(first, g) <= two_w[0] and t.text_width(rest, g) <= two_w[1]:
                     continue
                 return False
             return True
@@ -524,7 +556,15 @@ class Page(QWidget):
         return scale
 
     def name_block(
-        self, p: QPainter, rect: QRectF, name: str, px: float, color=t.TEXT, scale: float = 1.0
+        self,
+        p: QPainter,
+        rect: QRectF,
+        name: str,
+        px: float,
+        color=t.TEXT,
+        scale: float = 1.0,
+        card: QRectF | None = None,
+        axis: float | None = None,
     ) -> None:
         """A name centered in ``rect``, on two lines when one would not fit.
 
@@ -532,32 +572,35 @@ class Page(QWidget):
         better as two big lines than as one line squeezed to fit. The
         first word goes on top so a multi-word last name stays together.
         Two lines are set as one block (``t.stacked_lines``) so they read
-        as one name, centered in the card.
+        as one name, centered in the card. On a rider row's ``card`` the
+        lines center on ``axis`` and each keeps clear of the bar
+        (``card_line``).
         """
         f = t.scaled(t.font(px, t.BOLD), scale)
-        w = rect.width()
         name = name.strip()
         first, sep, rest = name.partition(" ")
         rest = rest.strip()
+        w = self.line_room(t.stacked_lines(rect, f, 1)[0], f, card)
+        w1, w2 = (self.line_room(r, f, card) for r in t.stacked_lines(rect, f, 2))
 
-        def fits(s: str) -> bool:
-            return t.text_width(s, f) <= w
+        def fits(s: str, width: float = w) -> bool:
+            return t.text_width(s, f) <= width
 
         # The steps run in the order of ``fit_name``: the first name gives
         # way to its initial before the last name is ever cut.
         short = t.initialed(name)
         if fits(name) or not short:
             lines = [t.fit_name(name, w, f)]
-        elif fits(first) and fits(rest):
+        elif fits(first, w1) and fits(rest, w2):
             lines = [first, rest]
         elif fits(short):
             lines = [short]
         else:
             # The initial keeps a line of its own so the last name gets
             # the whole width before it is elided.
-            lines = [f"{first[0]}.", t.elide(rest, w, f)]
+            lines = [f"{first[0]}.", t.elide(rest, w2, f)]
         for r, s in zip(t.stacked_lines(rect, f, len(lines)), lines, strict=True):
-            t.text(p, r, s, f, color, CENTER)
+            self.card_line(p, r, s, f, color, card, axis)
 
     def section_label(
         self, p: QPainter, x: float, y: float, s: str, color: QColor = t.MUTED
@@ -574,22 +617,34 @@ class Page(QWidget):
         fit = max(1, int(height // (LIST_MIN_PITCH * self.u)))
         return max(1, min(most, -(-count // fit)))
 
+    def bar_lead(self, band_h: float, h: float, size: float, teams: bool = False) -> float:
+        """How far a rider row's plate, or its name without one, stands from the row's left end; see ``bar_lead``."""
+        return bar_lead(band_h, h, size, self.u, self.show_bibs, teams)
+
     def rows_geometry(
-        self, area: QRectF, count: int, cols: int, pitch_cap: float = 112, name_cap: float = 46
+        self,
+        area: QRectF,
+        count: int,
+        cols: int,
+        pitch_cap: float = 112,
+        name_cap: float = 46,
+        barred: bool = False,
     ) -> tuple[int, float, float, QRectF, tuple[float, float, float, float]]:
-        """``entry_rows``' layout: rows a column, pitch, name size, first entry rect, padding."""
+        """``entry_rows``' layout: rows a column, pitch, name size, first entry rect, padding.
+
+        ``barred`` lays out rider rows, whose entries stand clear of the bar.
+        """
         u = self.u
         col_w = (area.width() - LIST_COL_GAP * u * (cols - 1)) / cols
         fit = max(1, int(area.height() // (LIST_MIN_PITCH * u)))
         per_col = min(fit, math.ceil(count / cols))
         pitch = min(pitch_cap * u, area.height() / per_col)
         size = min(name_cap * u, pitch * LIST_NAME_SHARE)
-        # The band and its padding give way in a dense list, so the plate
-        # keeps its size rather than the air around it.
-        band_gap = min(12 * u, pitch * 0.12)
+        band_h = pitch - band_gap(pitch, u)
         vpad = min(8 * u, pitch * 0.07)
-        pad = (18 * u, vpad, -18 * u, -vpad)
-        inner = QRectF(area.x(), area.y(), col_w, pitch - band_gap).adjusted(*pad)
+        left = self.bar_lead(band_h, band_h - 2 * vpad, size) if barred else 18 * u
+        pad = (left, vpad, -18 * u, -vpad)
+        inner = QRectF(area.x(), area.y(), col_w, band_h).adjusted(*pad)
         return per_col, pitch, size, inner, pad
 
     def team_fit(
@@ -623,6 +678,7 @@ class Page(QWidget):
         pitch_cap: float = 112,
         name_cap: float = 46,
         laps: list[int] | None = None,
+        bar: str | None = None,
     ) -> None:
         """Entries as banded rows in ``cols`` columns, filled top to bottom.
 
@@ -630,14 +686,16 @@ class Page(QWidget):
         a long list sets smaller type in shorter rows; at 24 riders a
         fixed 46 px name would lose its descenders to the next row. Rows never
         go tighter than LIST_MIN_PITCH: what still does not fit is left off,
-        never drawn over itself.
+        never drawn over itself. With ``bar`` the rows are rider rows, the
+        Madison's row with a bar of that color (``team_rows.paint_band``);
+        without it each is a rounded band of ``fill``.
         """
         u = self.u
         if not entries:
             return
         gap = LIST_COL_GAP * u
         per_col, pitch, size, inner, pad = self.rows_geometry(
-            area, len(entries), cols, pitch_cap, name_cap
+            area, len(entries), cols, pitch_cap, name_cap, barred=bar is not None
         )
         col_w = (area.width() - gap * (cols - 1)) / cols
         band_h = inner.height() + pad[1] - pad[3]
@@ -646,24 +704,77 @@ class Page(QWidget):
         for i, entry in enumerate(entries):
             c, r = divmod(i, per_col)
             row = QRectF(area.x() + c * (col_w + gap), area.y() + r * pitch, col_w, band_h)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(fill)
-            p.drawRoundedRect(row, 10 * u, 10 * u)
+            if bar is None:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(fill)
+                p.drawRoundedRect(row, 10 * u, 10 * u)
+            else:
+                team_rows.paint_band(
+                    p,
+                    row,
+                    bar,
+                    u,
+                    slant=t.SLANT,
+                    texture=self.texture,
+                    dpr=self.devicePixelRatioF(),
+                )
             lap = laps[i] if laps and i < len(laps) else 0
             self.entry_line(p, row.adjusted(*pad), entry, size, scale=scale, laps=lap)
 
 
+def plate_height(h: float, u: float) -> float:
+    """A bib plate's height in an entry ``h`` tall.
+
+    Three quarters of the row when the row is roomy; in a dense list
+    the plate takes more of its row, up to nearly all of it, so its
+    digits stay near the board's minimum instead of shrinking with the
+    row. The digits are 0.68 of the plate (``t.plate``).
+    """
+    return min(h * 0.92, max(h * 0.74, t.MIN_PX * u / 0.68))
+
+
+def bar_lead(
+    band_h: float, h: float, size: float, u: float, show_bibs: bool, teams: bool = False
+) -> float:
+    """How far a rider row's plate, or its name without one, stands from the row's left end.
+
+    Past the bar and ROW_PAD, and as much further as keeps the plate's
+    top and the name's capitals SLANT_AIR from the bar's slanted edge
+    (``team_rows.clearance``), as the Madison start list's riders are:
+    ``band_h`` is the row's height, ``h`` the entry's that the plate
+    is sized in, and ``size`` the name's largest, so a list set
+    smaller never moves its plates or names. ``teams`` is a list that
+    holds a team, whose block is the entry's whole height.
+    """
+    shift = team_rows.slant_shift(band_h, size, u)
+    if show_bibs:
+        ph = plate_height(h, u)
+        # The name stands a plate's width and its gap further right.
+        beside = shift - t.plate_width(ph) - PLATE_NAME_GAP * u
+        shift = max(team_rows.clearance(band_h, ph / 2, u), beside)
+    if teams:
+        shift = max(shift, team_rows.clearance(band_h, h / 2, u))
+    return (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
+
+
+def rider_row_fill(span: float, n: int) -> float:
+    """One rider table row's pitch when ``n`` rows share ``span``, down to RIDER_FILL_LEAST."""
+    return span / max(n, RIDER_FILL_LEAST)
+
+
 # Between a team block and its riders' names.
 TEAM_GAP = 28
+# Between a rider's bib plate and the name beside it.
+PLATE_NAME_GAP = 26
 # Between the columns of a list of entries.
 LIST_COL_GAP = 48
 # The most of an entry's width a team block takes for its name at full
 # size; a longer name shrinks inside it, down to the board's floor.
 TEAM_SHARE = 0.4
 # How much of a row a block takes beside its riders when they leave the
-# room (the start list, the result's podium): the color is the thing a
-# rider at speed finds first, so it gets the spare room, and the riders
-# keep one column beside it.
+# room (the result's podium): the color is the thing a rider at speed
+# finds first, so it gets the spare room, and the riders keep one column
+# beside it.
 TEAM_FILL = 0.6
 # A list row's name as a share of the row's pitch.
 LIST_NAME_SHARE = 0.56
@@ -673,15 +784,20 @@ LIST_MIN_PITCH = t.MIN_PX / LIST_NAME_SHARE
 # to take their place: one long column of names barely larger has
 # shorter rows and smaller plates.
 ONE_COLUMN_GAIN = 1.03
-# A team list row's name as a share of its pitch: less than a rider's, as
-# the row stacks the team's two riders beside the block.
-TEAM_LIST_NAME_SHARE = 0.4
 # The widest lap chips a list keeps room for while it grows, so a lap
 # taken mid-race never steps the list's names down.
 LAP_CHIP_SAMPLES = (8, -8)
 
 
 class PreRacePage(Page):
+    """The start list: riders as a list of rows, or a Madison's teams as one row each.
+
+    A team list longer than TEAM_PAGE_ROWS is shown a page at a time, as
+    the team standings are; ``advance`` turns the page.
+    """
+
+    page = 0
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         # The last list's layout and what it was worked out for: finding
@@ -689,51 +805,109 @@ class PreRacePage(Page):
         # repaint of the same list on the same page needs none of that.
         self._layout: tuple[tuple, tuple[int, float, float]] | None = None
 
+    def set_data(self, data, prev=None) -> None:
+        if self.data is None or getattr(self.data, "header", None) != getattr(data, "header", None):
+            self.page = 0
+        super().set_data(data, prev)
+
+    def teams(self) -> bool:
+        return self.data is not None and any(e.color for e in self.data.roster)
+
+    def page_count(self) -> int:
+        if not self.teams():
+            return 1
+        n = len(self.data.roster)
+        return max(1, -(-n // page_rows(n, TEAM_PAGE_ROWS)))
+
+    def advance(self) -> None:
+        if self.page_count() > 1:
+            self.page = (self.page + 1) % self.page_count()
+            self.update()
+
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: PreRace = self.data
         u = self.u
-        count = len(d.roster)
-        teams = any(e.color for e in d.roster)
-        noun = ("team" if teams else "rider") + ("" if count == 1 else "s")
-        # The top bar already says Start list; the count is the news here.
-        self.section_label(p, area.x(), area.y(), f"{count} {noun}")
-        top = area.y() + 64 * u
+        if self.teams():
+            self.team_list(p, area, d)
+            return
+        # No count label, as on a Madison's: the list shows the field, so
+        # the rows take the page from its top.
         laps = any(d.laps)
-        room = QRectF(area.x(), top, area.width(), area.bottom() - top)
-        if self.bibs_only and not teams and not laps and all(e.bibs for e in d.roster):
+        room = QRectF(area)
+        if self.bibs_only and not laps and all(e.bibs for e in d.roster):
             plate_grid(p, room, [e.bibs[0] for e in d.roster], u)
             return
         if not d.roster:
             return
-        self.team_fill = TEAM_FILL
         key = (room.width(), room.height(), u, self.rider_label, d)
         if self._layout is None or self._layout[0] != key:
             # A copy, so a payload changed where it stands is not taken for the one measured.
             self._layout = ((*key[:-1], copy.deepcopy(d)), self.list_layout(room, d))
         cols, pitch_cap, name_cap = self._layout[1]
-        self.entry_rows(p, room, d.roster, cols, t.ROW, pitch_cap, name_cap, d.laps)
+        # Rider rows, every bar neutral: a start list has no leader.
+        bar = team_rows.RIDER_BAR
+        self.entry_rows(p, room, d.roster, cols, t.ROW, pitch_cap, name_cap, d.laps, bar)
+
+    def team_list(self, p: QPainter, area: QRectF, d: PreRace) -> None:
+        """A Madison's teams, one row each: the riders' names lead and the color identifies.
+
+        No section label and no team word or name: the start list is
+        riders only (design section 10). The rows share the page down to
+        TEAM_FILL_LEAST rows' worth, so fewer teams get larger names and a
+        lone team takes half the page. Every page is set for a full page's
+        rows, so the names keep one size as the pages turn. The list
+        leaves the board at the first sprint or lap, so a row keeps no
+        room for a lap. The rows are the table's: a square left end and a
+        swatch whose right edge leans at the score chip's slant
+        (``theme.SLANT``), so the turn to the table crossfades like for
+        like.
+        """
+        u = self.u
+        pages = self.page_count()
+        page = self.page % pages
+        per_page = page_rows(len(d.roster), TEAM_PAGE_ROWS)
+        rows = d.roster[page * per_page : (page + 1) * per_page]
+        bottom = area.bottom() - (PAGE_DOTS_H * u if pages > 1 else 0)
+        gap = team_rows.ROW_GAP * u
+        rh = team_rows.stacked_row_h(bottom - area.y(), per_page, u, TEAM_FILL_LEAST)
+        first_px, last_px = team_rows.start_name_px(rh, u)
+        for i, e in enumerate(rows):
+            row = QRectF(area.x(), area.y() + i * (rh + gap), area.width(), rh)
+            team_rows.paint_band(
+                p,
+                row,
+                e.color,
+                u,
+                slant=t.SLANT,
+                texture=self.texture,
+                dpr=self.devicePixelRatioF(),
+            )
+            team_rows.paint_start_riders(
+                p, row, e.bibs, e.names, first_px, last_px, u, self.rider_label
+            )
+        if pages > 1:
+            page_dots(p, area, pages, page, u)
 
     def list_layout(self, room: QRectF, d: PreRace) -> tuple[int, float, float]:
         """The list's columns and its pitch and name caps: the plan that sets its names largest."""
         u = self.u
         count = len(d.roster)
-        teams = any(e.color for e in d.roster)
         if count <= 6:
             # A small field is one column of big names.
             plans = [(1, 128, 56)]
         else:
             cols = max(2, self.list_columns(count, room.height()))
-            if teams:
-                cols = self.team_columns(room, d.roster, cols, d.laps)
             plans = [(cols, 112, 46)]
-            if not teams and count <= room.height() // (LIST_MIN_PITCH * u):
+            if count <= room.height() // (LIST_MIN_PITCH * u):
                 # A mid-size field may read larger in one column than in
                 # two, whose half-width rows cap the names.
                 plans.append((1, 112, 46))
         best = None
         for cols, pitch_cap, name_cap in plans:
             caps = self.grown_caps(room, d.roster, cols, pitch_cap, name_cap)
-            _per, pitch, size, _inner, _pad = self.rows_geometry(room, count, cols, *caps)
+            _per, pitch, size, _inner, _pad = self.rows_geometry(
+                room, count, cols, *caps, barred=True
+            )
             if best is None:
                 best, least_pitch = (size, cols, caps), pitch
             elif size > best[0] * ONE_COLUMN_GAIN and pitch >= least_pitch:
@@ -748,64 +922,32 @@ class PreRacePage(Page):
     ) -> tuple[float, float]:
         """The list's pitch and name caps, grown so a small field's rows share the page.
 
-        The rows share the room down to a least field, as the race's own
-        table does, shared by the list's columns; the type grows with them
-        only while every name fits whole at its size and, for teams, every
-        team keeps its riders beside it. A rider list keeps room for a lap
-        chip on every row, so the first lap taken never steps it down. The
-        caps never go under ``pitch_cap`` and ``name_cap``, so a long list
-        keeps its base sizes.
+        The rows share the room down to RIDER_FILL_LEAST rows, as the race's
+        own table does, shared by the list's columns; the type grows with
+        them only while every name fits whole at its size. The list keeps
+        room for a lap chip on every row, so the first lap taken never
+        steps it down. The caps never go under ``pitch_cap`` and
+        ``name_cap``, so a long list keeps its base sizes.
         """
         u = self.u
-        teams = any(e.color for e in roster)
         per_col = math.ceil(len(roster) / cols)
-        least = math.ceil((TEAM_FILL_LEAST if teams else RIDER_FILL_LEAST) / cols)
-        share = TEAM_LIST_NAME_SHARE if teams else LIST_NAME_SHARE
+        least = math.ceil(RIDER_FILL_LEAST / cols)
         fill = room.height() / max(per_col, least)
         base_size = min(name_cap * u, min(pitch_cap * u, room.height() / per_col) * LIST_NAME_SHARE)
-        # A team list leaves the board at its first lap, for the race's table.
-        chip = 0 if teams else max(LAP_CHIP_SAMPLES, key=self.lap_room)
+        chip = max(LAP_CHIP_SAMPLES, key=self.lap_room)
         laps = [chip] * len(roster)
-        size = fill * share
+        size = fill * LIST_NAME_SHARE
         while size > base_size:
             # The rows never come out shorter than the base list's, which
             # would cost the plates what the names gain.
-            caps = (max(size / share / u, pitch_cap), size / u)
-            _per, _pitch, got, inner, _pad = self.rows_geometry(room, len(roster), cols, *caps)
-            whole = self.entry_scale(roster, inner, got, True, laps) >= 1.0
-            if whole and teams:
-                whole = self.team_fit(roster, inner, got, True, laps) == 2
-                whole = whole and self.pair_height(got) <= inner.height()
-            if whole:
+            caps = (max(size / LIST_NAME_SHARE / u, pitch_cap), size / u)
+            _per, _pitch, got, inner, _pad = self.rows_geometry(
+                room, len(roster), cols, *caps, barred=True
+            )
+            if self.entry_scale(roster, inner, got, True, laps) >= 1.0:
                 return caps
             size *= 0.96
         return pitch_cap, name_cap
-
-    def pair_height(self, size: float) -> float:
-        """The height a team's two riders need in a list set at ``size``.
-
-        The lines are centered by their capitals (``t.stacked_lines``), so
-        the descenders below need the same room above.
-        """
-        f = t.font(self.pair_size(size), t.SEMI)
-        fm = QFontMetricsF(f)
-        return fm.capHeight() + t.STACK_LEADING * f.pixelSize() + 2 * fm.descent()
-
-    def team_columns(self, room: QRectF, roster: list[Entry], cols: int, laps: list[int]) -> int:
-        """Fewer, wider columns for a team list whose riders or names a column would lose.
-
-        Eight long team names in two columns would show blocks alone over
-        half an empty page; one column holds them with their riders. A list
-        keeps its columns when it is whole in them, and
-        never takes fewer than show every entry.
-        """
-        best = (-1, cols)
-        for c in range(cols, 0, -1):
-            per_col, _pitch, size, inner, _pad = self.rows_geometry(room, len(roster), c)
-            if per_col * c < len(roster):
-                break
-            best = max(best, (self.team_fit(roster, inner, size, True, laps), c))
-        return best[1]
 
 
 # The most riders still in that show as cards; more open as rows. Four
@@ -817,6 +959,26 @@ ROW_NAME_PX = 50
 # The tallest bib plate on a remaining-rider card: the plate grid's own
 # largest, which a three-digit bib fills from the far end of the stands.
 PLATE_CAP = 170
+# Elimination's side column and its gap from the riders still in, the
+# gap a list's columns have. The last-out card's bar takes the left of
+# the column, so the column is as wide as keeps a 17-letter surname such
+# as Featherstonehaugh whole above the floor beside it, and the riders
+# still in keep their room. On a board narrower than 16:9 the column
+# takes no more than SIDE_SHARE of the page, so two cards still hold
+# their plates beside their bars.
+SIDE_W = 616
+SIDE_GAP = 48
+SIDE_SHARE = 0.38
+# Between two cards of riders still in.
+CARD_GAP = 24
+# Between a card's content and its rounded right end.
+CARD_PAD = 16
+
+
+def caps_top(line: QRectF, f: QFont) -> float:
+    """Where the capitals of a line of ``f`` set centered in ``line`` start."""
+    fm = QFontMetricsF(f)
+    return line.center().y() + (fm.ascent() - fm.descent()) / 2 - fm.capHeight()
 
 
 def plate_grid(p: QPainter, area: QRectF, bibs: list[str], u: float) -> None:
@@ -853,7 +1015,10 @@ class EliminationPage(Page):
 
     ``fresh`` is set by the window for a few seconds after an elimination
     and drives the red treatment; afterwards the card stays, quieter, so a
-    spectator who looked away can still see who went.
+    spectator who looked away can still see who went. Every card and row
+    is a rider row (design section 10): the riders still in have the
+    neutral bar, since an elimination has no leader, and the last-out
+    card's bar is the out color.
     """
 
     fresh = True
@@ -861,8 +1026,8 @@ class EliminationPage(Page):
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Elimination = self.data
         u = self.u
-        side_w = 600 * u
-        gap = 64 * u
+        side_w = min(SIDE_W * u, area.width() * SIDE_SHARE)
+        gap = SIDE_GAP * u
         grid = QRectF(area.x(), area.y(), area.width() - side_w - gap, area.height())
         side = QRectF(grid.right() + gap, area.y(), side_w, area.height())
 
@@ -880,53 +1045,122 @@ class EliminationPage(Page):
             self._rows(p, QRectF(grid.x(), top, grid.width(), grid.bottom() - top))
             self._side(p, side, n)
             return
-        # Four to six left are two columns of cards: three across are too
-        # narrow for a name such as M. Vanderbilt-Rochester at the board's
-        # minimum, and four would leave the fourth alone on a second row.
-        cols = 2 if n >= 4 else max(n, 1)
-        rows = max(1, math.ceil(n / cols))
-        cg = 24 * u
-        cw = (grid.width() - cg * (cols - 1)) / cols
+        room_h = grid.bottom() - top
+        cols, cw, ch = self.cards(grid.width(), room_h, n)
+        cg = CARD_GAP * u
         # The last few riders are the race's climax: their cards grow.
         final = n <= 4
-        ch = min((420 if final else 250) * u, (grid.bottom() - top - cg * (rows - 1)) / rows)
         names = [e.names[0] if e.names and not self.bibs_only else "" for e in d.remaining]
         block_px = min((88 if final else 52) * u, ch * 0.26)
         card_px = min((64 if final else 36) * u, ch * 0.15)
+        # Every card has one geometry, worked out on one card at the
+        # origin: the content centers on the room the bar leaves at the
+        # content's top, at its largest, so every card reads the same.
+        frame = QRectF(0, 0, cw, ch)
+        right = cw - CARD_PAD * u
         if self.show_bibs:
+            name_rect = QRectF(16 * u, ch * 0.64, cw - 32 * u, ch * 0.28)
             f = t.font(card_px, t.SEMI)
-            scale = t.fit_scale(((n, cw - 32 * u, f) for n in names), self.name_floor(card_px))
+            room = self.line_room(name_rect, f, frame)
+            scale = t.fit_scale(((n, room, f) for n in names), self.name_floor(card_px))
+            plate_top = ch * 0.13
+            axis = self.card_axis(frame, plate_top, right)
+            # One plate size from four left to two, the least any of their
+            # layouts holds, and never more for five or six: the plates
+            # never shrink as riders go out. The last rider's card is the
+            # widest, so it keeps its own.
+            least = min(
+                self.card_plate(*self.cards(grid.width(), room_h, k)[1:]) for k in range(2, 5)
+            )
+            own = self.card_plate(cw, ch)
+            ph = own if n == 1 else (least if final else min(own, least))
         else:
-            scale = self.block_scale(names, cw - 32 * u, block_px)
+            inner = QRectF(16 * u, 10 * u, cw - 32 * u, ch - 20 * u)
+            scale = self.block_scale(names, inner, block_px, frame)
+            # A name on two lines stands highest.
+            f = t.font(block_px, t.BOLD)
+            axis = self.card_axis(frame, caps_top(t.stacked_lines(inner, f, 2)[0], f), right)
+        dpr = self.devicePixelRatioF()
         for i, entry in enumerate(d.remaining):
             r, c = divmod(i, cols)
-            card = QRectF(grid.x() + c * (cw + cg), top + r * (ch + cg), cw, ch)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.CARD)
-            p.drawRoundedRect(card, 14 * u, 14 * u)
+            x = grid.x() + c * (cw + cg)
+            if n == 3 and cols == 2 and i == 2:
+                # The third card alone on its row sits under the gap
+                # between the two, so the three read as one group.
+                x = grid.x() + (grid.width() - cw) / 2
+            card = QRectF(x, top + r * (ch + cg), cw, ch)
+            team_rows.paint_band(
+                p, card, team_rows.RIDER_BAR, u, slant=t.SLANT, texture=self.texture, dpr=dpr
+            )
+            at = card.topLeft()
             name = names[i]
             if not self.show_bibs:
-                inner = card.adjusted(16 * u, 10 * u, -16 * u, -10 * u)
-                self.name_block(p, inner, name, block_px, scale=scale)
+                self.name_block(
+                    p,
+                    inner.translated(at),
+                    name,
+                    block_px,
+                    scale=scale,
+                    card=card,
+                    axis=card.x() + axis,
+                )
                 continue
-            # The plate grows with the card, but never past the size a
-            # three-digit bib needs, and never wider than the card less a
-            # margin, or three left on a wide monitor would draw plates taller
-            # than the cards are wide, running into each other.
-            ph = min(ch * 0.46, PLATE_CAP * u, (cw - 48 * u) / t.plate_width(1.0))
             pw = t.plate_width(ph)
             bib = entry.bibs[0] if entry.bibs else ""
-            t.plate(p, QRectF(card.center().x() - pw / 2, card.y() + ch * 0.13, pw, ph), bib)
-            name_rect = QRectF(card.x() + 16 * u, card.y() + ch * 0.64, cw - 32 * u, ch * 0.28)
+            t.plate(p, QRectF(card.x() + axis - pw / 2, card.y() + plate_top, pw, ph), bib)
+            line = name_rect.translated(at)
             f = t.scaled(t.font(card_px, t.SEMI), scale)
-            t.text(p, name_rect, t.fit_name(name, name_rect.width(), f), f, t.TEXT, CENTER)
+            shown = t.fit_name(name, self.line_room(line, f, card), f)
+            self.card_line(p, line, shown, f, t.TEXT, card, card.x() + axis)
         self._side(p, side, n)
 
+    def cards(self, width: float, height: float, n: int) -> tuple[int, float, float]:
+        """The columns, card width, and card height for ``n`` cards in ``width`` by ``height``.
+
+        Four to six left are two columns of cards: three across are too
+        narrow for a name such as M. Vanderbilt-Rochester at the board's
+        minimum, and four would leave the fourth alone on a second row.
+        Three left keep four's two columns, two and one with the third
+        centered under the two, unless three across hold a larger plate:
+        the plates are one size from four left to two, so three narrower
+        cards across would gain no plate and cost the names their size.
+        """
+        u = self.u
+        cg = CARD_GAP * u
+
+        def layout(cols: int, final: bool) -> tuple[int, float, float]:
+            rows = max(1, math.ceil(n / cols))
+            cw = (width - cg * (cols - 1)) / cols
+            ch = min((420 if final else 250) * u, (height - cg * (rows - 1)) / rows)
+            return cols, cw, ch
+
+        if n == 3:
+            across, two = layout(3, True), layout(2, True)
+            return across if self.card_plate(*across[1:]) > self.card_plate(*two[1:]) else two
+        return layout(2 if n >= 4 else max(n, 1), n <= 4)
+
+    def card_plate(self, cw: float, ch: float) -> float:
+        """The tallest plate a card ``cw`` by ``ch`` holds.
+
+        The plate grows with the card, but never past the size a
+        three-digit bib needs, and never wider than the card less a
+        margin, or three left on a wide monitor would draw plates taller
+        than the cards are wide, running into each other; nor wider than
+        the room the bar leaves it at the plate's top.
+        """
+        u = self.u
+        top = ch * 0.13
+        room = cw - CARD_PAD * u - team_rows.bar_clear(QRectF(0, 0, cw, ch), top, u)
+        unit = t.plate_width(1.0)
+        return max(0.0, min(ch * 0.46, PLATE_CAP * u, (cw - 48 * u) / unit, room / unit))
+
     def _rows(self, p: QPainter, area: QRectF) -> None:
-        """The riders still in as columns of start-list rows, for a big field."""
+        """The riders still in as columns of rider rows, for a big field."""
         d: Elimination = self.data
         cols = max(2, self.list_columns(len(d.remaining), area.height()))
-        self.entry_rows(p, area, d.remaining, cols, t.CARD, name_cap=ROW_NAME_PX)
+        self.entry_rows(
+            p, area, d.remaining, cols, t.CARD, name_cap=ROW_NAME_PX, bar=team_rows.RIDER_BAR
+        )
 
     def _side(self, p: QPainter, side: QRectF, n: int) -> None:
         """The side column: who just went, how many are left, who went before."""
@@ -940,22 +1174,39 @@ class EliminationPage(Page):
                 p, side.x(), y, "Eliminated" if fresh else "Last out", t.OUT if fresh else t.MUTED
             )
             card = QRectF(side.x(), y + 56 * u, side_w, 330 * u)
-            p.setBrush(t.OUT_SOFT if fresh else t.CARD)
-            p.setPen(QPen(t.OUT, 4 * u) if fresh else Qt.PenStyle.NoPen)
-            p.drawRoundedRect(card.adjusted(2 * u, 2 * u, -2 * u, -2 * u), 16 * u, 16 * u)
+            team_rows.paint_band(
+                p,
+                card,
+                t.OUT.name(),
+                u,
+                slant=t.SLANT,
+                texture=self.texture,
+                dpr=self.devicePixelRatioF(),
+            )
+            if fresh:
+                # The bell's news: the card washed and edged in the out
+                # color for a few seconds.
+                p.save()
+                p.setBrush(t.OUT_SOFT)
+                p.setPen(QPen(t.OUT, 4 * u))
+                p.drawPath(team_rows.band_shape(card.adjusted(2 * u, 2 * u, -2 * u, -2 * u), u))
+                p.restore()
             out_name = d.last_eliminated.names[0] if d.last_eliminated.names else ""
             if self.bibs_only:
                 out_name = ""
             if self.show_bibs:
                 self._last_out_plate(p, card, out_name)
             else:
-                inner = card.adjusted(32 * u, 40 * u, -32 * u, -40 * u)
+                inner = card.adjusted(32 * u, 40 * u, -CARD_PAD * u, -40 * u)
                 # 76 px of Inter has the capitals of the 84 px this card was
                 # designed at, and lets a 17-letter last name such as
-                # Featherstonehaugh stay whole above the floor.
+                # Featherstonehaugh stay whole above the floor beside the bar.
                 out_px = 76 * u
-                scale = self.block_scale([out_name], inner.width(), out_px)
-                self.name_block(p, inner, out_name, out_px, scale=scale)
+                f = t.font(out_px, t.BOLD)
+                first = t.stacked_lines(inner, f, 2)[0]
+                axis = self.card_axis(card, caps_top(first, f), inner.right())
+                scale = self.block_scale([out_name], inner, out_px, card)
+                self.name_block(p, inner, out_name, out_px, scale=scale, card=card, axis=axis)
             y = card.bottom() + 56 * u
         self._remaining(p, side, y, n)
 
@@ -963,18 +1214,26 @@ class EliminationPage(Page):
         u = self.u
         bibs = self.data.last_eliminated.bibs
         bib = bibs[0] if bibs else ""
+        right = card.right() - 24 * u
+        unit = t.plate_width(1.0)
         if not name:
             # Bibs only: the plate alone, larger, in the middle of its card.
-            ph = 200 * u
+            top = card.center().y() - 100 * u
+            ph = min(200 * u, (right - team_rows.bar_clear(card, top, u)) / unit)
             pw = t.plate_width(ph)
-            t.plate(p, QRectF(card.center().x() - pw / 2, card.center().y() - ph / 2, pw, ph), bib)
+            top = card.center().y() - ph / 2
+            axis = self.card_axis(card, top, right)
+            t.plate(p, QRectF(axis - pw / 2, top, pw, ph), bib)
             return
-        ph = 150 * u
+        ph = min(150 * u, (right - team_rows.bar_clear(card, card.y() + 44 * u, u)) / unit)
         pw = t.plate_width(ph)
-        t.plate(p, QRectF(card.center().x() - pw / 2, card.y() + 44 * u, pw, ph), bib)
+        axis = self.card_axis(card, card.y() + 44 * u, right)
+        t.plate(p, QRectF(axis - pw / 2, card.y() + 44 * u, pw, ph), bib)
         rect = QRectF(card.x() + 24 * u, card.y() + 220 * u, card.width() - 48 * u, 80 * u)
-        f = t.scaled(t.font(50 * u, t.BOLD), self.names_scale([name], rect.width(), 50 * u))
-        t.text(p, rect, t.fit_name(name, rect.width(), f), f, t.TEXT, CENTER)
+        f = t.font(50 * u, t.BOLD)
+        f = t.scaled(f, self.names_scale([name], self.line_room(rect, f, card), 50 * u))
+        shown = t.fit_name(name, self.line_room(rect, f, card), f)
+        self.card_line(p, rect, shown, f, t.TEXT, card, axis)
 
     def _remaining(self, p: QPainter, side: QRectF, y: float, n: int) -> None:
         """How many are left, then who went before the last one out."""
@@ -1027,17 +1286,6 @@ class EliminationPage(Page):
             x += pw + gap
 
 
-def sprint_title(res: SprintResult) -> str:
-    """The card's title, worded like the header's "After Sprint 2 of 3"."""
-    # "Final sprint" is the task line's phrase for the last sprint, so the
-    # audience reads the same words the scorer does.
-    if res.of is not None and res.number >= res.of:
-        return "Final sprint"
-    if res.of is not None:
-        return f"Sprint {res.number} of {res.of}"
-    return f"Sprint {res.number}"
-
-
 # The most rows a page shows. Sixteen is the most riders a 166 m track
 # may start (USAC 2B7), so a full field at the venue is one page the
 # stands can read whole, its names at the design's floor (section 10). A
@@ -1045,29 +1293,47 @@ def sprint_title(res: SprintResult) -> str:
 # rather than shrinking its names, and its pages share the rows evenly, so
 # 24 riders show as 12 and 12, not 16 and a lonely 8.
 PAGE_ROWS = 16
-# A madison row carries a team block, so a page holds half as many. USAC
+# A madison row carries two riders, so a page holds half as many. USAC
 # 2B7 allows twelve teams on a 166.66 m track; twelve rows would set the
-# team names under MIN_PX, so a full field shows as two pages of six.
+# surnames under MIN_PX, so a full field shows as two pages of six.
 TEAM_PAGE_ROWS = 8
 # Team rows share the page's height whatever the field, so two teams read
 # from the track as large as the page allows; a lone team takes half the
-# page rather than one bar the whole height.
+# page rather than one row the whole height.
 TEAM_FILL_LEAST = 2
-# A team row's place and total, its largest type, as a share of the row.
-TEAM_FIGURE_SHARE = 0.62
-# The team name as a share of the row; ``team_px`` holds it inside the bar.
-TEAM_NAME_SHARE = 0.5
+# A team row's total, its largest type, as a share of the row.
+TEAM_FIGURE_SHARE = 0.76
+# The place beside the total's size: Black weight like the total, a step
+# under it, so the total stays the figure the eye finds first.
+TEAM_PLACE_SCALE = 0.85
 # The widest the place column grows, as a share of the page's width.
 TEAM_PLACE_SHARE = 0.14
-# LAPS and PENALTY grow with the row, under the total so it stays the
-# figure the eye finds first.
-TEAM_LAPS_SHARE = 0.36
-# A small field's figures give way to its team names: they step down from
-# their share of the row until the widest name fits whole left of them at
-# TEAM_NAME_LEAST or larger, and never below TEAM_FIGURE_LEAST. A name is
-# what the stands match to the jerseys, and the growth is for both.
-TEAM_NAME_LEAST = 84
+# The laps and the penalty grow with the row, under the total.
+TEAM_LAPS_SHARE = 0.44
+# The laps and the penalty stop growing here, as the surnames do: a lone
+# team's or a pair's tall row would otherwise give their columns the width
+# the surnames need, and the total is the figure the riders read.
+TEAM_LAPS_MOST = 96
+# The least the place and the total give way to, so the surnames fit
+# whole beside them; past that a long surname shrinks instead.
 TEAM_FIGURE_LEAST = 84
+# The total gives way to the surnames only down to this many times their
+# size; past it the two step down together, so long surnames never leave
+# the scores smaller than the names beside them.
+TEAM_TOTAL_OVER_SURNAME = 1.45
+# The riders' surnames, side by side on the row, as a share of its height.
+# They stop growing at the start list's largest surname
+# (``team_rows.START_SURNAME_MOST``): surnames set to a lone team's or a
+# pair's tall row would leave each other no room beside the figures, which
+# give way to them only down to TEAM_FIGURE_LEAST.
+TEAM_SURNAME_SHARE = 0.48
+# The team's name in the color view, as a share of the row's height.
+TEAM_LABEL_SHARE = 0.52
+# The color view's solid color stops this far short of the first figure
+# column, so the figures keep the dark row around them in both views.
+COLOR_ZONE_GAP = 60
+# The total's right edge is set in this far from the row's right end.
+TEAM_FIGURE_PAD = 24
 # Row height to type in a rider table: the name is this share of the row,
 # so sixteen rows set it at MIN_PX and fewer rows set it larger.
 STANDINGS_NAME_SHARE = 0.69
@@ -1081,6 +1347,17 @@ RIDER_ROW_FULL = 96
 # how far the type grows, as the wider figure columns leave a name less
 # room, and a name that holds the type back shortens the rows with it.
 RIDER_FILL_LEAST = 5
+# A rider table's heading row and the air under it, and the share of a row
+# its entry leaves clear at the top and the bottom each.
+RIDER_HEAD_H = 44
+RIDER_HEAD_GAP = 8
+RIDER_INSET = 0.05
+# The rider table's total and its other figures at the figure unit. They
+# fill their columns' width (TOTAL is 170 units over a 20-unit inset,
+# the others 150 over a 24-unit pad), so a small field's larger rows set
+# them as large as the columns hold without taking room from the names.
+RIDER_TOTAL = 72
+RIDER_FIGURE = 56
 
 
 # The header words of a race the officials have decided.
@@ -1146,33 +1423,494 @@ def page_rows(count: int, most: int = PAGE_ROWS) -> int:
     return max(1, -(-count // pages))
 
 
+# The strip under a paged list that its page dots take.
+PAGE_DOTS_H = 32
+
+
+def page_dots(p: QPainter, area: QRectF, pages: int, page: int, u: float) -> None:
+    """Page dots at the bottom right of ``area``, the page in view lit.
+
+    Dots, not a "1-8 of 16" footer: they say there is more without asking
+    anyone to read a line of small print.
+    """
+    dot, gap = 16 * u, 14 * u
+    x = area.right() - pages * dot - (pages - 1) * gap - 20 * u
+    y = area.bottom() - dot - 6 * u
+    p.setPen(Qt.PenStyle.NoPen)
+    for i in range(pages):
+        p.setBrush(t.TEXT if i == page else t.RULE)
+        p.drawEllipse(QRectF(x + i * (dot + gap), y, dot, dot))
+
+
+class TeamTable(NamedTuple):
+    """A Madison table's layout, worked out once per payload and board size.
+
+    A frame of the rotation only reads it, so the motion never measures
+    text. ``labels`` holds each row's team name and its font, in the
+    payload's row order.
+    """
+
+    rows_top: float
+    rh: float
+    gap: float
+    row_x: float
+    rank_w: float
+    place_f: QFont
+    total_f: QFont
+    num: QFont
+    total_r: float
+    total_col: float
+    pen_r: float
+    pen_col: float
+    laps_r: float
+    laps_col: float
+    penalized: bool
+    zone_r: float
+    names_x: float
+    half: float
+    surname_f: QFont
+    plate_h: float
+    labels: list[tuple[str, QFont]]
+
+
+# A score chip: its type and its padding as shares of the total's type,
+# and its height as a share of the row, so it covers the total it replaces.
+CHIP_TYPE = 0.82
+CHIP_PAD = 0.5
+CHIP_HEIGHT = 0.78
+# It drops from this many times its size, slanted at the board's slant
+# (``theme.SLANT``), so it lands as a stamp cut like the rows it lands on.
+CHIP_START = 2.4
+# It fades in over its first moments, so its large start reads as a drop
+# and not as a flash over the row above.
+CHIP_IN_MS = 90
+CHIP_RADIUS = 14
+# The ring that grows out of the chip as it lands: its starting alpha,
+# its growth over the chip's size, and its line.
+RING_ALPHA = 0.6
+RING_GROWTH = 0.6
+RING_LINE = 6
+# The sheen's alpha at its middle as it crosses the chip.
+SHEEN_ALPHA = 150
+# How far, in rows, the old total is knocked down, the chip lifts away,
+# and the new total rises from.
+OLD_DROP = 0.35
+CHIP_LIFT = 0.9
+NEW_RISE = 0.8
+
+
+def score_chip(
+    p: QPainter,
+    rect: QRectF,
+    s: str,
+    f: QFont,
+    fill: QColor,
+    ink: QColor,
+    ms: float,
+    rh: float,
+    u: float,
+) -> None:
+    """A score change's chip at rest in ``rect``, ``ms`` into its team's step.
+
+    It drops from CHIP_START times its size with an overshoot, a ring in
+    its color grows out of it and a sheen crosses it as it lands, and from
+    ``SWAP_AT_MS`` it lifts away and fades. Only the painter's transform
+    and opacity move; the chip's size is set once.
+    """
+    gone = ease_in(phase(ms, scorebug.SWAP_AT_MS, scorebug.SWAP_MS))
+    if gone >= 1:
+        return
+    scale = CHIP_START - (CHIP_START - 1) * ease_back(phase(ms, 0, scorebug.SLAM_MS))
+    c = rect.center()
+    w, h = rect.width(), rect.height()
+    radius = CHIP_RADIUS * u
+    p.save()
+    p.setOpacity(phase(ms, 0, CHIP_IN_MS) * (1 - gone))
+    p.translate(c.x(), c.y() - gone * CHIP_LIFT * rh)
+    p.scale(scale, scale)
+    # Qt's shear moves x by its factor times y, and y runs down the
+    # board, so the negative factor leans the top to the right.
+    p.shear(-t.SLANT, 0)
+    p.translate(-c.x(), -c.y())
+    if scorebug.RING_AT_MS < ms < scorebug.RING_AT_MS + scorebug.RING_MS:
+        k = ease_out(phase(ms, scorebug.RING_AT_MS, scorebug.RING_MS))
+        ring = QColor(fill)
+        ring.setAlphaF(RING_ALPHA * (1 - k))
+        g = 1 + RING_GROWTH * k
+        p.setPen(QPen(ring, RING_LINE * u))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(
+            QRectF(c.x() - w * g / 2, c.y() - h * g / 2, w * g, h * g), radius * g, radius * g
+        )
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(fill)
+    p.drawRoundedRect(rect, radius, radius)
+    sheen = phase(ms, scorebug.SLAM_MS, scorebug.SHEEN_MS)
+    if 0 < sheen < 1:
+        x = rect.left() - w * 0.4 + w * 1.8 * sheen
+        light = QLinearGradient(x - w * 0.2, 0, x + w * 0.2, 0)
+        light.setColorAt(0, QColor(255, 255, 255, 0))
+        light.setColorAt(0.5, QColor(255, 255, 255, SHEEN_ALPHA))
+        light.setColorAt(1, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(light))
+        p.drawRoundedRect(rect, radius, radius)
+    t.text(p, rect, s, f, ink, CENTER)
+    p.restore()
+
+
+class Scene(NamedTuple):
+    """What a play's frames draw beside its steps.
+
+    ``end`` is the payload the play ends on: a play waiting in the queue
+    was built against the one before it, so a frame reads its rows, not
+    the newest payload's. ``places``, ``penalties`` and ``sprints`` (a
+    rider's SPRINT PTS) are each row's as the table stood before the
+    play, ``leaders`` the rows ranked first then, and ``page`` the page
+    it plays on.
+    """
+
+    end: Standings
+    places: dict[Key, str]
+    penalties: dict[Key, int]
+    sprints: dict[Key, int]
+    leaders: frozenset[Key]
+    page: int
+
+
+def place_ink(place: str) -> QColor:
+    """The leader's place in the accent, as on the podium page; the rest in full ink."""
+    return t.ACCENT if place in ("1", "1st") else t.TEXT
+
+
+def row_key(row: StandingRow) -> Key:
+    return tuple(row.entry.bibs)
+
+
+def sprint_points(row: StandingRow) -> int:
+    """A rider's sprint points so far, the figure under SPRINT PTS."""
+    return sum(v for v in row.sprints if v)
+
+
+class RiderTable(NamedTuple):
+    """A rider table's layout, worked out once per payload and board size.
+
+    A frame of a score change only reads it, so the motion never
+    measures text. ``name_rect`` is the first row's name area and
+    ``scale`` the names' shared fit.
+    """
+
+    head_h: float
+    rows_top: float
+    rh: float
+    band_h: float
+    cols: RiderColumns
+    name_rect: QRectF
+    name_size: float
+    scale: float
+    place_f: QFont
+    total_f: QFont
+    num: QFont
+    pad: float
+    penalized: bool
+
+
+@dataclass
+class Turn:
+    """The start list turning into the table before the race's first score plays.
+
+    ``start`` is the clock's time at the turn and ``picture`` the start
+    list as the board showed it (None when there was none to take).
+    ``rows`` turn on ``page``, the table's page that holds the first
+    play, from ``clear`` ms on, once a rider start list has cleared
+    (0 for a Madison's). ``plays`` are the score changes that wait
+    for the turn and its hold: they join the queue at ``release``, a time
+    worked out from the turn's start and not from when a board next
+    paints, so the TV and the preview start them at one moment.
+    """
+
+    start: float
+    picture: QPixmap | None
+    rows: int
+    page: int
+    clear: float = 0.0
+    plays: list[Play] = field(default_factory=list)
+
+    @property
+    def release(self) -> float:
+        rows = scorebug.intro_ms(self.rows)
+        return self.start + self.clear + rows + scorebug.INTRO_HOLD_MS
+
+    def row_ms(self, now: float) -> float:
+        """Milliseconds into the rows' turn at ``now``; negative while the start list clears."""
+        return now - self.start - self.clear
+
+
+class TurnRow(NamedTuple):
+    """A table row as the turn from the start list shows it, and the figures in view."""
+
+    row: StandingRow
+    place: str
+    laps: int
+    penalty: int
+    total: str
+    sprints: int
+    leader: bool
+
+
+def reorder_progress(play: Play, frame: Frame) -> float:
+    """How far the rows have slid to their new order, 0 to 1; 0 for a play that keeps its order."""
+    after = {k: j for j, k in enumerate(play.after)}
+    for i, k in enumerate(play.before):
+        if after[k] != i:
+            return (frame.rows[k] - i) / (after[k] - i)
+    return 0.0
+
+
 class StandingsPage(Page):
     """Points race, madison and tempo standings: place, who, sprint points, laps, total.
 
     No per-sprint columns: riders read the board at speed for their
     place, their total and their laps, and on a TV the columns squeeze a
-    long team name ("Stars and Stripes") and make the table too busy to
-    parse. One SPRINT PTS column carries the sprint points so far and
-    LAPS the laps alone ("+1"): a bare number under SPRINTS reads as a
-    count of sprints, and "+1 (+20)" mixes laps with points. The team
-    page drops SPRINT PTS and the riders' names and sets its place, team
-    bar and total as the row's largest things (``team_table``). Each
-    sprint shows for a few seconds on the sprint-result card as it lands; the operator table and the
-    results sheet keep every sprint. More than PAGE_ROWS rows
-    (TEAM_PAGE_ROWS for teams) are shown a page at a time; ``advance``
-    turns the page.
+    long name and make the table too busy to parse. One SPRINT PTS
+    column carries the sprint points so far and LAPS the laps alone
+    ("+1"): a bare number under SPRINTS reads as a count of sprints, and
+    "+1 (+20)" mixes laps with points. The Madison page drops SPRINT PTS,
+    names each team by its riders' surnames on a row of its color, and
+    turns to the team's color and name on a timer (``team_table``). With
+    a clock, each score change plays on its rider's or team's TOTAL as a
+    chip, then the rows reorder (``team_play``, ``rider_play``); the
+    operator table and the results sheet keep every sprint. More than
+    PAGE_ROWS rows (TEAM_PAGE_ROWS for teams) are shown a page at a time;
+    ``advance`` turns the page, and a Madison table with a clock turns its
+    own pages with its rotation.
     """
 
     page = 0
 
-    def set_data(self, data) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # The Madison table's layout and what it was worked out for, so a
+        # frame of the rotation measures nothing; the rider table's, so a
+        # frame of a score change measures nothing.
+        self._layout: tuple[tuple, TeamTable] | None = None
+        self._rider_layout: tuple[tuple, RiderTable] | None = None
+        # The clock's time when the rotation last started: a new race
+        # starts it over on the names view, and a sprint's new header
+        # leaves it running, so the look in view never jumps.
+        self._rotation_from = 0.0
+        # Frames run only while a change between views moves; between
+        # changes one timer waits for the next, so the board idles.
+        self._ticker = Ticker(self, self._busy)
+        # Precise, since a coarse timer may fire a few percent of its 10 s
+        # late, and a change's first frame would land partway through it.
+        self._wake = QTimer(self, singleShot=True, timerType=Qt.TimerType.PreciseTimer)
+        self._wake.timeout.connect(self._wake_up)
+        # The table's score changes, one play a scoring entry, and
+        # what each play's frames draw beside its steps (``Scene``), by the
+        # play's id.
+        self._queue = ScoreQueue()
+        self._scenes: dict[int, Scene] = {}
+        # Milliseconds into the rotation when the playing sequence began:
+        # the rotation holds that look until the queue is empty. None while
+        # nothing plays.
+        self._held: float | None = None
+        # The turn from the start list while it plays or holds, else None.
+        self._turn: Turn | None = None
+
+    def now(self) -> float:
+        return self.clock.now() if self.clock is not None else 0.0
+
+    def set_data(self, data, prev=None) -> None:
+        now = self.now()
+        self._settle(now)
         if self.data is None or getattr(self.data, "header", None) != getattr(data, "header", None):
             self.page = 0
-        super().set_data(data)
+        if prev is None or self.data is None or self.data.header.race_id != data.header.race_id:
+            self.stop_motion()
+            self._rotation_from = now
+        super().set_data(data, prev)
+        if self.clock is None:
+            self.stop_motion()
+            return
+        same_race = (
+            isinstance(prev, (Standings, PreRace)) and prev.header.race_id == data.header.race_id
+        )
+        if data.scored is not None and same_race:
+            if isinstance(prev, PreRace):
+                self._turn_from_start_list(data, prev, now)
+            # New scoring with nothing in view to play (every entrant that
+            # scored is on another page, or no total changed) updates
+            # quietly: it leaves what plays alone, and shows when that ends.
+            built = self._play_for(data, prev)
+            if built is not None:
+                play, scene = built
+                if self._held is None:
+                    self._held = self.since()
+                self._scenes[id(play)] = scene
+                if self._turn is not None:
+                    # Behind the turn, in the order the entries came.
+                    self._turn.plays.append(play)
+                else:
+                    self._queue.push(play, now)
+                self._ticker.poke()
+            return
+        # A redraw (the scorer staging the next sprint's places) leaves a
+        # running sequence alone; any other quiet change stops it, so the
+        # board never announces points that no longer stand.
+        if not self._redraw(data, prev):
+            self.stop_motion()
+
+    def stop_motion(self) -> None:
+        if self._held is not None:
+            self._rotation_from = self.now() - rotation.resumed(self._held, self.per_page())
+        self._queue.cancel()
+        self._scenes.clear()
+        self._held = None
+        self._turn = None
+
+    def _turn_from_start_list(self, data: Standings, prev: PreRace, now: float) -> None:
+        """Start the turn from the start list in view to this table, before its first score.
+
+        The Madison's table is new to the stands, so it starts on the names
+        view of its first page, which is where the start list's rows stand.
+        A rider table's rows line up with no start list, so it comes in on
+        the page that holds the most of the first score's changes, the
+        first such page on a tie, and the stands see those chips play.
+        """
+        self.stop_motion()
+        self._rotation_from = now
+        self._held = 0.0
+        if not self.teams():
+            self.page = max(range(self.page_count()), key=lambda pg: self._steps_on(data, prev, pg))
+        page, per_page = self.shown_page(), self.per_page()
+        rows = len(data.rows[page * per_page : (page + 1) * per_page])
+        outgoing = self.outgoing
+        picture = outgoing.grab() if isinstance(outgoing, PreRacePage) else None
+        clear = 0.0 if self.teams() else scorebug.INTRO_CLEAR_MS
+        self._turn = Turn(start=now, picture=picture, rows=rows, page=page, clear=clear)
+        self._ticker.poke()
+
+    def _steps_on(self, data: Standings, prev: PreRace, page: int) -> int:
+        """How many of the first score's changes would play on ``page``."""
+        built = self._play_for(data, prev, page)
+        return len(built[0].steps) if built is not None else 0
+
+    def _release(self, now: float) -> None:
+        """Once the turn and its hold end, the plays behind it join the queue at that moment."""
+        turn = self._turn
+        if turn is None or now < turn.release:
+            return
+        self._turn = None
+        for play in turn.plays:
+            self._queue.push(play, turn.release)
+        if not turn.plays and self._held is not None:
+            # Nothing to play: the rotation goes on from the zero table.
+            self._rotation_from = turn.release - rotation.resumed(self._held, self.per_page())
+            self._held = None
+
+    def scoring_now(self) -> bool:
+        """Whether the turn from the start list or a score change plays, or one waits to play."""
+        if self.clock is None:
+            return False
+        now = self.clock.now()
+        self._release(now)
+        return self._turn is not None or self._queue.busy(now)
+
+    def _settle(self, now: float) -> None:
+        """Once the last play ends, the rotation goes on from the look it held.
+
+        A table held on the names view starts its names hold over; one
+        held anywhere else eases back to names first (``rotation.resumed``).
+        It goes on from the moment the queue emptied, not from when this
+        board next looks: the TV and the preview get the same calls but
+        paint at their own times, and one hidden while the queue drains
+        must still turn its views and pages with the other.
+        """
+        self._release(now)
+        if self._held is None or self._turn is not None or self._queue.busy(now):
+            return
+        ended = self._queue.ended_at(now)
+        resume = rotation.resumed(self._held, self.per_page())
+        self._held = None
+        self._scenes.clear()
+        self._rotation_from = (ended if ended is not None else now) - resume
+
+    @staticmethod
+    def _redraw(data: Standings, prev) -> bool:
+        """Whether ``data`` draws the same table ``prev`` did."""
+
+        def table(d: Standings) -> tuple:
+            rows = [(row_key(r), r.total, r.laps, r.penalty, r.status) for r in d.rows]
+            return d.header, rows
+
+        return isinstance(prev, Standings) and table(prev) == table(data)
+
+    def _play_for(
+        self, data: Standings, prev: Standings | PreRace, page: int | None = None
+    ) -> tuple[Play, Scene] | None:
+        """The play from ``prev``'s table to ``data``'s, for the entrants on ``page``.
+
+        ``page`` is the page in view unless given. The first score of a
+        race plays from the start list: every rider or team at 0, in
+        start-list order, with no leader. One that scored on another page
+        goes straight to its new values, and one whose total did not
+        change has no step. None when no step is left.
+        """
+        olds: dict[Key, StandingRow] = {}
+        if isinstance(prev, PreRace):
+            old_order = [tuple(e.bibs) for e in prev.roster]
+            places = {k: str(i + 1) for i, k in enumerate(old_order)}
+        else:
+            olds = {row_key(r): r for r in prev.rows}
+            old_order = list(olds)
+            # The rider table words its places as numbers, decided or not.
+            decided = self.teams() and self.ordinals(prev)
+            places = {row_key(r): ordinal(r.rank) if decided else str(r.rank) for r in prev.rows}
+        rows = {row_key(r): r for r in data.rows}
+        new_order = list(rows)
+        before = [k for k in old_order if k in rows]
+        seen = set(before)
+        before += [k for k in new_order if k not in seen]
+        per_page = self.per_page()
+        if page is None:
+            page = self.shown_page()
+        lo, hi = page * per_page, (page + 1) * per_page
+        shown_before, shown_after = before[lo:hi], new_order[lo:hi]
+        steps: list[Step] = []
+        for k in dict.fromkeys(tuple(k) for k in data.scored.keys):
+            row = rows.get(k)
+            if row is None or row.status or k not in shown_before:
+                continue
+            old = olds.get(k)
+            old_total, old_laps = (old.total, old.laps) if old is not None else (0, 0)
+            if row.total != old_total:
+                steps.append(Step(k, old_total, row.total, old_laps, row.laps))
+        if not steps:
+            return None
+        # Both orders hold every row drawn: a row that moves onto the page
+        # in the reorder starts below it, and one that leaves ends below it.
+        play = Play(
+            steps=tuple(steps),
+            before=(*shown_before, *(k for k in shown_after if k not in shown_before)),
+            after=(*shown_after, *(k for k in shown_before if k not in shown_after)),
+        )
+        penalties = {k: r.penalty for k, r in olds.items()}
+        sprints = {k: sprint_points(r) for k, r in olds.items()}
+        leaders = frozenset(k for k, r in olds.items() if r.rank == 1 and not r.status)
+        return play, Scene(data, places, penalties, sprints, leaders, page)
+
+    def teams(self) -> bool:
+        return self.data is not None and any(r.entry.color for r in self.sized(self.data).rows)
+
+    def rotates(self) -> bool:
+        """Whether the table turns between its names and color views, and its pages, on its own."""
+        return self.clock is not None and self.teams()
 
     def page_most(self) -> int:
-        teams = self.data is not None and any(r.entry.color for r in self.sized(self.data).rows)
-        return TEAM_PAGE_ROWS if teams else PAGE_ROWS
+        return TEAM_PAGE_ROWS if self.teams() else PAGE_ROWS
+
+    def per_page(self) -> int:
+        return self.paging(self.data)[1] if self.data is not None else 1
 
     def penalized(self) -> bool:
         """Whether a PENALTY column stands: only while a row drawn carries one. A row off
@@ -1204,6 +1942,13 @@ class StandingsPage(Page):
         track, which come back on the result."""
         return replace(d, rows=d.rows + d.off_track) if d.off_track else d
 
+    def shown_page(self) -> int:
+        """The page in view when nothing plays: the rotation's, or the one ``advance`` turned to."""
+        pages = self.page_count()
+        if self.rotates():
+            return rotation.page_at(self.since(), self.per_page(), pages)
+        return self.page % pages
+
     def ordinals(self, d: Standings) -> bool:
         """Whether the places read "1st", "2nd": once the officials have decided the race.
 
@@ -1214,69 +1959,289 @@ class StandingsPage(Page):
         return d.header.status in DECIDED
 
     def advance(self) -> None:
-        if self.page_count() > 1:
+        # A score change plays out on the page it began on; the page turns
+        # on the pager's next tick after it.
+        if self.page_count() > 1 and not self.scoring_now():
             self.page = (self.page + 1) % self.page_count()
             self.update()
+
+    # The rotation ------------------------------------------------------
+
+    def since(self) -> float:
+        """Milliseconds into the rotation; 0 with no clock, so the table rests on its names.
+
+        Held while a score change plays, so the table keeps its look and
+        its page under the slams.
+        """
+        if self._held is not None:
+            return self._held
+        return self.clock.now() - self._rotation_from if self.clock is not None else 0.0
+
+    def moving_now(self) -> bool:
+        """Whether a change between the names and color views is playing."""
+        return self.rotates() and rotation.moving(self.since(), self.per_page())
+
+    def wake_in(self) -> float | None:
+        """Milliseconds the last paint set to wait for the next change; None while none waits.
+
+        The delay as scheduled, not the time left on the wall clock, so a
+        test reads it the same however long its own steps took.
+        """
+        return float(self._wake.interval()) if self._wake.isActive() else None
+
+    def _busy(self) -> bool:
+        return self.isVisible() and (self.scoring_now() or self.moving_now())
+
+    def _wake_up(self) -> None:
+        if self.isVisible() and self.rotates():
+            self._ticker.poke()
+            self.update()
+
+    def _schedule(self) -> None:
+        """Frames while anything moves, else one timer for the next change's start."""
+        if self._held is not None:
+            self._wake.stop()
+            self._ticker.poke()
+            return
+        if not self.rotates():
+            self._wake.stop()
+            return
+        since, rows = self.since(), self.per_page()
+        if rotation.moving(since, rows):
+            self._wake.stop()
+            self._ticker.poke()
+        else:
+            self._wake.start(math.ceil(rotation.until_change(since, rows)) + 1)
 
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Standings = self.data
         u = self.u
+        now = self.now()
+        self._settle(now)
+        turn = self._turn if self.clock is not None else None
+        play = self._queue.playing(now) if self.clock is not None else None
+        scene = self._scenes.get(id(play)) if play is not None else None
         pages, per_page, n, dots = self.paging(d)
-        page = self.page % pages
-        whole = self.sized(d)
-        rows = d.rows[page * per_page : (page + 1) * per_page]
-        bottom = area.bottom() - (32 * u if dots else 0)
-        if any(r.entry.color for r in whole.rows):
-            self.team_table(p, area, whole, rows, n, bottom, self.ordinals(d))
+        if turn is not None:
+            page = min(turn.page, pages - 1)
+        elif scene is not None:
+            page = min(scene.page, pages - 1)
         else:
-            self.rider_table(p, area, whole, rows, n, bottom)
+            page = self.shown_page()
+        rows = d.rows[page * per_page : (page + 1) * per_page]
+        bottom = area.bottom() - (PAGE_DOTS_H * u if dots else 0)
+        playing = None
+        if scene is not None:
+            playing = (play, self._queue.frame(now), scene)
+        if self.teams():
+            self.team_table(p, area, d, page * per_page, rows, n, bottom, playing, turn)
+        else:
+            self.rider_table(p, area, d, rows, n, bottom, playing, turn)
 
         if pages > 1:
-            # Page dots, not a "1-8 of 16" footer: they say there is more
-            # without asking anyone to read a line of small print.
-            dot, gap = 16 * u, 14 * u
-            x = area.right() - pages * dot - (pages - 1) * gap - 20 * u
-            y = area.bottom() - dot - 6 * u
-            p.setPen(Qt.PenStyle.NoPen)
-            for i in range(pages):
-                p.setBrush(t.TEXT if i == page else t.RULE)
-                p.drawEllipse(QRectF(x + i * (dot + gap), y, dot, dot))
-
-        if d.sprint_result is not None:
-            self.paint_overlay(p, area, d)
-
-    def row_band(self, p: QPainter, area: QRectF, i: int, y: float, rh: float) -> None:
-        """Every other row on a faint band, so a row reads across the page."""
-        if i % 2:
-            return
-        u = self.u
-        band = QRectF(area.x() - 20 * u, y + 3 * u, area.width() + 40 * u, rh - 6 * u)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(255, 255, 255, 10))
-        p.drawRoundedRect(band, 10 * u, 10 * u)
+            p.save()
+            if turn is not None and not self.teams():
+                # The rider start list has no dots: they come in with the last row.
+                p.setOpacity(scorebug.intro_row(turn.row_ms(now), turn.rows - 1))
+            page_dots(p, area, pages, page, u)
+            p.restore()
+        self._schedule()
 
     def rider_table(
-        self, p: QPainter, area: QRectF, d: Standings, rows: list, n: int, bottom: float
+        self,
+        p: QPainter,
+        area: QRectF,
+        d: Standings,
+        rows: list,
+        n: int,
+        bottom: float,
+        playing: tuple[Play, Frame, Scene] | None = None,
+        turn: Turn | None = None,
     ) -> None:
+        """The Points Race and Tempo Race page: a heading row, then a rider row per rider.
+
+        The place stands left of the row, as on the Madison's table. The
+        row is the Madison's, its bar the accent for the leader and
+        neutral for the rest (``team_rows.rider_bar``); the plate and the
+        name stand clear of the bar at their largest (``bar_lead``), and
+        RIDER stands over them. ``playing`` is a score change's play, its
+        frame now, and its scene, drawn over the same layout
+        (``rider_play``); ``turn`` is the turn from the start list
+        (``rider_turn``).
+        """
         u = self.u
-        head_h = 44 * u
+        key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
+        if self._rider_layout is None or self._rider_layout[0] != key:
+            # A copy, so a payload changed where it stands is not taken for the one measured.
+            self._rider_layout = (
+                (*key[:-1], copy.deepcopy(d)),
+                self.rider_table_layout(area, d, n, bottom),
+            )
+        lay = self._rider_layout[1]
+        cols = lay.cols
+        if turn is not None:
+            self.rider_turn(p, area, lay, rows, turn)
+            return
+        self.rider_headings(p, area, lay)
+        if playing is not None:
+            self.rider_play(p, area, lay, bottom, *playing)
+            return
+        for i, row in enumerate(rows):
+            y = lay.rows_top + i * lay.rh
+            place = str(row.rank)
+            # The leader in the accent, as "1st" is on the result page; the
+            # rest in full ink, not the row's dimmest text.
+            t.text(
+                p, QRectF(area.x(), y, cols.rank_w, lay.rh), place, lay.place_f, place_ink(place)
+            )
+            total = row.status or total_text(row.total)
+            leader = row.rank == 1
+            self.rider_row(
+                p, area, lay, y, row, leader, sprint_points(row), row.laps, row.penalty, total
+            )
+
+    def rider_headings(self, p: QPainter, area: QRectF, lay: RiderTable) -> None:
+        """The rider table's heading row, RIDER over the plates and names."""
+        u = self.u
+        cols = lay.cols
         top = area.y()
-        rows_top = top + head_h + 8 * u
+        head_h = lay.head_h
+        pad = lay.pad
+        lab = t.label(u)
+        # Room to the left for a heading wider than its column.
+        reach = 120 * u
+        name_x, name_w = lay.name_rect.x(), lay.name_rect.width()
+        t.text(p, QRectF(area.x(), top, cols.rank_w, head_h), "#", lab, t.MUTED)
+        t.text(p, QRectF(name_x, top, name_w, head_h), "RIDER", lab, t.MUTED)
+        rect = QRectF(cols.sprints_x - reach, top, cols.sprints_w - pad + reach, head_h)
+        t.text(p, rect, "SPRINT PTS", lab, t.MUTED, RIGHT)
+        rect = QRectF(cols.laps_x, top, cols.laps_w - pad, head_h)
+        t.text(p, rect, "LAPS", lab, t.MUTED, RIGHT)
+        if lay.penalized:
+            rect = QRectF(cols.penalty_x - reach, top, cols.penalty_w - pad + reach, head_h)
+            t.text(p, rect, "PENALTY", lab, t.MUTED, RIGHT)
+        rect = QRectF(cols.total_x, top, cols.total_w - 20 * u, head_h)
+        t.text(p, rect, "TOTAL", lab, t.TEXT, RIGHT)
+
+    def rider_turn(
+        self, p: QPainter, area: QRectF, lay: RiderTable, rows: list, turn: Turn
+    ) -> None:
+        """The start list clearing from the board, then the rider table coming in a row at a time.
+
+        The start list's rows line up with none of the table's, so a row
+        crossing one would show two names at once: the start list clears
+        first, top to bottom (``clear_picture``), and the table's rows
+        then fade in from the right on the cleared board, the headings
+        with the first. Only opacity and position move, and the rows
+        stand as the first play starts from them.
+        """
+        now = self.now()
+        self.clear_picture(p, turn, scorebug.intro_clear(now - turn.start))
+        ms = turn.row_ms(now)
+        for i, r in enumerate(self._turn_rows(rows, turn)):
+            y = lay.rows_top + i * lay.rh
+            k = scorebug.intro_row(ms, i)
+            if k > 0:
+                self.turn_arriving(p, k)
+                if i == 0:
+                    self.rider_headings(p, area, lay)
+                place_rect = QRectF(area.x(), y, lay.cols.rank_w, lay.rh)
+                t.text(p, place_rect, r.place, lay.place_f, place_ink(r.place))
+                self.rider_row(
+                    p, area, lay, y, r.row, r.leader, r.sprints, r.laps, r.penalty, r.total
+                )
+                p.restore()
+
+    def clear_edge(self, cleared: float) -> float:
+        """The top of the soft edge clearing the start list, ``cleared`` of the way down the page."""
+        band = scorebug.INTRO_CLEAR_BAND * self.u
+        return -band + cleared * (self.height() + band)
+
+    def clear_picture(self, p: QPainter, turn: Turn, cleared: float) -> None:
+        """The start list's picture, cleared down to a soft edge ``cleared`` of the way down.
+
+        Above the edge the board is bare; across its INTRO_CLEAR_BAND
+        units the picture comes up from nothing to full; below it the
+        picture stands untouched.
+        """
+        if cleared >= 1 or turn.picture is None:
+            return
+        picture = turn.picture
+        band = scorebug.INTRO_CLEAR_BAND * self.u
+        top = self.clear_edge(cleared)
+        foot = top + band
+        p.save()
+        p.setClipRect(QRectF(0, foot, self.width(), self.height() - foot))
+        p.drawPixmap(QPointF(0, 0), picture)
+        p.restore()
+        if foot <= 0:
+            return
+        # The edge itself: its strip of the picture masked by a gradient, so
+        # the mask costs one strip of the board a frame, not the whole page.
+        dpr = picture.devicePixelRatio()
+        strip = QImage(
+            max(1, math.ceil(self.width() * dpr)),
+            max(1, math.ceil(band * dpr)),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        strip.setDevicePixelRatio(dpr)
+        strip.fill(Qt.GlobalColor.transparent)
+        q = QPainter(strip)
+        q.drawPixmap(QPointF(0, -top), picture)
+        q.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        fade = QLinearGradient(0, 0, 0, band)
+        fade.setColorAt(0, QColor(0, 0, 0, 0))
+        fade.setColorAt(1, QColor(0, 0, 0, 255))
+        q.fillRect(QRectF(0, 0, self.width(), band), fade)
+        q.end()
+        p.drawImage(QPointF(0, top), strip)
+
+    def turn_picture(self, p: QPainter, turn: Turn, band: QRectF, k: float, dx: float = 0) -> None:
+        """The start list's picture over ``band`` as the row there is ``k`` into its turn.
+
+        The start list leaves faster than the table arrives, so a row's
+        old and new names are never on the board at full strength together.
+        """
+        if k >= 1 or turn.picture is None:
+            return
+        p.save()
+        p.setClipRect(band)
+        p.setOpacity((1 - k) ** 3)
+        p.drawPixmap(QPointF(dx, 0), turn.picture)
+        p.restore()
+
+    def turn_arriving(self, p: QPainter, k: float) -> None:
+        """Saves the painter and sets it for a table row ``k`` into its turn; the caller restores it."""
+        p.save()
+        p.setOpacity(k)
+        p.translate(scorebug.INTRO_DRIFT * self.u * (1 - k), 0)
+
+    def rider_table_layout(self, area: QRectF, d: Standings, n: int, bottom: float) -> RiderTable:
+        """The rider table's rows, columns and fonts for this payload on this board."""
+        u = self.u
+        head_h = RIDER_HEAD_H * u
+        rows_top = area.y() + head_h + RIDER_HEAD_GAP * u
         # The feed leaves a status row off the board; a page given one
         # prints the status for a total and no figures, so a penalty on it
         # opens no column.
         penalized = self.penalized()
-        entries = [r.entry for r in d.rows]
-        fill = (bottom - rows_top) / max(n, RIDER_FILL_LEAST)
+        # Sized on the whole table, the rows off the track included, so
+        # their return on the result never steps the page down.
+        entries = [r.entry for r in self.sized(d).rows]
+        fill = rider_row_fill(bottom - rows_top, n)
         # The entry takes nearly the whole row, so the bib plate keeps its
-        # size in a dense table; the row bands carry the separation.
-        inset = 0.05
+        # size in a dense table; the gaps between the rows carry the
+        # separation.
+        inset = RIDER_INSET
 
         def layout(g: float, reserve: bool = False):
             rh = min(fill, RIDER_ROW_FULL * g)
             cols = rider_columns(area, g, 24 * u, penalized or reserve)
-            rect = QRectF(cols.name_x, rows_top + rh * inset, cols.name_w, rh * (1 - 2 * inset))
-            return rh, cols, rect, min(46 * g, rh * STANDINGS_NAME_SHARE)
+            size = min(46 * g, rh * STANDINGS_NAME_SHARE)
+            h = rh * (1 - 2 * inset)
+            lead = self.bar_lead(rh - band_gap(rh, u), h, size)
+            name_w = max(0.0, cols.name_w - lead)
+            return rh, cols, QRectF(cols.name_x + lead, rows_top + rh * inset, name_w, h), size
 
         # The figures' unit: the page's for nine riders or more; for fewer,
         # as large as the rows allow while every name still fits whole, so
@@ -1287,446 +2252,667 @@ class StandingsPage(Page):
         g = u * max(1.0, fill / (RIDER_ROW_FULL * u))
         while g > u and not self.names_whole(entries, *layout(g, reserve=True)[2:]):
             g = max(u, g * 0.96)
-        rh, cols, name_rect, name_size = layout(g)
-        place_f = t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True)
-        total_f = t.font(min(60 * g, rh * 0.84), t.HEAVY, tabular=True)
-        pad = 24 * g
-        right = area.right()
-        (
-            rank_w,
-            name_x,
-            name_w,
-            sprints_x,
-            sprints_w,
-            laps_x,
-            laps_w,
-            penalty_x,
-            penalty_w,
-            total_x,
-            total_w,
-        ) = cols
-        lab = t.label(u)
-        # Room to the left for a heading wider than its column.
-        reach = 120 * u
-
-        t.text(p, QRectF(area.x(), top, rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(name_x, top, name_w, head_h), "RIDER", lab, t.MUTED)
-        t.text(
-            p,
-            QRectF(sprints_x - reach, top, sprints_w - pad + reach, head_h),
-            "SPRINT PTS",
-            lab,
-            t.MUTED,
-            RIGHT,
-        )
-        t.text(p, QRectF(laps_x, top, laps_w - pad, head_h), "LAPS", lab, t.MUTED, RIGHT)
-        if penalized:
-            t.text(
-                p,
-                QRectF(penalty_x - reach, top, penalty_w - pad + reach, head_h),
-                "PENALTY",
-                lab,
-                t.MUTED,
-                RIGHT,
-            )
-        t.text(p, QRectF(total_x, top, total_w - 20 * u, head_h), "TOTAL", lab, t.TEXT, RIGHT)
-
-        # The figures keep pace with the names: at sixteen rows a sprint
-        # value set at half the row would be 26 px, under the board's minimum.
-        num = t.font(min(48 * g, rh * 0.7), t.BOLD, tabular=True)
+        rh, cols, _rect, name_size = layout(g)
+        # The names are fitted and drawn in the room a PENALTY column
+        # leaves, so the first penalty given neither shrinks nor cuts them.
+        name_rect = layout(g, reserve=True)[2]
         self.team_fill = 0.0
         # Measured over every row, not the page's, as the rank and total
         # columns are, so the names hold still as the page turns.
         scale = self.entry_scale(entries, name_rect, name_size, True)
-        for i, row in enumerate(rows):
-            y = rows_top + i * rh
-            self.row_band(p, area, i, y, rh)
-            cell = QRectF(0, y, 0, rh)
-            t.text(
-                p,
-                QRectF(area.x(), y, rank_w, rh),
-                str(row.rank),
-                place_f,
-                # The leader in the accent, as "1st" is on the result page;
-                # the rest in full ink, not the row's dimmest text.
-                t.ACCENT if row.rank == 1 else t.TEXT,
-            )
-            self.entry_line(
-                p,
-                QRectF(name_x, y + rh * inset, name_w, rh * (1 - 2 * inset)),
-                row.entry,
-                name_size,
-                two_line_names=True,
-                scale=scale,
-            )
-            # The sprint points so far, a plain number: a "+" here is the
-            # laps chip's language and would read as a lap. Zero stays
-            # blank so the TV stays quiet until a rider scores.
-            sprint_points = sum(v for v in row.sprints if v)
-            if sprint_points and not row.status:
-                t.text(
-                    p,
-                    cell.adjusted(sprints_x, 0, sprints_x + sprints_w - pad, 0),
-                    str(sprint_points),
-                    num,
-                    t.TEXT,
-                    RIGHT,
-                )
-            if row.laps and not row.status:
-                # The laps alone: the points they earn are the venue's
-                # known value and are already in the total.
-                t.text(
-                    p,
-                    cell.adjusted(laps_x, 0, laps_x + laps_w - pad, 0),
-                    lap_text(row.laps),
-                    num,
-                    t.GAIN if row.laps > 0 else t.LOSS,
-                    RIGHT,
-                )
-            if penalized and row.penalty and not row.status:
-                # Written as a lap lost is, in the loss color: points taken.
-                t.text(
-                    p,
-                    cell.adjusted(penalty_x, 0, penalty_x + penalty_w - pad, 0),
-                    lap_text(row.penalty),
-                    num,
-                    t.LOSS if row.penalty < 0 else t.GAIN,
-                    RIGHT,
-                )
-            shown_total = row.status or total_text(row.total)
-            t.text(
-                p, cell.adjusted(total_x, 0, right - 20 * u, 0), shown_total, total_f, t.TEXT, RIGHT
-            )
+        return RiderTable(
+            head_h=head_h,
+            rows_top=rows_top,
+            rh=rh,
+            band_h=rh - band_gap(rh, u),
+            cols=cols,
+            name_rect=name_rect,
+            name_size=name_size,
+            scale=scale,
+            place_f=t.font(min(46 * g, rh * 0.7), t.BOLD, tabular=True),
+            total_f=t.font(min(RIDER_TOTAL * g, rh * 0.84), t.HEAVY, tabular=True),
+            # The figures keep pace with the names: at sixteen rows a sprint
+            # value set at half the row would be 26 px, under the board's minimum.
+            num=t.font(min(RIDER_FIGURE * g, rh * 0.7), t.BOLD, tabular=True),
+            pad=24 * g,
+            penalized=penalized,
+        )
+
+    def rider_row(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: RiderTable,
+        y: float,
+        row: StandingRow,
+        leader: bool,
+        sprints: int,
+        laps: int,
+        penalty: int,
+        total: str | None,
+    ) -> None:
+        """One rider's row at ``y``: band, plate and name, and figures.
+
+        ``sprints``, ``laps``, ``penalty`` and ``total`` are the figures in
+        view, which a score change holds at their old values until its new
+        total rises in; ``total`` is None while the change plays on the
+        cell, which then draws it (``total_change``). ``leader`` gives the
+        bar the accent.
+        """
+        u = self.u
+        cols = lay.cols
+        band_y = y + (lay.rh - lay.band_h) / 2
+        band = QRectF(cols.name_x, band_y, area.right() - cols.name_x, lay.band_h)
+        bar = team_rows.rider_bar(1 if leader else 2, t.ACCENT)
+        dpr = self.devicePixelRatioF()
+        team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
+        name_rect = lay.name_rect.translated(0, y - lay.rows_top)
+        self.entry_line(
+            p, name_rect, row.entry, lay.name_size, two_line_names=True, scale=lay.scale
+        )
+        cell = QRectF(0, y, 0, lay.rh)
+        pad = lay.pad
+        # The sprint points so far, a plain number: a "+" here is the
+        # laps chip's language and would read as a lap. Zero stays
+        # blank so the TV stays quiet until a rider scores.
+        if sprints and not row.status:
+            rect = cell.adjusted(cols.sprints_x, 0, cols.sprints_x + cols.sprints_w - pad, 0)
+            t.text(p, rect, str(sprints), lay.num, t.TEXT, RIGHT)
+        if laps and not row.status:
+            # The laps alone: the points they earn are the venue's
+            # known value and are already in the total.
+            rect = cell.adjusted(cols.laps_x, 0, cols.laps_x + cols.laps_w - pad, 0)
+            t.text(p, rect, lap_text(laps), lay.num, t.GAIN if laps > 0 else t.LOSS, RIGHT)
+        if lay.penalized and penalty and not row.status:
+            # Written as a lap lost is, in the loss color: points taken.
+            rect = cell.adjusted(cols.penalty_x, 0, cols.penalty_x + cols.penalty_w - pad, 0)
+            t.text(p, rect, lap_text(penalty), lay.num, t.LOSS if penalty < 0 else t.GAIN, RIGHT)
+        if total is not None:
+            t.text(p, self.rider_total_cell(area, lay, y), total, lay.total_f, t.TEXT, RIGHT)
+
+    def rider_total_cell(self, area: QRectF, lay: RiderTable, y: float) -> QRectF:
+        """A rider row's TOTAL cell at ``y``: the total and its chip stand to its right edge."""
+        return QRectF(lay.cols.total_x, y, area.right() - 20 * self.u - lay.cols.total_x, lay.rh)
+
+    def rider_play(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: RiderTable,
+        bottom: float,
+        play: Play,
+        frame: Frame,
+        scene: Scene,
+    ) -> None:
+        """A score change's frame on the rider table, as ``team_play`` draws the Madison's.
+
+        Each row's SPRINT PTS, laps and penalty settle with its new total.
+        The accent bar stays with the leader the stands saw until the last
+        total has risen in, then goes with the new leader as the rows slide.
+        """
+        rows = {row_key(r): r for r in scene.end.rows}
+        steps = {s.key: s for s in play.steps}
+        landed = not frame.chips and all(frame.totals[s.key] == s.new for s in play.steps)
+        clip = len(play.before) > self.per_page()
+        if clip:
+            # A row moving onto the page or off it slides in or out below the last row.
+            p.save()
+            p.setClipRect(QRectF(0, lay.rows_top, self.width(), bottom - lay.rows_top))
+        for k in play.before:
+            row = rows.get(k)
+            if row is None:
+                continue
+            y = lay.rows_top + frame.rows[k] * lay.rh
+            shown = frame.totals.get(k, row.total)
+            # The figures beside the total settle with it.
+            settled = shown == row.total
+            penalty = row.penalty if settled else scene.penalties.get(k, 0)
+            sprints = sprint_points(row) if settled else scene.sprints.get(k, 0)
+            total = None if k in frame.chips else (row.status or total_text(shown))
+            laps = frame.laps.get(k, row.laps)
+            leader = row.rank == 1 if landed else k in scene.leaders
+            self.rider_row(p, area, lay, y, row, leader, sprints, laps, penalty, total)
+        if clip:
+            p.restore()
+        x, w = area.x(), lay.cols.rank_w
+        self.play_places(p, x, w, lay.rows_top, lay.rh, lay.rh, lay.place_f, play, frame, scene)
+        for k, ms in frame.chips.items():
+            cell = self.rider_total_cell(area, lay, lay.rows_top + frame.rows[k] * lay.rh)
+            self.total_change(p, cell, lay.total_f, steps[k], ms, self.u)
+
+    def play_places(
+        self,
+        p: QPainter,
+        x: float,
+        w: float,
+        top: float,
+        pitch: float,
+        h: float,
+        f: QFont,
+        play: Play,
+        frame: Frame,
+        scene: Scene,
+        decided: bool = False,
+    ) -> None:
+        """A play's places, each slot's old place turning to its new one as the rows slide.
+
+        The places stay with their slots, ``pitch`` apart from ``top``,
+        each ``w`` by ``h`` from ``x``; ``decided`` words them as ordinals.
+        """
+        rows = {row_key(r): r for r in scene.end.rows}
+        moved = reorder_progress(play, frame)
+        for slot in range(min(self.per_page(), len(play.before))):
+            rect = QRectF(x, top + slot * pitch, w, h)
+            after = rows.get(play.after[slot])
+            new = (ordinal(after.rank) if decided else str(after.rank)) if after else ""
+            old = scene.places.get(play.before[slot], new)
+            if old == new:
+                t.text(p, rect, new, f, place_ink(new))
+                continue
+            for s, k in ((old, 1 - moved), (new, moved)):
+                if k > 0:
+                    p.save()
+                    p.setOpacity(k)
+                    t.text(p, rect, s, f, place_ink(s))
+                    p.restore()
 
     def team_table(
         self,
         p: QPainter,
         area: QRectF,
         d: Standings,
+        first: int,
         rows: list,
         n: int,
         bottom: float,
-        ordinals: bool = False,
+        playing: tuple[Play, Frame, Scene] | None = None,
+        turn: Turn | None = None,
     ) -> None:
-        """The madison page while the race runs: place, then one bar per team carrying its figures.
+        """The Madison page: place, then each team's row, its riders' surnames leading.
 
-        The bar runs from the place to the page's edge and LAPS, PENALTY
-        and TOTAL sit inside its right end, so a rider finds the color and
-        reads the team's figures on it without tracking across bare
-        background. LAPS and PENALTY take the bar's ink: a lap's green or
-        red on a red or green bar would vanish, so the sign carries the
-        gain or loss. The total sits dark on a plate (``t.figure_plate``),
-        and a status row keeps its word in the bar's ink with no plate, so
-        it reads apart from a scored row. The place and the total are the
-        row's largest type.
+        The row is the start list's: a square left end with the swatch
+        flush against it, and the swatch's right edge, the fade's start,
+        and the color view's moving edge at the score chip's slant
+        (``theme.SLANT``). The figures sit on its dark right end: the
+        laps in the gain or loss color, the penalty while one stands, and
+        the total in white, the row's largest type. There is no heading
+        row: the figures' colors and order say which is which. On a timer
+        the row turns to its color view, the name area solid in the team's
+        color with the team's name on it, and back (design section 10). ``first`` is the
+        payload index of the page's first row. ``playing`` is a score
+        change's play, its frame now, and its scene, drawn over the same
+        layout (``team_play``); ``turn`` is the turn from the start list
+        (``team_turn``).
         """
         u = self.u
-        head_h = 44 * u
-        top = area.y()
-        rows_top = top + head_h + 8 * u
-        rh = (bottom - rows_top) / max(n, TEAM_FILL_LEAST)
-        inset = 0.05
-        bh = rh * (1 - 2 * inset)
-        lab = t.label(u)
+        key = (area.x(), area.y(), area.width(), area.height(), bottom, u, self.rider_label, n, d)
+        if self._layout is None or self._layout[0] != key:
+            # A copy, so a payload changed where it stands is not taken for the one measured.
+            self._layout = (
+                (*key[:-1], copy.deepcopy(d)),
+                self.team_table_layout(area, d, n, bottom),
+            )
+        lay = self._layout[1]
+        ordinals = self.ordinals(d)
+        if turn is not None:
+            self.team_turn(p, area, lay, rows, turn)
+            return
+        if playing is not None:
+            self.team_play(p, area, lay, bottom, *playing)
+            return
+        since, per_page = self.since(), self.per_page()
+        for i, row in enumerate(rows):
+            y = lay.rows_top + i * (lay.rh + lay.gap)
+            look = rotation.look(since, i, per_page) if self.rotates() else rotation.NAMES
+            # The leader in the accent, running or decided, as the winner
+            # alone is on the podium page.
+            place = ordinal(row.rank) if ordinals else str(row.rank)
+            t.text(p, QRectF(area.x(), y, lay.rank_w, lay.rh), place, lay.place_f, place_ink(place))
+            total = row.status or total_text(row.total)
+            label = lay.labels[first + i]
+            self.team_row(p, area, lay, y, look, row, label, row.laps, row.penalty, total)
+
+    def team_row(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: TeamTable,
+        y: float,
+        look: rotation.RowLook,
+        row: StandingRow,
+        label: tuple[str, QFont] | None,
+        laps: int,
+        penalty: int,
+        total: str | None,
+    ) -> None:
+        """One team's row at ``y``: band, riders or team name, and figures.
+
+        ``laps``, ``penalty`` and ``total`` are the figures in view, which a
+        score change holds at their old values until its new total rises
+        in; ``total`` is None while the change plays on the cell, which
+        then draws it (``total_change``).
+        """
+        u = self.u
+        e = row.entry
+        band = QRectF(lay.row_x, y, area.right() - lay.row_x, lay.rh)
+        team_rows.paint_band(
+            p,
+            band,
+            e.color,
+            u,
+            sweep=look.sweep,
+            zone_right=lay.zone_r,
+            slant=t.SLANT,
+            texture=self.texture,
+            dpr=self.devicePixelRatioF(),
+        )
+        # The views' fades scale the painter's opacity, so a row fading in
+        # whole (the turn from the start list) keeps its parts in step.
+        if look.names > 0:
+            p.save()
+            p.setOpacity(p.opacity() * look.names)
+            self.team_riders(p, band, e, lay)
+            p.restore()
+        if look.label > 0 and label is not None:
+            name, f = label
+            rise = (1 - look.label) * 12 * u
+            # Inside the color's square left end and its slanted right end
+            # where it crosses the row's middle, so the name keeps its air
+            # from both at every height.
+            pad = team_rows.ROW_PAD * u
+            right = lay.zone_r - team_rows.run(band, t.SLANT) / 2 - pad
+            rect = QRectF(band.x() + pad, y + rise, right - band.x() - pad, lay.rh)
+            p.save()
+            p.setOpacity(p.opacity() * look.label)
+            t.text(p, rect, name, f, t.team_ink(QColor(e.color)), CENTER)
+            p.restore()
+        cell = QRectF(0, y, 0, lay.rh)
+        # A status row shows its status and no figures, laps included.
+        if laps and not row.status:
+            # The laps alone: the points they earn are in the total.
+            rect = cell.adjusted(lay.laps_r - lay.laps_col, 0, lay.laps_r, 0)
+            t.text(p, rect, team_laps_text(laps), lay.num, t.GAIN if laps > 0 else t.LOSS, RIGHT)
+        if lay.penalized and penalty and not row.status:
+            # Written as a lap lost is, in the loss color: points taken.
+            rect = cell.adjusted(lay.pen_r - lay.pen_col, 0, lay.pen_r, 0)
+            color = t.LOSS if penalty < 0 else t.GAIN
+            t.text(p, rect, lap_text(penalty), lay.num, color, RIGHT)
+        if total is not None:
+            rect = cell.adjusted(lay.total_r - lay.total_col, 0, lay.total_r, 0)
+            t.text(p, rect, total, lay.total_f, t.TEXT, RIGHT)
+
+    def team_turn(self, p: QPainter, area: QRectF, lay: TeamTable, rows: list, turn: Turn) -> None:
+        """The start list turning into the table, a row at a time, then the table held.
+
+        The start list's rows and the table's start at the page's top with
+        one height and gap, so each row's band of the start list's picture
+        fades out drifting left while the table's row fades in from the
+        right over the same band; only opacity and position move. The
+        table's rows stand as the first play starts from them, so the
+        play's first frame follows on with nothing moving but its chip.
+        """
+        ms = turn.row_ms(self.now())
+        drift = scorebug.INTRO_DRIFT * self.u
+        pitch = lay.rh + lay.gap
+        labels = {row_key(r): label for r, label in zip(self.data.rows, lay.labels, strict=True)}
+        for i, r in enumerate(self._turn_rows(rows, turn)):
+            y = lay.rows_top + i * pitch
+            k = scorebug.intro_row(ms, i)
+            # The band and half the gap on each side, so the rows' bands
+            # of the picture meet with nothing left between.
+            band = QRectF(0, y - lay.gap / 2, self.width(), pitch)
+            self.turn_picture(p, turn, band, k, -drift * k)
+            if k > 0:
+                self.turn_arriving(p, k)
+                rect = QRectF(area.x(), y, lay.rank_w, lay.rh)
+                t.text(p, rect, r.place, lay.place_f, place_ink(r.place))
+                label = labels.get(row_key(r.row))
+                self.team_row(
+                    p, area, lay, y, rotation.NAMES, r.row, label, r.laps, r.penalty, r.total
+                )
+                p.restore()
+
+    def _turn_rows(self, rows: list, turn: Turn) -> list[TurnRow]:
+        """The table's rows as the turn shows them.
+
+        In the first play's starting order and figures, so the turn hands
+        over to the play with nothing jumping; the page's rows as they
+        stand when nothing plays.
+        """
+        if not turn.plays:
+            # The rider table words its places as numbers, decided or not.
+            decided = self.teams() and self.ordinals(self.data)
+            return [
+                TurnRow(
+                    r,
+                    ordinal(r.rank) if decided else str(r.rank),
+                    r.laps,
+                    r.penalty,
+                    r.status or total_text(r.total),
+                    sprint_points(r),
+                    r.rank == 1,
+                )
+                for r in rows
+            ]
+        play = turn.plays[0]
+        scene = self._scenes[id(play)]
+        ends = {row_key(r): r for r in scene.end.rows}
+        steps = {s.key: s for s in play.steps}
+        out = []
+        for k in play.before[: turn.rows]:
+            row = ends[k]
+            place = scene.places.get(k, str(row.rank))
+            step = steps.get(k)
+            if step is None:
+                figures = (row.laps, row.penalty, row.status or total_text(row.total))
+                sprints = sprint_points(row)
+            else:
+                figures = (step.old_laps, scene.penalties.get(k, 0), total_text(step.old))
+                sprints = scene.sprints.get(k, 0)
+            out.append(TurnRow(row, place, *figures, sprints, k in scene.leaders))
+        return out
+
+    def team_play(
+        self,
+        p: QPainter,
+        area: QRectF,
+        lay: TeamTable,
+        bottom: float,
+        play: Play,
+        frame: Frame,
+        scene: Scene,
+    ) -> None:
+        """A score change's frame: rows where the frame puts them, then the slams on their totals.
+
+        The rows and their figures are the scene's: a waiting play was
+        built against the play ahead, so the newest payload's totals are
+        not yet the ones in view. The places stay with their slots and
+        turn to the new places as the rows slide.
+        """
+        u = self.u
+        pitch = lay.rh + lay.gap
+        rows = {row_key(r): r for r in scene.end.rows}
+        labels = {row_key(r): label for r, label in zip(self.data.rows, lay.labels, strict=True)}
+        steps = {s.key: s for s in play.steps}
+        since, per_page = self.since(), self.per_page()
+        clip = len(play.before) > per_page
+        if clip:
+            # A row moving onto the page or off it slides in or out below the last row.
+            p.save()
+            p.setClipRect(QRectF(0, lay.rows_top, self.width(), bottom - lay.rows_top))
+        for i, k in enumerate(play.before):
+            row = rows.get(k)
+            if row is None:
+                continue
+            y = lay.rows_top + frame.rows[k] * pitch
+            look = rotation.look(since, i, per_page) if self.rotates() else rotation.NAMES
+            shown = frame.totals.get(k, row.total)
+            # The penalty settles with the new total.
+            penalty = row.penalty if shown == row.total else scene.penalties.get(k, 0)
+            total = None if k in frame.chips else (row.status or total_text(shown))
+            laps = frame.laps.get(k, row.laps)
+            self.team_row(p, area, lay, y, look, row, labels.get(k), laps, penalty, total)
+        if clip:
+            p.restore()
+        decided = self.ordinals(scene.end)
+        x, w = area.x(), lay.rank_w
+        self.play_places(
+            p, x, w, lay.rows_top, pitch, lay.rh, lay.place_f, play, frame, scene, decided
+        )
+        for k, ms in frame.chips.items():
+            y = lay.rows_top + frame.rows[k] * pitch
+            cell = QRectF(lay.total_r - lay.total_col, y, lay.total_col, lay.rh)
+            self.total_change(p, cell, lay.total_f, steps[k], ms, u)
+
+    def total_change(
+        self, p: QPainter, cell: QRectF, f: QFont, step: Step, ms: float, u: float
+    ) -> None:
+        """A TOTAL ``cell`` ``ms`` into its step: the old total knocked out, the chip, the new total.
+
+        The total and the chip stand to the cell's right edge, and the new
+        total rises in clipped to the cell; ``f`` is the total's font.
+        """
+        rh = cell.height()
+        y = cell.y()
+        out = ease_out(phase(ms, 0, scorebug.OLD_OUT_MS))
+        if out < 1:
+            p.save()
+            p.setOpacity(1 - out)
+            t.text(
+                p, cell.translated(0, out * OLD_DROP * rh), total_text(step.old), f, t.TEXT, RIGHT
+            )
+            p.restore()
+        rise = ease_out(phase(ms, scorebug.SWAP_AT_MS, scorebug.SWAP_MS))
+        if rise > 0:
+            p.save()
+            p.setClipRect(cell)
+            p.setOpacity(rise)
+            moved = cell.translated(0, (1 - rise) * NEW_RISE * rh)
+            t.text(p, moved, total_text(step.new), f, t.TEXT, RIGHT)
+            p.restore()
+        chip_f = t.font(max(f.pixelSize() * CHIP_TYPE, t.MIN_PX * u), t.HEAVY, tabular=True)
+        w = t.text_width(step.text, chip_f) + CHIP_PAD * f.pixelSize()
+        h = CHIP_HEIGHT * rh
+        rect = QRectF(cell.right() - w, y + (rh - h) / 2, w, h)
+        # A gain in the accent, a loss (a lap lost, a penalty) in the loss red.
+        fill, ink = (t.ACCENT, t.ACCENT_INK) if step.gain else (t.OUT, t.TEXT)
+        score_chip(p, rect, step.text, chip_f, fill, ink, ms, rh, u)
+
+    def team_riders(self, p: QPainter, band: QRectF, e: Entry, lay: TeamTable) -> None:
+        """A team's two riders side by side: their surnames, or with Bibs Only their plates.
+
+        A rider with no bib yet is named with Bibs Only too, never shown
+        an empty plate, as on the start list.
+        """
+        u = self.u
+        for k, name in enumerate(e.names[:2]):
+            x = lay.names_x + k * lay.half
+            room = max(0.0, lay.half - team_rows.RIDER_GAP * u)
+            bib = e.bibs[k] if k < len(e.bibs) else ""
+            if self.bibs_only and bib:
+                ph = lay.plate_h
+                t.plate(p, QRectF(x, band.center().y() - ph / 2, t.plate_width(ph), ph), bib)
+                continue
+            last = team_rows.split_name(name)[1]
+            rect = QRectF(x, band.y(), room, band.height())
+            t.text(p, rect, t.elide(last, room, lay.surname_f), lay.surname_f, t.TEXT)
+
+    def team_table_layout(self, area: QRectF, d: Standings, n: int, bottom: float) -> TeamTable:
+        """The Madison table's rows, columns and fonts for this payload on this board.
+
+        The rows share the page down to TEAM_FILL_LEAST rows' worth, each
+        page set for a full page's rows. Every column and size is measured
+        over every row, not the page's, so nothing moves as the page
+        turns, and the sizes are decided as though a lap, a penalty, and
+        ordinal places stood, so the first lap gained, the first penalty
+        given, or the race being decided never steps the totals or the
+        surnames down while the riders read them.
+        """
+        u = self.u
+        # The rows take the page from its top: there is no heading row.
+        rows_top = area.y()
+        gap = team_rows.ROW_GAP * u
+        rh = team_rows.stacked_row_h(bottom - rows_top, n, u, TEAM_FILL_LEAST)
         # A PENALTY column opens only while a placed row carries one, as on
         # the rider table, and a status row opens none.
         penalized = self.penalized()
+        ordinals = self.ordinals(d)
+        # Sized on the whole table, the rows off the track included, so
+        # their return on the result never steps the page down.
+        whole = self.sized(d).rows
 
-        def widest(strings: list[str], f: QFont) -> float:
+        def widest(strings, f: QFont) -> float:
             return max((t.text_width(s, f) for s in strings if s), default=0.0)
 
-        # Every column is measured over every row, not the page's, so the
-        # bars and the figures hold still as the page turns.
-        def place(rank: int) -> str:
-            return ordinal(rank) if ordinals else str(rank)
+        places = [ordinal(r.rank) if ordinals else str(r.rank) for r in whole]
+        decided = [ordinal(r.rank) for r in whole]
+        totals = [total_text(r.total) for r in whole if not r.status]
+        lasts = [team_rows.split_name(n)[1] for r in whole for n in r.entry.names[:2]]
+        size = min(rh * TEAM_SURNAME_SHARE, team_rows.START_SURNAME_MOST * u)
+        fig_gap = FIGURE_GAP * u
+        total_r = area.right() - TEAM_FIGURE_PAD * u
+        # The swatch's right edge leans right as it rises; a tall row's
+        # surnames, and with Bibs Only its plates at their largest, step
+        # right of it, a short row's stay where they are.
+        shift = team_rows.slant_shift(rh, size, u)
+        if self.bibs_only:
+            most = min(rh * team_rows.BIBS_ONLY_PLATE_SHARE, team_rows.BIBS_ONLY_PLATE_MOST * u)
+            shift = max(shift, team_rows.clearance(rh, most / 2, u))
+        pad = (team_rows.SWATCH_W + team_rows.ROW_PAD) * u + shift
 
-        places = [place(r.rank) for r in d.rows]
-        decided = [ordinal(r.rank) for r in d.rows]
-        names = [r.entry.team or "" for r in d.rows]
-        totals = [total_text(r.total) for r in d.rows if not r.status]
-        gap = FIGURE_GAP * u
+        def columns(big_px: float) -> dict:
+            """The fonts and columns with the total at ``big_px``, and the surnames' room.
 
-        def columns(big_px: float, reserve: bool = False) -> dict:
-            """The fonts and right edges of the place and the figures at ``big_px``.
-
-            ``reserve`` lays the figures out as a race may come to need
-            them, with a lap, a penalty, and its places worded as ordinals
-            once decided, for deciding the page's size.
+            The room is what a penalty and ordinal places would leave, so
+            neither steps the surnames down when it comes.
             """
-            # The plate's margin is the bar's at full size and gives way
-            # with the figures, as the plate itself does.
-            margin = bh * PLATE_MARGIN * big_px / (rh * TEAM_FIGURE_SHARE)
-            place_f = t.font(big_px, t.HEAVY, tabular=True)
             total_f = t.font(big_px, t.HEAVY, tabular=True)
-            # The laps and penalty keep pace with the figures, never under
-            # the floor.
+            # The laps and penalty keep pace with the total, never under the
+            # floor and never past TEAM_LAPS_MOST; their reserved columns are
+            # measured at that size, so the cap gives the surnames the width.
             laps_px = big_px * TEAM_LAPS_SHARE / TEAM_FIGURE_SHARE
-            num = t.font(max(min(48 * u, rh * 0.7), laps_px), t.BOLD, tabular=True)
-            # The place matches the total until its column would pass
-            # TEAM_PLACE_SHARE of the page: a decided two-team field sets
-            # "2nd" at a row's height, which would take the bars' room.
-            most = area.width() * TEAM_PLACE_SHARE - 32 * u
-            shown = [*places, *decided] if reserve else places
-            if widest(shown, place_f) > most:
-                place_f = t.font(big_px * most / widest(shown, place_f), t.HEAVY, tabular=True)
-            rank_w = max(80 * u, widest(shown, place_f) + 32 * u)
-            # A column is as wide as its heading or its widest figure, so
-            # each heading sits over its figures, right edges together.
-            plate_col = max(widest([*totals, *PLATE_SAMPLES], total_f), t.text_width("TOTAL", lab))
-            # The feed leaves a status row off the board; a page given one
-            # keeps the word clear of the figures beside it.
-            total_col = max(plate_col, widest([r.status for r in d.rows], total_f))
-            laps_col = max(
-                widest(
-                    [
-                        *(lap_text(r.laps) for r in d.rows if not r.status),
-                        *(LAP_SAMPLES if reserve else ()),
-                    ],
-                    num,
-                ),
-                t.text_width("LAPS", lab),
-            )
-            pen_col = max(
-                widest(
-                    [
-                        *(lap_text(r.penalty) for r in d.rows if not r.status),
-                        *(PENALTY_SAMPLES if reserve else ()),
-                    ],
-                    num,
-                ),
-                t.text_width("PENALTY", lab),
-            )
-            bar_x = area.x() + rank_w
-            pad = big_px * PLATE_PAD
-            total_r = area.right() - margin - pad
-            # One width for every plate, so they stand as one column with
-            # the same air on both sides of its widest figure.
-            plate_l = total_r - plate_col - pad
-            pen_r = min(plate_l, total_r - total_col) - gap
-            laps_r = pen_r - pen_col - gap if penalized or reserve else pen_r
+            num_px = min(max(min(48 * u, rh * 0.7), laps_px), TEAM_LAPS_MOST * u)
+            num = t.font(num_px, t.BOLD, tabular=True)
+            # A column is as wide as its widest figure, the samples standing
+            # in for a lap or a penalty not yet given. The feed leaves a
+            # status row off the board; a page given one keeps the word
+            # clear of the figures beside it.
+            total_col = widest([*totals, *TOTAL_SAMPLES, *(r.status for r in whole)], total_f)
+            shown_laps = [team_laps_text(r.laps) for r in whole if not r.status]
+            shown_pens = [lap_text(r.penalty) for r in d.rows if not r.status]
+            laps_col = widest([*shown_laps, *LAP_SAMPLES], num)
+            pen_col = widest([*shown_pens, *PENALTY_SAMPLES], num)
+            pen_r = total_r - total_col - fig_gap
+            reserve_laps_r = pen_r - pen_col - fig_gap
+
+            def place_column(shown: list[str]) -> tuple[QFont, float]:
+                # The place matches the total's scale until its column would
+                # pass TEAM_PLACE_SHARE of the page: a decided two-team field
+                # sets "2nd" at a row's height, which would take the names' room.
+                f = t.font(big_px * TEAM_PLACE_SCALE, t.HEAVY, tabular=True)
+                most = area.width() * TEAM_PLACE_SHARE - 32 * u
+                if widest(shown, f) > most:
+                    f = t.font(f.pixelSize() * most / widest(shown, f), t.HEAVY, tabular=True)
+                return f, max(80 * u, widest(shown, f) + 32 * u)
+
+            place_f, rank_w = place_column(places)
+            _f, reserve_rank_w = place_column([*places, *decided])
+            zone_l = area.x() + reserve_rank_w + pad
+            zone_r = reserve_laps_r - laps_col - COLOR_ZONE_GAP * u
+            half = max(0.0, (zone_r - zone_l) / 2)
             return {
-                "place_f": place_f,
                 "total_f": total_f,
                 "num": num,
-                "rank_w": rank_w,
-                "bar_x": bar_x,
                 "total_col": total_col,
                 "laps_col": laps_col,
                 "pen_col": pen_col,
-                "total_r": total_r,
-                "plate_l": plate_l,
                 "pen_r": pen_r,
-                "laps_r": laps_r,
-                "figures_x": laps_r - laps_col,
-                "margin": margin,
+                "reserve_laps_r": reserve_laps_r,
+                "place_f": place_f,
+                "rank_w": rank_w,
+                "room": max(0.0, half - team_rows.RIDER_GAP * u),
+                "reserve_row_x": area.x() + reserve_rank_w,
+                "reserve_zone_r": zone_r,
             }
 
-        # The team name near the figures' size: with no riders on the row
-        # the bar is the row, and its name is read with the place and the
-        # total. ``team_px`` holds it inside the bar's height.
-        name_cap = self.team_px(rh * TEAM_NAME_SHARE, rh * TEAM_NAME_SHARE, bh)
-
-        def name_px(cols: dict) -> float:
-            """The largest name size up to ``name_cap`` at which the widest name fits left of the figures."""
-            room = cols["figures_x"] - 24 * u - cols["bar_x"]
-            wide = widest(names, t.font(name_cap, t.BOLD))
-            if not wide:
-                return name_cap
-            need = wide + 2 * name_cap * t.TEAM_PAD
-            if need <= room:
-                return name_cap
-            px = name_cap * max(0.0, room) / need
-            # Text width is not exactly linear in pixel size (hinting).
-            while px > 1 and widest(names, t.font(px, t.BOLD)) + 2 * px * t.TEAM_PAD > room:
-                px -= 1
-            return max(px, 0.0)
-
+        # The place and the total give way to the surnames: they step down
+        # from their share of the row until the widest surname fits whole,
+        # but not under TEAM_TOTAL_OVER_SURNAME times the surnames' size;
+        # past that the surnames step down too, and the total follows them
+        # down to TEAM_FIGURE_LEAST. The surnames are what the stands match
+        # to the jerseys and the totals what the riders race on, so a small
+        # field's growth is for both.
         big_px = rh * TEAM_FIGURE_SHARE
-        least_big = min(big_px, TEAM_FIGURE_LEAST * u)
-        least_name = min(name_cap, TEAM_NAME_LEAST * u)
-        # The size is decided as though a lap and a penalty stood, and the
-        # names' size with it, so neither moves when the race gets one.
-        sizing = columns(big_px, reserve=True)
-
-        def short(cols: dict) -> bool:
-            # The names want more room, or the figures would start left
-            # of the bar, over the place column.
-            return name_px(cols) < least_name or cols["figures_x"] < cols["bar_x"] + 24 * u
-
-        while short(sizing) and big_px > least_big:
-            big_px = max(least_big, big_px * 0.96)
-            sizing = columns(big_px, reserve=True)
-        name_f = t.font(max(name_px(sizing), t.MIN_PX * u), t.BOLD)
+        least = min(big_px, TEAM_FIGURE_LEAST * u)
+        surname_px = size
         cols = columns(big_px)
-        place_f, total_f, num = cols["place_f"], cols["total_f"], cols["num"]
-        rank_w, bar_x, bar_r = cols["rank_w"], cols["bar_x"], area.right()
-        total_col, laps_col, pen_col = cols["total_col"], cols["laps_col"], cols["pen_col"]
-        total_r, plate_l, pen_r, laps_r = (
-            cols["total_r"],
-            cols["plate_l"],
-            cols["pen_r"],
-            cols["laps_r"],
-        )
-        figures_x = cols["figures_x"]
-        # A plate keeps to its figures when they gave way to the names, so
-        # a bar taller than its figures does not hold a tall, narrow plate
-        # with a heavy edge.
-        give = big_px / (rh * TEAM_FIGURE_SHARE)
-        margin = cols["margin"]
-        plate_h = (bh - 2 * bh * PLATE_MARGIN) * give
-        zone = name_zone(QRectF(bar_x, 0, bar_r - bar_x, bh), names, name_f, figures_x, u)
-
-        reach = 200 * u
-        t.text(p, QRectF(area.x(), top, rank_w, head_h), "#", lab, t.MUTED)
-        t.text(p, QRectF(bar_x, top, reach, head_h), "TEAM", lab, t.MUTED)
-        t.text(p, QRectF(laps_r - reach, top, reach, head_h), "LAPS", lab, t.MUTED, RIGHT)
-        if penalized:
-            t.text(p, QRectF(pen_r - reach, top, reach, head_h), "PENALTY", lab, t.MUTED, RIGHT)
-        t.text(p, QRectF(total_r - reach, top, reach, head_h), "TOTAL", lab, t.TEXT, RIGHT)
-
-        for i, row in enumerate(rows):
-            y = rows_top + i * rh
-            self.row_band(p, area, i, y, rh)
-            # The leader in the accent, running or decided, as the winner
-            # alone is on the podium page.
-            top = t.ACCENT if row.rank == 1 else t.TEXT
-            t.text(p, QRectF(area.x(), y, rank_w, rh), place(row.rank), place_f, top)
-            e = row.entry
-            bar = QRectF(bar_x, y + rh * inset, bar_r - bar_x, bh)
-            t.team_block(p, bar, e.color, "", name_f)
-            name_rect = QRectF(zone.x(), bar.y(), zone.width(), bh)
-            block_name(p, name_rect, e.color, e.team or "", name_f, t.MIN_PX * u)
-            ink = t.team_ink(QColor(e.color))
-            # A status row shows its status and no figures, laps included.
-            if row.laps and not row.status:
-                # The laps alone: the points they earn are in the total.
-                lap = QRectF(laps_r - laps_col, bar.y(), laps_col, bh)
-                figure(p, lap, lap_text(row.laps), num, ink, RIGHT)
-            if penalized and row.penalty and not row.status:
-                pen = QRectF(pen_r - pen_col, bar.y(), pen_col, bh)
-                figure(p, pen, lap_text(row.penalty), num, ink, RIGHT)
-            if not row.status:
-                plate_y = bar.y() + (bh - plate_h) / 2
-                plate = QRectF(plate_l, plate_y, bar_r - margin - plate_l, plate_h)
-                t.figure_plate(p, plate, bh * give)
-            total = QRectF(total_r - total_col, bar.y(), total_col, bh)
-            total_ink = ink if row.status else t.PLATE_TEXT
-            figure(p, total, row.status or total_text(row.total), total_f, total_ink, RIGHT)
-
-    def paint_overlay(self, p: QPainter, area: QRectF, d: Standings) -> None:
-        """The sprint's result over the standings: place, who, and the points one gap after.
-
-        The card is as wide as its content and centered on the board, so
-        each "+5" sits beside its team block or rider, where the eye
-        already is, rather than across an empty row; the blocks share the
-        widest name's width so the points stand in one right-aligned
-        column.
-        """
-        res = d.sprint_result
-        p.fillRect(self.rect(), QColor(5, 6, 9, SPRINT_VEIL))
-        # A team is its color and name on a three-second card; its pair
-        # of names would be cut to fragments there and add nothing.
-        placings = [
-            (pl, replace(e, names=[]) if e.color else e, pts) for pl, e, pts in res.placings
-        ]
-        # The page's unit is scaled for the card alone, so every helper the
-        # card calls (plates, name fitting) measures as it draws; the team
-        # blocks are sized for the table behind at the page's own unit.
-        scale = sprint_card_scale(len(placings), area.height(), self.u)
-        # The page's unit follows its height, so on a board narrower than
-        # 16:9 (a window of any shape) a card of long names can be wider
-        # than the page: it takes a smaller unit until it fits with air at
-        # its sides.
-        room = self.width() - 2 * SPRINT_CARD_AIR * self.u
-        for _ in range(8):
-            w = self._card_at(p, area, placings, res, scale, draw=False)
-            if w <= room:
+        while widest(lasts, t.font(surname_px, t.HEAVY)) > cols["room"]:
+            keep = max(least, TEAM_TOTAL_OVER_SURNAME * surname_px)
+            if big_px > keep:
+                big_px = max(keep, big_px * 0.96)
+                cols = columns(big_px)
+            elif surname_px > t.MIN_PX * u:
+                surname_px = max(t.MIN_PX * u, surname_px * 0.97)
+            else:
                 break
-            scale *= min(0.995, room / w)
-        self.card_scale = scale
-        self._card_at(p, area, placings, res, scale)
-
-    def _card_at(self, p, area, placings, res, scale: float, draw: bool = True) -> float:
-        """``_paint_card`` in the card's unit, ``scale`` times the page's; the card's width."""
-        page_u, self.u = self.u, self.u * scale
-        page_team_w, self.team_w = self.team_w, self.team_w * scale
-        try:
-            return self._paint_card(p, area, placings, res, draw)
-        finally:
-            self.u, self.team_w = page_u, page_team_w
-
-    def _paint_card(self, p: QPainter, area: QRectF, placings, res, draw: bool = True) -> float:
-        u = self.u
-        rh = SPRINT_ROW_H * u
-        size = 46 * u
-        side, place_w, gap = 48 * u, 120 * u, SPRINT_GAP * u
-        title = sprint_title(res)
-        title_f = t.font(54 * u, t.HEAVY)
-        pts_f = t.font(60 * u, t.HEAVY, tabular=True)
-        figs = [f"+{pts}" for _, _, pts in placings]
-        pts_w = max((t.text_width(s, pts_f) for s in figs), default=0.0)
-        # The card grows to SPRINT_CARD_MOST at most: wide enough that a
-        # long name stays at a size the stands read in the few seconds
-        # the card is up.
-        most = SPRINT_CARD_MOST * u - 2 * side - place_w - gap - pts_w
-        room = QRectF(0, 0, most, rh - 16 * u)
-        entries = [e for _, e, _ in placings]
-        # The blocks keep to the widest name: a bar the card's width would
-        # be a second row band, not a label.
-        self.team_fill = 0.0
-        fit = self.entry_scale(entries, room, size, False)
-        if any(e.color for e in entries):
-            entry_w = self.team_w
-        else:
-            # Rounded up to the pixel: the column is the sum of a name's
-            # parts, and float sums can land a hair under the name they were
-            # measured from, which would initial the widest name.
-            entry_w = math.ceil(
-                max((self.entry_width(room, e, size, fit) for e in entries), default=0.0)
-            )
-        w = max(2 * side + place_w + entry_w + gap + pts_w, 2 * side + t.text_width(title, title_f))
-        if not draw:
-            return w
-        h = SPRINT_HEAD_H * u + len(placings) * rh + SPRINT_FOOT_H * u
-        card = QRectF(area.center().x() - w / 2, area.center().y() - h / 2, w, h)
-        p.setPen(QPen(t.ACCENT, 3 * u))
-        p.setBrush(t.BAR)
-        p.drawRoundedRect(card, 20 * u, 20 * u)
-        t.text(
-            p,
-            QRectF(card.x() + side, card.y() + 30 * u, w - 2 * side, 70 * u),
-            title,
-            title_f,
-            t.ACCENT,
+        surname_f = t.font(surname_px, t.HEAVY)
+        total_f, num, place_f, rank_w = (
+            cols["total_f"],
+            cols["num"],
+            cols["place_f"],
+            cols["rank_w"],
         )
-        # A rule under the title: the card reads as a card over the
-        # table, not as a brighter part of it.
-        p.setPen(QPen(t.ACCENT, 2 * u))
-        rule_y = card.y() + 108 * u
-        p.drawLine(QPointF(card.x() + side, rule_y), QPointF(card.right() - side, rule_y))
-        x = card.x() + side
-        y = card.y() + 124 * u
-        place_f = t.font(40 * u, t.BOLD, tabular=True)
-        for (place, entry, _pts), fig in zip(placings, figs, strict=True):
-            t.text(p, QRectF(x, y, 110 * u, rh), ordinal(place), place_f, t.MUTED)
-            entry_rect = QRectF(x + place_w, y + 8 * u, entry_w, rh - 16 * u)
-            self.entry_line(p, entry_rect, entry, size, two_line_names=False, scale=fit)
-            figs_rect = QRectF(entry_rect.right() + gap, y, pts_w, rh)
-            t.text(p, figs_rect, fig, pts_f, t.TEXT, RIGHT)
-            y += rh
-        return w
+        total_col, laps_col, pen_col, pen_r = (
+            cols["total_col"],
+            cols["laps_col"],
+            cols["pen_col"],
+            cols["pen_r"],
+        )
+        room = cols["room"]
+        laps_r = cols["reserve_laps_r"] if penalized else pen_r
+        row_x = area.x() + rank_w
+        zone_r = laps_r - laps_col - COLOR_ZONE_GAP * u
+        names_x = row_x + pad
+        half = max(0.0, (zone_r - names_x) / 2)
+        floor_px = round(t.MIN_PX * u)
+        scale = t.fit_scale([(s, room, surname_f) for s in lasts], floor=t.MIN_PX * u / surname_px)
+        surname_f = t.font(max(math.floor(surname_px * scale), floor_px), t.HEAVY)
+        # Text width is not exactly linear in pixel size (hinting).
+        while surname_f.pixelSize() > floor_px and widest(lasts, surname_f) > room:
+            surname_f = t.font(surname_f.pixelSize() - 1, t.HEAVY)
+        plate_h = min(
+            rh * team_rows.BIBS_ONLY_PLATE_SHARE,
+            team_rows.BIBS_ONLY_PLATE_MOST * u,
+            room / t.plate_width(1.0),
+        )
 
-    def entry_width(self, rect: QRectF, entry: Entry, size: float, scale: float) -> float:
-        """How much of ``rect`` a rider's plate and name take, the name as ``fit_name`` sets it."""
-        texts = self.entry_texts(rect, entry, size, False, scale)
-        end = rect.x()
-        if self.show_bibs and entry.bibs:
-            end += t.plate_width(self.plate_height(rect.height()))
-        for r, s, f, _kind in texts:
-            if s:
-                shown = t.fit_name(s, r.width(), f)
-                end = max(end, r.x() + min(r.width(), t.text_width(shown, f)))
-        return end - rect.x()
+        # The color view's team name: as large as its share of the row
+        # while it fits the area, then smaller down to the floor, then cut.
+        # Like the surnames and the plates, it is sized for the area a
+        # penalty and ordinal places would leave, and placed in the area
+        # drawn, so neither steps it down when it comes.
+        # The room is inside the color's square left end and its slanted
+        # right end where it crosses the row's middle, as the name is
+        # placed (``team_row``).
+        run = t.SLANT * rh
+        label_room = (
+            cols["reserve_zone_r"] - cols["reserve_row_x"] - 2 * team_rows.ROW_PAD * u - run / 2
+        )
+        labels = []
+        for r in d.rows:
+            name = r.entry.team or ""
+            f = t.font(rh * TEAM_LABEL_SHARE, t.HEAVY)
+            w = t.text_width(name, f)
+            if w > label_room > 0:
+                px = max(t.MIN_PX * u, f.pixelSize() * label_room / w)
+                f = t.font(px, t.HEAVY)
+                # Text width is not exactly linear in pixel size (hinting).
+                while f.pixelSize() > round(t.MIN_PX * u) and t.text_width(name, f) > label_room:
+                    f = t.font(f.pixelSize() - 1, t.HEAVY)
+            labels.append((name, f))
+        return TeamTable(
+            rows_top=rows_top,
+            rh=rh,
+            gap=gap,
+            row_x=row_x,
+            rank_w=rank_w,
+            place_f=place_f,
+            total_f=total_f,
+            num=num,
+            total_r=total_r,
+            total_col=total_col,
+            pen_r=pen_r,
+            pen_col=pen_col,
+            laps_r=laps_r,
+            laps_col=laps_col,
+            penalized=penalized,
+            zone_r=zone_r,
+            names_x=names_x,
+            half=half,
+            surname_f=surname_f,
+            plate_h=plate_h,
+            labels=labels,
+        )
 
 
 # The closest the result's rows below the podium are set: a 72 px row
@@ -1739,13 +2925,27 @@ FINISH_PLANS = ((136, 2), (112, 2), (112, 3))
 # The least result whose rows share the page: a smaller one is set as
 # this many places would be, so a podium of three is not one huge band.
 FINISH_FILL_LEAST = 5
+# Between a place and its row on the result, as the table's place stands
+# left of its row.
+PLACE_GAP = 20
+# The places the rows below the podium may show (FINISH_PLANS' last plan
+# holds 27). Until a result is decided its place column is as wide as the
+# widest of them, so the rows hold still while a Win-and-Out's bells
+# decide its places; a decided result's places stand, so its column is as
+# wide as they need.
+REST_PLACES = range(4, 28)
+# Between an entry and its row's rounded right end, as on a list's rows.
+ROW_END_PAD = 18
 
 
 class FinishPage(Page):
     """The result of a race placed by its finish: a podium of three, the rest in columns.
 
-    A points race never comes here: its standings table stays up to the
-    end and reads as the result once stamped (``StandingsPage.ordinals``).
+    Every place is a rider row (design section 10), its place standing
+    left of it as on the table: the podium's bars are the accent, as
+    1st is, and the rest are neutral. A points race never comes here:
+    its standings table stays up to the end and reads as the result
+    once stamped (``StandingsPage.ordinals``).
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -1756,6 +2956,8 @@ class FinishPage(Page):
         self.g = 1.0
         # The last growth and what it was worked out for, as on the start list.
         self._growth: tuple[tuple, float] | None = None
+        # The places the rows below the podium measure their column by.
+        self.rest_places: list[int] | range = REST_PLACES
 
     def paint(self, p: QPainter, area: QRectF) -> None:
         d: Finish = self.data
@@ -1774,40 +2976,41 @@ class FinishPage(Page):
             if math.ceil(len(rest) / cols) <= per_col:
                 break
         rest = rest[: cols * per_col]
+        decided = d.header.status in DECIDED
+        self.rest_places = [pl.place for pl in rest] if decided and rest else REST_PLACES
         key = (area.width(), area.height(), u, self.rider_label, d)
         if self._growth is None or self._growth[0] != key:
             g = self.growth(area, d, podium, rest, big, cols)
             self._growth = ((*key[:-1], copy.deepcopy(d)), g)
         self.g = g = self._growth[1]
         big_h = big * u * g
-        name_x = area.x() + 230 * u * g
-        podium_rect = QRectF(name_x, y, area.right() - name_x, big_h - 28 * u * g)
+        teams = any(pl.entry.color for pl in podium)
+        entry = self.podium_rect(area, y, big, g, teams)
         self.team_fill = TEAM_FILL
         podium_scale = self.entry_scale(
             [pl.entry for pl in podium],
-            podium_rect,
+            entry,
             64 * u * g,
             False,
             laps=[pl.laps for pl in podium],
         )
+        place_f = t.font(72 * u * g, t.HEAVY, tabular=True)
+        dpr = self.devicePixelRatioF()
         for pl in podium:
-            row = QRectF(area.x() - 20 * u, y, area.width() + 40 * u, big_h - 14 * u * g)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(t.CARD)
-            p.drawRoundedRect(row, 14 * u, 14 * u)
+            band = self.podium_band(area, y, big, g)
+            bar = t.ACCENT.name()
+            team_rows.paint_band(p, band, bar, u, slant=t.SLANT, texture=self.texture, dpr=dpr)
             color = t.ACCENT if pl.place == 1 else t.TEXT
             t.text(
                 p,
-                QRectF(area.x() + 8 * u, y, 200 * u * g, big_h - 14 * u * g),
+                QRectF(area.x(), y, band.x() - area.x(), band.height()),
                 ordinal(pl.place),
-                t.font(72 * u * g, t.HEAVY, tabular=True),
+                place_f,
                 color,
             )
             self.entry_line(
                 p,
-                # The entry fills its band less a margin, so the podium's plates
-                # are a size with the names beside them.
-                QRectF(name_x, y + 7 * u * g, area.right() - name_x, big_h - 28 * u * g),
+                entry.translated(0, y - area.y()),
                 pl.entry,
                 64 * u * g,
                 two_line_names=False,
@@ -1823,12 +3026,13 @@ class FinishPage(Page):
         col_w = (area.width() - gap * (cols - 1)) / cols
         rh = min(84 * u * g, (area.bottom() - y) / per_col)
         rest = self.blocks_alone(rest)
+        teams = any(pl.entry.color for pl in rest)
         # Blocks alone in two columns: at their names, so the lap chips
         # sit beside them rather than at the far end of a bar.
         self.team_fill = 0.0
         scale = self.entry_scale(
             [pl.entry for pl in rest],
-            self._small_name_rect(QRectF(0, y, col_w, rh)),
+            self._small_name_rect(QRectF(0, y, col_w, rh), teams),
             38 * u * g,
             False,
             laps=[pl.laps for pl in rest],
@@ -1837,7 +3041,29 @@ class FinishPage(Page):
             c, r = divmod(i, per_col)
             x = area.x() + c * (col_w + gap)
             ry = y + r * rh
-            self.small_placing(p, QRectF(x, ry, col_w, rh), pl, scale)
+            self.small_placing(p, QRectF(x, ry, col_w, rh), pl, scale, teams)
+
+    def podium_band(self, area: QRectF, y: float, big: float, g: float) -> QRectF:
+        """A podium row at growth ``g``: from just past the widest podium place to the page's edge."""
+        u = self.u
+        f = t.font(72 * u * g, t.HEAVY, tabular=True)
+        left = area.x() + max(t.text_width(ordinal(k), f) for k in (1, 2, 3)) + PLACE_GAP * u * g
+        return QRectF(left, y, area.right() - left, (big - 14) * u * g)
+
+    def podium_rect(
+        self, area: QRectF, y: float, big: float, g: float, teams: bool = False
+    ) -> QRectF:
+        """A podium entry at growth ``g``: its row less a margin, clear of the bar at its largest.
+
+        The entry fills its row less a margin, so the podium's plates are
+        a size with the names beside them.
+        """
+        u = self.u
+        band = self.podium_band(area, y, big, g)
+        h = (big - 28) * u * g
+        lead = self.bar_lead(band.height(), h, 64 * u * g, teams)
+        x = band.x() + lead
+        return QRectF(x, y + 7 * u * g, max(0.0, band.right() - ROW_END_PAD * u - x), h)
 
     def growth(
         self,
@@ -1869,6 +3095,8 @@ class FinishPage(Page):
         col_w = (area.width() - gap * (cols - 1)) / cols
         alone = self.blocks_alone(rest)
         per_col = max(1, math.ceil(len(rest) / cols))
+        teams = any(pl.entry.color for pl in podium)
+        rest_teams = any(pl.entry.color for pl in alone)
 
         def rest_h(g: float) -> float:
             below = area.bottom() - area.y() - (3 * big + 30) * u * g
@@ -1879,13 +3107,11 @@ class FinishPage(Page):
             if alone and rest_h(g) - 12 * u * g < rest_h(1.0) - 12 * u:
                 g = max(1.0, g * 0.96)
                 continue
-            name_x = area.x() + 230 * u * g
-            podium_rect = QRectF(name_x, 0, area.right() - name_x, (big - 28) * u * g)
             self.team_fill = TEAM_FILL
             whole = (
                 self.entry_scale(
                     [pl.entry for pl in podium],
-                    podium_rect,
+                    self.podium_rect(area, 0, big, g, teams),
                     64 * u * g,
                     False,
                     laps=[pl.laps for pl in podium],
@@ -1895,7 +3121,7 @@ class FinishPage(Page):
             if whole and alone:
                 self.g = g
                 self.team_fill = 0.0
-                rest_rect = self._small_name_rect(QRectF(0, 0, col_w, rest_h(g)))
+                rest_rect = self._small_name_rect(QRectF(0, 0, col_w, rest_h(g)), rest_teams)
                 whole = (
                     self.entry_scale(
                         [pl.entry for pl in alone],
@@ -1918,22 +3144,50 @@ class FinishPage(Page):
             replace(pl, entry=replace(pl.entry, names=[])) if pl.entry.color else pl for pl in rest
         ]
 
-    def _small_name_rect(self, r: QRectF) -> QRectF:
-        u = self.u * self.g
-        return QRectF(r.x() + 120 * u, r.y() + 6 * u, r.width() - 120 * u, r.height() - 12 * u)
+    def _rest_place_font(self) -> QFont:
+        return t.font(38 * self.u * self.g, t.BOLD, tabular=True)
 
-    def small_placing(self, p: QPainter, r: QRectF, pl: Placing, scale: float) -> None:
+    def rest_band(self, r: QRectF) -> QRectF:
+        """The row below the podium in the slot ``r``: past the widest place, to the column's end."""
+        f = self._rest_place_font()
+        place_w = max(t.text_width(ordinal(k), f) for k in self.rest_places)
+        left = r.x() + place_w + PLACE_GAP * self.u * self.g
+        gap = band_gap(r.height(), self.u)
+        return QRectF(left, r.y() + gap / 2, r.right() - left, r.height() - gap)
+
+    def _small_name_rect(self, r: QRectF, teams: bool = False) -> QRectF:
         u = self.u * self.g
+        band = self.rest_band(r)
+        h = r.height() - 12 * u
+        x = band.x() + self.bar_lead(band.height(), h, 38 * u, teams)
+        return QRectF(x, r.y() + 6 * u, max(0.0, band.right() - ROW_END_PAD * self.u - x), h)
+
+    def small_placing(
+        self, p: QPainter, r: QRectF, pl: Placing, scale: float, teams: bool = False
+    ) -> None:
+        u = self.u * self.g
+        band = self.rest_band(r)
+        # A rider tied onto the podium below its first three rows is on
+        # the podium, so takes its accent.
+        team_rows.paint_band(
+            p,
+            band,
+            t.ACCENT.name() if pl.place <= 3 else team_rows.RIDER_BAR,
+            self.u,
+            slant=t.SLANT,
+            texture=self.texture,
+            dpr=self.devicePixelRatioF(),
+        )
         t.text(
             p,
-            QRectF(r.x(), r.y(), 110 * u, r.height()),
+            QRectF(r.x(), r.y(), band.x() - r.x(), r.height()),
             ordinal(pl.place),
-            t.font(38 * u, t.BOLD, tabular=True),
+            self._rest_place_font(),
             t.MUTED,
         )
         self.entry_line(
             p,
-            self._small_name_rect(r),
+            self._small_name_rect(r, teams),
             pl.entry,
             38 * u,
             two_line_names=False,

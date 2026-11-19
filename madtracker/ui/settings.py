@@ -15,7 +15,7 @@ on the window's light gray.
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QDir, QEvent, QIODevice, QSize, Qt
+from PySide6.QtCore import QBuffer, QDir, QEvent, QIODevice, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QImage, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -30,11 +30,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from madtracker.board import theme
+from madtracker.board import texture, theme
 from madtracker.control import venue
 from madtracker.control.exports import documents_dir
+from madtracker.inputs import clean_line
 from madtracker.store import Store, StoreError
+from madtracker.ui import style
 from madtracker.ui.icons import mdi
+from madtracker.ui.texture_dialog import TextureDialog
 from madtracker.ui.widgets import (
     Form,
     apply_style,
@@ -49,7 +52,9 @@ from madtracker.ui.widgets import (
     show_message,
 )
 
-PREVIEW_W, PREVIEW_H = 520, 64
+PREVIEW_W, PREVIEW_H = 520, 48
+# The preview box's padding around the logo, both axes together.
+PREVIEW_PAD = 12
 # The most pixels a logo file may declare. Qt decodes the whole image
 # before it scales, so this bounds the memory one pick can take on a
 # venue laptop; it still admits a 50-megapixel phone photo or an
@@ -59,6 +64,12 @@ LOGO_MAX_PIXELS = 64 * 1024 * 1024
 # PNG decodes to 64-bit color. Qt's own default (256) would refuse a
 # 16-bit print wordmark well inside the pixel cap.
 LOGO_DECODE_LIMIT_MB = LOGO_MAX_PIXELS * 8 // (1024 * 1024)
+TEXTURE_TIP = "The pattern tiled faintly across the scoreboard's rows."
+# The combo's last item opens the file dialog; it is never a stored value.
+ADD_FROM_FILE = "Add from File..."
+ADD_KEY = "add"
+
+TEXTURE_REFUSAL = "That file has no shape to tile. Choose an SVG file with a filled shape."
 LOGO_TIP = "A PNG with a transparent background and light artwork; it is scaled to the scoreboard."
 # An invented venue, as every other field shows an example value.
 NAME_PLACEHOLDER = "Lakeside Track Cycling"
@@ -142,6 +153,13 @@ def _swatch(name: str, hex_color: str) -> QPushButton:
     return b
 
 
+class NoWheelCombo(QComboBox):
+    """A dropdown a wheel notch passes over, so scrolling the form never changes it."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, store: Store, data_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -168,8 +186,29 @@ class SettingsDialog(QDialog):
         logo_row.addWidget(browse)
         logo_row.addWidget(default)
 
+        # Pending until Save, like every other value here: the venue's own
+        # shape (None when none is stored), the chosen pattern, and the
+        # adjustments, which "None" keeps so a pattern chosen again is as it was.
+        self.texture_data: bytes | None = venue.texture_setting(store)
+        self.texture_file = venue.texture_name(store)
+        self.pending_pattern = venue.texture_pattern(store)
+        self.pending_adjust = venue.texture_adjust(store)
+        self.texture_combo = NoWheelCombo()
+        self._fill_texture_combo()
+        self.texture_combo.currentIndexChanged.connect(self._texture_picked)
+        # Opens the adjustments dialog; it is off while no pattern is drawn.
+        self.adjust_button = QPushButton("Adjust...")
+        self.adjust_button.clicked.connect(self.open_adjustments)
+        self.adjust_button.setEnabled(self.pending_pattern != "none")
+        texture_row = QHBoxLayout()
+        texture_row.addWidget(self.texture_combo, 1)
+        texture_row.addWidget(self.adjust_button)
+        self.texture_label = QLabel("Scoreboard texture")
+        for w in (self.texture_label, self.texture_combo):
+            w.setToolTip(TEXTURE_TIP)
+
         self.preview = QLabel()
-        self.preview.setFixedSize(PREVIEW_W + 24, PREVIEW_H + 24)
+        self.preview.setFixedSize(PREVIEW_W + PREVIEW_PAD, PREVIEW_H + PREVIEW_PAD)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # With no logo it shows the venue's name, which may be long.
         self.preview.setWordWrap(True)
@@ -238,9 +277,12 @@ class SettingsDialog(QDialog):
         self.rulesets_button.clicked.connect(self.open_rulesets)
 
         form = Form()
+        # Ten rows must fit a 1366 by 768 screen at 125%.
+        form.setVerticalSpacing(style.XS)
         form.addRow("Venue name", self.venue_name)
         form.addRow("Scoreboard logo", logo_row)
         form.addRow("", self.preview)
+        form.addRow(self.texture_label, texture_row)
         form.addRow("Riders on the scoreboard", self.rider_label)
         form.addRow("Accent color", accent_row)
         form.addRow("Backup folder", backup_row)
@@ -283,6 +325,71 @@ class SettingsDialog(QDialog):
         show_message(self.error, "")
         self.logo_name.setText(name if data else "Default logo")
         self._preview()
+
+    def _fill_texture_combo(self) -> None:
+        """The patterns, the venue's own shape when one is stored, then Add from File."""
+        combo = self.texture_combo
+        combo.blockSignals(True)
+        combo.clear()
+        for key, label in texture.PATTERNS:
+            combo.addItem(label, key)
+        # The item is the file's name; a stored shape without one is not offered.
+        if self.texture_data and self.texture_file:
+            combo.addItem(self.texture_file, "venue")
+        combo.insertSeparator(combo.count())
+        combo.addItem(ADD_FROM_FILE, ADD_KEY)
+        combo.setCurrentIndex(max(0, combo.findData(self.pending_pattern)))
+        combo.blockSignals(False)
+
+    def _texture_picked(self, index: int) -> None:
+        key = self.texture_combo.itemData(index)
+        if key == ADD_KEY:
+            # The dialog is modal and the combo is rebuilt after it, so it runs
+            # once this signal handler has returned.
+            QTimer.singleShot(0, self, self._pick_texture)
+            return
+        if key is None:
+            return
+        self.pending_pattern = key
+        show_message(self.error, "")
+        self.adjust_button.setEnabled(key != "none")
+
+    def _pick_texture(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose Scoreboard Texture", "", "SVG Images (*.svg)"
+        )
+        if path:
+            self.choose_texture(path)
+        else:
+            self._show_pending_pattern()
+
+    def _show_pending_pattern(self) -> None:
+        combo = self.texture_combo
+        combo.blockSignals(True)
+        combo.setCurrentIndex(max(0, combo.findData(self.pending_pattern)))
+        combo.blockSignals(False)
+
+    def choose_texture(self, path: str | Path) -> bool:
+        """Take the file as the venue shape and select it; False, with the red line, when it has no shape to tile."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(texture.MAX_SVG_BYTES + 1)
+        except OSError:
+            raw = b""
+        data = texture.first_shape_svg(raw) if raw else None
+        # The item is named by the file, so a file with no usable name is refused.
+        name = clean_line(Path(path).name) or Path(path).name
+        if data is None or not name:
+            show_message(self.error, TEXTURE_REFUSAL)
+            self._show_pending_pattern()
+            return False
+        self.texture_data = data
+        self.texture_file = name
+        self.pending_pattern = "venue"
+        show_message(self.error, "")
+        self._fill_texture_combo()
+        self.adjust_button.setEnabled(True)
+        return True
 
     def _show_accent(self) -> None:
         for hex_color, b in self.accent_swatches.items():
@@ -344,6 +451,11 @@ class SettingsDialog(QDialog):
         if not data:
             self.logo_name.setText("Default logo")
 
+    def open_adjustments(self) -> None:
+        dialog = TextureDialog(self.pending_pattern, self.texture_data, self.pending_adjust, self)
+        if run_dialog(dialog) == QDialog.DialogCode.Accepted:
+            self.pending_adjust = dialog.adjust()
+
     def open_rulesets(self) -> None:
         from madtracker.ui.rulesets import open_rulesets
 
@@ -364,6 +476,11 @@ class SettingsDialog(QDialog):
             venue.save(
                 self.store,
                 logo=self.logo_data,
+                texture=self.texture_data,
+                texture_name=self.texture_file,
+                keep_texture=False,
+                texture_pattern=self.pending_pattern,
+                texture_adjust=self.pending_adjust,
                 name=self.venue_name.text(),
                 backup=self.backup.text(),
                 rider_label=self.rider_label.currentData(),

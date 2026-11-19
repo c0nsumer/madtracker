@@ -246,12 +246,12 @@ def test_the_word_reaches_the_name_the_program_the_surface_the_board_and_the_she
     qtbot.addWidget(surface)
     surface.show_screen(shown)
     # Unnamed, so the venue's word is the title, with the group beside it
-    # and no format line repeating it, on the surface and the board alike.
+    # and no format line repeating it on the surface.
     assert surface.title.text() == "Devil"
     assert surface.detail.text() == "Group A"
     assert surface.description.text() == DEVIL and not surface.description.isHidden()
     _, payload = board_feed.board_for(live.view())
-    assert (payload.header.title, payload.header.detail) == ("Devil", "")
+    assert payload.header.title == "Devil"
     assert build_summary(store, race).format_label == "Devil"
 
     # A race made from the rulebook says nothing extra and shows no description line.
