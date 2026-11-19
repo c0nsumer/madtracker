@@ -19,6 +19,7 @@ entry names the version shown in About.
 - The rider's ⋯ menu has separators: the ways out of the race are grouped together, and **Disqualify** is set apart.
 - A Sprint Final and a Keirin Final no longer offer a tie. A dead heat there is rerun (USAC 2F12, 2H2), and the scorer enters the order after the rerun.
 - In the ruleset editor, **Scratch Race and Others** is now the last tab.
+- The results PDF prints the points of a rider or team marked Did Not Finish, in gray. Before, the row had no figures, though the points still counted in a Team Omnium by Points.
 - The Scoring help for the Win-and-Out no longer describes a dead heat on a bell lap or a lap winner marked Did Not Finish, which the scoring window does not offer.
 
 ## 1.1.5 (2026-Oct-30)

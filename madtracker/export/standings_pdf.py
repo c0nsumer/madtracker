@@ -235,7 +235,16 @@ def _draw_row(
     status = tier is T.STATUS
     place = row.status if status else ("" if row.rank is None else str(row.rank))
     color = _swatch(row.color) if cols.swatch is not None else None
-    return T.draw_row(pdf, cols.lead, tier, y, text, place=place, color_hex=color, figures=figures)
+    return T.draw_row(
+        pdf,
+        cols.lead,
+        tier,
+        y,
+        text,
+        place=place,
+        color_hex=color,
+        figures=None if status else figures,
+    )
 
 
 def _header_names(pdf: P._Doc, group: GroupTable, cols: _Cols) -> list[T.Lines]:

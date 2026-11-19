@@ -380,7 +380,8 @@ def draw_row(
     """Draw one row at ``y`` and return its height.
 
     ``figures`` draws the sheet's own columns on the row's first line,
-    given its top; a status row has none.
+    given its top, in the row's ink; the sheet passes none for a row that
+    prints no figures.
     """
     height = text.height + tier.pad
     top = y + tier.pad / 2
@@ -420,7 +421,8 @@ def draw_row(
         if n == 0 and text.note and lead.team is None:
             _note_under_name(pdf, text, lead.name, ly)
             ly += text.note_h
-    if not status and figures is not None:
+    if figures is not None:
+        pdf.set_text_color(*(P.MUTED if status else P.INK))
         figures(first)
     pdf.set_text_color(*P.INK)
     pdf.set_draw_color(*P.RULE)

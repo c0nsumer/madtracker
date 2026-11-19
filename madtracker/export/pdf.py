@@ -804,9 +804,9 @@ class _Cols:
 def _widest_sprint(summary: RaceSummary) -> tuple[str, str]:
     """The widest sprint figure and the widest sprint sum as printed."""
     figures = [
-        format_number(p) for row in summary.rows if row.is_finisher for p in row.sprint_points
+        format_number(p) for row in summary.rows if _has_figures(row) for p in row.sprint_points
     ]
-    sums = [format_number(sum(row.sprint_points)) for row in summary.rows if row.is_finisher]
+    sums = [format_number(sum(row.sprint_points)) for row in summary.rows if _has_figures(row)]
     return T.widest(figures), T.widest(sums)
 
 
@@ -871,12 +871,12 @@ def _columns(pdf: _Doc, summary: RaceSummary, span: tuple[float, float] | None =
         # board run; the total sits at the right edge on all three. The
         # name column gives up the room.
         total_w = T.total_width(
-            pdf, (format_number(r.total_points) for r in summary.rows if r.is_finisher)
+            pdf, (format_number(r.total_points) for r in summary.rows if _has_figures(r))
         )
         points = (right - total_w, total_w)
         right -= total_w + T.GAP
-        if any(r.adjust_points for r in summary.rows if not r.status):
-            # A status row prints no figures, so only a placed row opens it.
+        if any(r.adjust_points for r in summary.rows if _has_figures(r)):
+            # Only a row that prints figures opens it.
             penalty = (right - T.PENALTY_W, T.PENALTY_W)
             right -= T.PENALTY_W + T.GAP
         laps = (right - LAPS_W, LAPS_W)
@@ -952,6 +952,16 @@ def _two_columns(pdf: _Doc, summary: RaceSummary, cols: _Cols) -> tuple[_Cols, .
     if pair[0].name[1] < NAME_MIN:
         return (cols,)
     return pair
+
+
+def _has_figures(row: ResultRow) -> bool:
+    """Whether the row prints its sprint, lap, and total figures.
+
+    A Did Not Finish keeps the points scored, and a Team Omnium by Points
+    counts them, so the sheet prints them, muted with the rest of the row.
+    A Did Not Start or a disqualified row has none that stand.
+    """
+    return row.is_finisher or row.status == "DNF"
 
 
 def _sprint_text(points: int, run: bool) -> str:
@@ -1038,7 +1048,7 @@ def _draw_row(
         text,
         place=row.place,
         color_hex=row.color_hex,
-        figures=figures,
+        figures=figures if _has_figures(row) else None,
     )
 
 

@@ -1335,11 +1335,67 @@ def test_a_lap_not_counted_prints_beside_the_name(store, event, tmp_path, drawn)
     assert "Lap not counted" in texts
 
 
-def test_a_penalty_only_on_a_dnf_rider_prints_no_penalty_column(
+def test_a_did_not_finish_prints_the_points_it_keeps(store, event, seeded, tmp_path, drawn):
+    """A Did Not Finish keeps the points scored, and a Team Omnium by Points
+    counts them, so the sheet prints the row's figures: Cy's 0 in the
+    seeded race, and a Madison team's sprint, lap, and total."""
+    event_id, ids = event
+    rules = R.SprintPointsRules(sprint_count=2, scored_unit="team")
+    mad = store.add_race(event_id, "Madison E", "madison", rules=rules.to_dict())
+    teams = {}
+    for color, a, b in (("Green", 1, 2), ("Gold", 3, 4)):
+        store.add_race_entry(mad.race_id, ids[a])
+        store.add_race_entry(mad.race_id, ids[b])
+        team = store.add_team(mad.race_id, color, color=color)
+        store.add_team_member(team.team_id, ids[a])
+        store.add_team_member(team.team_id, ids[b])
+        teams[color] = team.team_id
+    s = LiveRace(store, mad.race_id)
+    assert s.click(teams["Green"]).ok and s.click(teams["Gold"]).ok
+    assert s.record_sprint().ok
+    assert s.act(teams["Green"], "lap_gained").ok and s.act(teams["Green"], "dnf").ok
+    assert s.click(teams["Gold"]).ok
+    assert s.state == "provisional"
+    write_results_pdf(store, event_id, tmp_path / "dnf.pdf")
+    own = _section(drawn, "Points B", "Madison C")
+    head = next(d for d in own if d["text"] == "S1")
+    cy = _row_of(own, "Cy Park")
+    assert [d["text"] for d in cy if d["x"] >= head["x"]] == ["0"]
+    own = _section(drawn, "Madison E")
+    head = next(d for d in own if d["text"] == "S1")
+    green = _row_of(own, "Green")
+    assert green[0]["text"] == "DNF"
+    assert [d["text"] for d in green if d["x"] >= head["x"]] == ["5", "+1", "25"]
+    # The figures are in the status row's own face, right-aligned under the Total.
+    total = next(d for d in green if d["text"] == "25")
+    heading = next(d for d in own if d["text"] == "Total")
+    assert total["size"] == table.STATUS.size
+    assert abs(total["x"] + total["w"] - (heading["x"] + heading["w"])) < 0.01
+
+
+def test_a_penalty_on_a_did_not_finish_opens_the_penalty_column(
     store, event, seeded, tmp_path, drawn
 ):
-    """A status row prints no figures, so a column opened for it alone
-    would be a heading over nothing."""
+    """The row prints its figures, so its penalty has a column to stand in."""
+    event_id, ids = event
+    rules = R.SprintPointsRules(sprint_count=1)
+    race = store.add_race(event_id, "Points F", "points", rules=rules.to_dict())
+    for bib in (1, 2, 4):
+        store.add_race_entry(race.race_id, ids[bib])
+    s = LiveRace(store, race.race_id)
+    assert s.act(ids[4], "points_penalty:3").ok and s.act(ids[4], "dnf").ok
+    assert s.click(ids[1]).ok and s.click(ids[2]).ok
+    assert s.state == "provisional"
+    write_results_pdf(store, event_id, tmp_path / "out.pdf", races=[race.race_id])
+    assert "Penalty" in [d["text"] for d in drawn]
+    assert "\u22123" in [d["text"] for d in _row_of(drawn, "Cy Park")]
+
+
+def test_a_penalty_only_on_a_disqualified_rider_prints_no_penalty_column(
+    store, event, seeded, tmp_path, drawn
+):
+    """A disqualified row prints no figures, so a column opened for it
+    alone would be a heading over nothing."""
     event_id, ids = event
     points = next(r for r in store.races(event_id) if r.name == "Points B")
     s = LiveRace(store, points.race_id)
