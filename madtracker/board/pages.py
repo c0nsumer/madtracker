@@ -147,12 +147,16 @@ class Page(QWidget):
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        p.fillRect(self.rect(), t.BG)
-        if self.data is not None:
-            self.paint(p, self.margin_rect())
-        p.end()
+        # The painter is ended whatever the page raises: one left open
+        # fails every later frame and takes the process down with the board.
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            p.fillRect(self.rect(), t.BG)
+            if self.data is not None:
+                self.paint(p, self.margin_rect())
+        finally:
+            p.end()
 
     def margin_rect(self) -> QRectF:
         u = self.u
@@ -1577,9 +1581,22 @@ class Scene(NamedTuple):
     page: int
 
 
-def place_ink(place: str) -> QColor:
-    """The leader's place in the accent, as on the podium page; the rest in full ink."""
-    return t.ACCENT if place in ("1", "1st") else t.TEXT
+def place_ink(place: str, leader: bool = True) -> QColor:
+    """The leader's place in the accent, as on the podium page; the rest in full ink.
+
+    ``leader`` is off for a "1" that leads nothing: the first row of a
+    table still in start-list order, before its first score lands.
+    """
+    return t.ACCENT if leader and place in ("1", "1st") else t.TEXT
+
+
+def ink_between(a: QColor, b: QColor, k: float) -> QColor:
+    """The ink ``k`` of the way from ``a`` to ``b``."""
+    return QColor(
+        round(a.red() + (b.red() - a.red()) * k),
+        round(a.green() + (b.green() - a.green()) * k),
+        round(a.blue() + (b.blue() - a.blue()) * k),
+    )
 
 
 def row_key(row: StandingRow) -> Key:
@@ -2146,7 +2163,7 @@ class StandingsPage(Page):
                 if i == 0:
                     self.rider_headings(p, area, lay)
                 place_rect = QRectF(area.x(), y, lay.cols.rank_w, lay.rh)
-                t.text(p, place_rect, r.place, lay.place_f, place_ink(r.place))
+                t.text(p, place_rect, r.place, lay.place_f, place_ink(r.place, r.leader))
                 self.rider_row(
                     p, area, lay, y, r.row, r.leader, r.sprints, r.laps, r.penalty, r.total
                 )
@@ -2405,15 +2422,19 @@ class StandingsPage(Page):
             rect = QRectF(x, top + slot * pitch, w, h)
             after = rows.get(play.after[slot])
             new = (ordinal(after.rank) if decided else str(after.rank)) if after else ""
-            old = scene.places.get(play.before[slot], new)
-            if old == new:
-                t.text(p, rect, new, f, place_ink(new))
+            new_ink = place_ink(new)
+            was = play.before[slot]
+            old = scene.places.get(was)
+            # A place the scene does not hold is drawn as it will stand.
+            old_ink = place_ink(old, was in scene.leaders) if old is not None else new_ink
+            if old is None or old == new:
+                t.text(p, rect, new, f, ink_between(old_ink, new_ink, moved))
                 continue
-            for s, k in ((old, 1 - moved), (new, moved)):
+            for s, ink, k in ((old, old_ink, 1 - moved), (new, new_ink, moved)):
                 if k > 0:
                     p.save()
                     p.setOpacity(k)
-                    t.text(p, rect, s, f, place_ink(s))
+                    t.text(p, rect, s, f, ink)
                     p.restore()
 
     def team_table(
@@ -2565,7 +2586,7 @@ class StandingsPage(Page):
             if k > 0:
                 self.turn_arriving(p, k)
                 rect = QRectF(area.x(), y, lay.rank_w, lay.rh)
-                t.text(p, rect, r.place, lay.place_f, place_ink(r.place))
+                t.text(p, rect, r.place, lay.place_f, place_ink(r.place, r.leader))
                 label = labels.get(row_key(r.row))
                 self.team_row(
                     p, area, lay, y, rotation.NAMES, r.row, label, r.laps, r.penalty, r.total
@@ -2795,8 +2816,10 @@ class StandingsPage(Page):
                     f = t.font(f.pixelSize() * most / widest(shown, f), t.HEAVY, tabular=True)
                 return f, max(80 * u, widest(shown, f) + 32 * u)
 
-            place_f, rank_w = place_column(places)
-            _f, reserve_rank_w = place_column([*places, *decided])
+            # The places are set at the size their ordinals will take, so
+            # the race being decided never steps them down.
+            place_f, reserve_rank_w = place_column([*places, *decided])
+            rank_w = max(80 * u, widest(places, place_f) + 32 * u)
             zone_l = area.x() + reserve_rank_w + pad
             zone_r = reserve_laps_r - laps_col - COLOR_ZONE_GAP * u
             half = max(0.0, (zone_r - zone_l) / 2)

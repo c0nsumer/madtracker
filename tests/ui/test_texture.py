@@ -222,6 +222,28 @@ def test_a_filled_child_of_an_unfilled_group_is_taken(qapp):
     assert _picked('<g fill="none"><rect width="50" height="50" fill="#000"/></g>') is not None
 
 
+def test_a_shape_keeps_no_filter(qapp):
+    """A filter is a render of its own on every cell, and the mask is the
+    shape's outline alone."""
+    blurred = (
+        f'<svg {NS} viewBox="0 0 10 10"><defs><filter id="f">'
+        '<feGaussianBlur stdDeviation="2"/></filter></defs>'
+        '<g style="filter:url(#f);opacity:1"><rect width="9" height="9" filter="url(#f)"/></g></svg>'
+    ).encode()
+    out = texture.first_shape_svg(blurred)
+    assert out is not None and b"filter" not in out and b"feGaussianBlur" not in out
+    assert b"opacity:1" in out
+    assert not texture.Texture(out).builtin
+
+
+def test_a_stored_shape_past_the_size_settings_accepts_draws_the_default_pattern(qapp):
+    svg = texture.first_shape_svg(CHEVRON)
+    padded = svg + b" " * (texture.MAX_SVG_BYTES + 1 - len(svg))
+    default = texture.make_texture(texture.DEFAULT_PATTERN, None).cell(1.0, 1.0)
+    tex = texture.make_texture("venue", padded)
+    assert tex.builtin and tex.cell(1.0, 1.0) == default
+
+
 def test_a_very_wide_shape_is_refused_quickly_and_a_wide_one_tiles(qapp):
     import time
 
@@ -258,7 +280,7 @@ def test_patterns_list_reads_as_approved():
     )
     assert texture.DEFAULT_PATTERN == "slant"
     assert texture.pattern_svg("none") is None and texture.pattern_svg("venue") is None
-    assert texture.pattern_svg("bolts") is None
+    assert texture.pattern_svg("swirls") is None
 
 
 def test_every_bundled_pattern_tiles(qapp):
@@ -303,7 +325,7 @@ def test_venue_unknown_and_missing_patterns(qapp):
     venue = texture.make_texture("venue", svg)
     assert venue is not None and not venue.builtin
     default = texture.make_texture(texture.DEFAULT_PATTERN, None).cell(1.0, 1.0)
-    for key in ("nonsense", "bolts"):
+    for key in ("nonsense", "swirls"):
         tex = texture.make_texture(key, None)
         assert tex.builtin and tex.cell(1.0, 1.0) == default, key
     assert texture.make_texture("venue", None).cell(1.0, 1.0) == default

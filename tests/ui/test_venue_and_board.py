@@ -764,17 +764,12 @@ def test_a_pattern_that_is_not_offered_reads_as_the_default(store):
     assert venue.texture_pattern(store) == "slant"
     with pytest.raises(ValueError):
         venue.save(store, name="R", backup="", texture_pattern="swirls")
-    with pytest.raises(ValueError):
-        venue.save(store, name="R", backup="", texture_pattern="bolts")
 
 
-def test_a_file_that_stores_the_bolts_draws_the_default_pattern(store, board):
+def test_a_file_that_stores_an_unknown_pattern_draws_the_default_pattern(store, board):
     from madtracker.board.texture import make_texture
 
-    store.set_setting(venue.TEXTURE_PATTERN_KEY, "bolts")
-    # Keys the app does not read are left where they are and change nothing.
-    store.set_setting("board/texture_size", 150)
-    store.set_setting("board/texture_opacity", 0)
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "swirls")
     assert venue.texture_pattern(store) == "slant"
     board.set_texture(venue.texture_pattern(store), venue.texture_setting(store))
     default = make_texture("slant", None).cell(1.0, 1.0)

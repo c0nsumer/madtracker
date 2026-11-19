@@ -875,6 +875,40 @@ def bare(img: QImage) -> QImage:
     return out
 
 
+def test_no_place_is_in_the_accent_until_the_first_score_has_made_a_leader(qtbot, drawn):
+    """The table comes in from the start list in start-list order, where the
+    first row's "1" leads nothing; the accent arrives with the reorder."""
+    from madtracker.board import scorebug
+    from madtracker.board import theme as t
+
+    w, clock, data = turning(qtbot)
+    w.set_layout("sprint_points", data)
+    rows_in = scorebug.INTRO_CLEAR_MS + scorebug.intro_ms(9)
+    assert frame(w, clock, drawn, rows_in)["1"][2] == t.TEXT.name()
+    assert frame(w, clock, drawn, intro_end() + 100)["1"][2] == t.TEXT.name()
+    at = frame(w, clock, drawn, intro_end() + SETTLED)
+    assert at["1"][2] == t.ACCENT.name() and at["2"][2] == t.TEXT.name()
+    assert not w.pages["sprint_points"].scoring_now()
+
+
+def test_a_page_that_fails_to_paint_ends_its_painter(qtbot, monkeypatch):
+    """A painter left open would fail every later frame, so the next
+    payload draws as though nothing had happened."""
+    w = render(qtbot, "sprint_points", table(9))
+    page = w.pages["sprint_points"]
+    picture = page.grab().toImage()
+
+    def fail(*_args):
+        raise RuntimeError("paint")
+
+    with monkeypatch.context() as m:
+        m.setattr(page, "paint", fail)
+        with pytest.raises(RuntimeError):
+            page.grab()
+    assert not page.paintingActive()
+    assert page.grab().toImage() == picture
+
+
 def test_the_rider_start_list_clears_then_the_table_comes_in_before_the_first_chip(
     qtbot, drawn, monkeypatch
 ):

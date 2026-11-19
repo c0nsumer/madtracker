@@ -125,6 +125,17 @@ def first_shape_svg(data: bytes) -> bytes | None:
         for child in list(parent):
             if id(child) not in keep and _local(child.tag) in _DRAWS:
                 parent.remove(child)
+    # A filter costs a render of its own on every cell, and the mask is
+    # the shape's outline alone, so none is kept.
+    for el in list(root.iter()):
+        for child in list(el):
+            if _local(child.tag) == "filter":
+                el.remove(child)
+        el.attrib.pop("filter", None)
+        style = el.get("style")
+        if style:
+            kept = [d for d in style.split(";") if d.partition(":")[0].strip() != "filter"]
+            el.set("style", ";".join(kept))
     tile.set("id", "tile")
     out = _writer.tostring(root, encoding="utf-8")
     return out if _measure(out) is not None else None
@@ -270,11 +281,12 @@ def make_texture(pattern: str, venue_svg: bytes | None) -> Texture | None:
     """The texture for a stored choice, or None when nothing is to be drawn.
 
     ``none`` draws nothing. ``venue`` is the venue's own shape, the default
-    pattern without one; a key that is not offered gives the default pattern.
+    pattern without one or with one past the size Settings accepts; a key
+    that is not offered gives the default pattern.
     """
     if pattern == "none":
         return None
-    if pattern == "venue" and venue_svg:
+    if pattern == "venue" and venue_svg and len(venue_svg) <= MAX_SVG_BYTES:
         return Texture(venue_svg)
     svg = pattern_svg(pattern) or pattern_svg(DEFAULT_PATTERN)
     assert svg is not None

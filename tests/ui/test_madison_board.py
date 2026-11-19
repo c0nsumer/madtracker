@@ -421,8 +421,8 @@ def test_a_slanted_sweep_ends_along_the_slant_short_of_the_zone(qapp):
 def test_the_color_is_the_part_left_of_its_edge_on_every_row_of_every_board(qapp, height):
     """The solid color always runs from the row's square left end to its
     slanted edge, never the rest of the row: Qt's path intersection
-    misreads the edges a part shares with the row and once filled one
-    team's figures instead of its name, on one board size only."""
+    misreads the edges a part shares with the row, and on some board
+    sizes would fill a team's figures instead of its name."""
     from madtracker.board import team_rows
     from madtracker.board import theme as t
 
@@ -840,6 +840,30 @@ def test_the_table_puts_place_names_and_figures_in_their_columns(qtbot, drawn, m
     )
     assert row.left() < okafor.left() < haddad.left() and okafor.right() < laps_ink
     assert okafor.center().y() == pytest.approx(row.center().y(), abs=1)
+
+
+@pytest.mark.parametrize("teams", [2, 3, 5])
+def test_the_places_keep_their_size_when_the_race_is_decided(qtbot, drawn, teams):
+    """The places are set at the size their ordinals take, so "1" turning
+    to "1st" never steps the place down."""
+
+    def place_sizes(status: str, words) -> set[int]:
+        data = standings(teams, status=status)
+        # Totals no place can be mistaken for, and surnames short enough
+        # that the figures keep their full size, where the ordinals'
+        # column reaches its share of the page.
+        short = ["Arlo Vesk", "Bexa Rendt"]
+        rows = [
+            replace(r, entry=replace(r.entry, names=short), laps=0, total=30 - 6 * i)
+            for i, r in enumerate(data.rows)
+        ]
+        drawn.clear()
+        render(qtbot, "madison", replace(data, rows=rows))
+        return sizes(drawn, [words(r.rank) for r in rows])
+
+    [before] = place_sizes("After Sprint 2 of 4", str)
+    [after] = place_sizes("Provisional", P.ordinal)
+    assert before == after
 
 
 def test_the_color_view_shows_the_team_name_in_its_ink(qtbot, drawn, monkeypatch):
