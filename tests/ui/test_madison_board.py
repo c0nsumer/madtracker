@@ -483,7 +483,7 @@ def test_the_texture_shows_on_the_fade_and_fades_with_it(qapp):
     from madtracker.board import theme as t
 
     plain = _band(slant=t.SLANT)
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     img = _band(slant=t.SLANT, texture=tex)
     run = t.SLANT * ROW.height()
     span = tex.cell(1.0, 1.0).width() * 2
@@ -501,7 +501,7 @@ def test_the_texture_shows_tone_on_tone_on_solid_color(qapp):
     from madtracker.board import team_rows, texture
     from madtracker.board import theme as t
 
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     zone = ROW.left() + 600
     img = _band(sweep=1.0, zone_right=zone, slant=t.SLANT, texture=tex)
     # The swatch, then the color view's fill, short of its slanted end.
@@ -514,7 +514,7 @@ def test_the_texture_stays_fixed_while_the_color_sweeps(qapp):
     from madtracker.board import team_rows, texture
     from madtracker.board import theme as t
 
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     zone = ROW.left() + 700
     part = _band(sweep=0.5, zone_right=zone, slant=t.SLANT, texture=tex)
     more = _band(sweep=0.9, zone_right=zone, slant=t.SLANT, texture=tex)
@@ -534,7 +534,7 @@ def test_a_venue_shape_replaces_the_builtin_stroke(qtbot):
     w = render(qtbot, "madison", standings(5))
     clocked(w, color_view_ms())
     builtin = w.grab().toImage()
-    w.set_texture("venue", texture.first_shape_svg(CHEVRON), texture.Adjust())
+    w.set_texture("venue", texture.first_shape_svg(CHEVRON))
     page = w.pages["madison"]
     assert not page.texture.builtin
     venue = w.grab().toImage()

@@ -594,14 +594,13 @@ def _empty_svg(tmp_path):
 
 
 def test_the_dropdown_lists_the_patterns_then_add_from_file(store, qtbot, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+    from PySide6.QtWidgets import QFileDialog, QPushButton
 
     d = _settings(store, tmp_path, qtbot)
     assert d.texture_label.text() == "Scoreboard texture"
     tip = "The pattern tiled faintly across the scoreboard's rows."
     assert d.texture_label.toolTip() == tip and d.texture_combo.toolTip() == tip
     assert _items(d) == [
-        "Lightning Bolts",
         "Slant Strokes",
         "Chevrons",
         "Dots",
@@ -609,7 +608,7 @@ def test_the_dropdown_lists_the_patterns_then_add_from_file(store, qtbot, tmp_pa
         "",
         "Add from File...",
     ]
-    assert d.adjust_button.text() == "Adjust..." and d.adjust_button.isEnabled()
+    assert "Adjust..." not in [b.text() for b in d.findChildren(QPushButton)]
     seen = {}
 
     def fake(parent, title, start, flt):
@@ -621,7 +620,7 @@ def test_the_dropdown_lists_the_patterns_then_add_from_file(store, qtbot, tmp_pa
     qtbot.waitUntil(lambda: "args" in seen)
     assert seen["args"] == ("Choose Scoreboard Texture", "SVG Images (*.svg)")
     # Cancelling the file dialog returns to the previous item, with no red line.
-    assert d.texture_combo.currentData() == "bolts" and d.error.text() == ""
+    assert d.texture_combo.currentData() == "slant" and d.error.text() == ""
 
 
 def test_a_wheel_over_the_texture_list_changes_nothing(store, qtbot, tmp_path, monkeypatch):
@@ -651,44 +650,41 @@ def test_a_wheel_over_the_texture_list_changes_nothing(store, qtbot, tmp_path, m
     assert combo.currentIndex() == before and opened == []
 
 
-def test_bolts_is_the_default_for_a_new_file(store, qtbot, tmp_path):
-    from madtracker.board.texture import Adjust
-
-    assert venue.texture_pattern(store) == "bolts" and venue.texture_adjust(store) == Adjust()
+def test_slant_strokes_is_the_default_for_a_new_file(store, qtbot, tmp_path):
+    assert venue.texture_pattern(store) == "slant"
     d = _settings(store, tmp_path, qtbot)
-    assert d.pending_pattern == "bolts" and d.texture_combo.currentText() == "Lightning Bolts"
-    assert d.pending_adjust == Adjust() and d.texture_data is None
+    assert d.pending_pattern == "slant" and d.texture_combo.currentText() == "Slant Strokes"
+    assert d.texture_data is None
 
 
 def test_add_from_file_adds_and_selects_the_venue_shape(store, qtbot, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
 
-    path = tmp_path / "bolt.svg"
+    path = tmp_path / "kite.svg"
     path.write_bytes(CHEVRON)
     d = _settings(store, tmp_path, qtbot)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
     d.texture_combo.setCurrentIndex(d.texture_combo.count() - 1)
-    qtbot.waitUntil(lambda: d.texture_file == "bolt.svg")
+    qtbot.waitUntil(lambda: d.texture_file == "kite.svg")
     assert _items(d) == [
-        "Lightning Bolts",
         "Slant Strokes",
         "Chevrons",
         "Dots",
         "None",
-        "bolt.svg",
+        "kite.svg",
         "",
         "Add from File...",
     ]
-    assert d.texture_combo.currentText() == "bolt.svg" and d.pending_pattern == "venue"
-    assert d.texture_file == "bolt.svg" and d.error.text() == ""
+    assert d.texture_combo.currentText() == "kite.svg" and d.pending_pattern == "venue"
+    assert d.texture_file == "kite.svg" and d.error.text() == ""
     # Nothing is stored until Save.
     assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
     assert d.save()
     kept = venue.texture_setting(store)
     assert kept is not None and b"<path" in kept
-    assert venue.texture_name(store) == "bolt.svg" and venue.texture_pattern(store) == "venue"
+    assert venue.texture_name(store) == "kite.svg" and venue.texture_pattern(store) == "venue"
     again = _settings(store, tmp_path, qtbot)
-    assert again.texture_combo.currentText() == "bolt.svg"
+    assert again.texture_combo.currentText() == "kite.svg"
 
 
 def test_a_refused_file_returns_to_the_previous_pattern(store, qtbot, tmp_path):
@@ -706,36 +702,28 @@ def test_a_refused_file_returns_to_the_previous_pattern(store, qtbot, tmp_path):
 
 
 def test_a_refused_file_keeps_the_venue_shape_already_chosen(store, qtbot, tmp_path):
-    good = tmp_path / "bolt.svg"
+    good = tmp_path / "kite.svg"
     good.write_bytes(CHEVRON)
     d = _settings(store, tmp_path, qtbot)
     assert d.choose_texture(good)
     kept = d.texture_data
     assert not d.choose_texture(_empty_svg(tmp_path))
-    assert d.texture_combo.currentText() == "bolt.svg" and d.texture_data == kept
+    assert d.texture_combo.currentText() == "kite.svg" and d.texture_data == kept
     assert d.save()
-    assert venue.texture_name(store) == "bolt.svg" and venue.texture_setting(store) == kept
+    assert venue.texture_name(store) == "kite.svg" and venue.texture_setting(store) == kept
 
 
-def test_none_draws_nothing_and_keeps_the_adjustments(store, qtbot, tmp_path, board):
-    from madtracker.board.texture import Adjust
-
-    chosen = Adjust(size=150, rotation=20, spacing=80, opacity=60, tone=-30)
-    venue.save(store, name="R", backup="", texture_pattern="slant", texture_adjust=chosen)
+def test_none_draws_nothing(store, qtbot, tmp_path, board):
+    venue.save(store, name="R", backup="", texture_pattern="slant")
     d = _settings(store, tmp_path, qtbot)
-    assert d.pending_adjust == chosen and d.adjust_button.isEnabled()
     d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
-    assert d.pending_pattern == "none" and not d.adjust_button.isEnabled()
-    assert d.pending_adjust == chosen
-    d.texture_combo.setCurrentIndex(d.texture_combo.findData("dots"))
-    assert d.adjust_button.isEnabled() and d.pending_adjust == chosen
-    d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
+    assert d.pending_pattern == "none"
     assert d.save()
-    assert venue.texture_pattern(store) == "none" and venue.texture_adjust(store) == chosen
-    board.set_texture("none", None, chosen)
+    assert venue.texture_pattern(store) == "none"
+    board.set_texture("none", None)
     assert all(p.texture is None for p in board.pages.values())
-    board.set_texture("slant", None, chosen)
-    assert all(p.texture is not None and p.texture.adjust == chosen for p in board.pages.values())
+    board.set_texture("slant", None)
+    assert all(p.texture is not None for p in board.pages.values())
 
 
 def test_choosing_a_pattern_changes_nothing_until_save(store, qtbot, tmp_path):
@@ -743,66 +731,66 @@ def test_choosing_a_pattern_changes_nothing_until_save(store, qtbot, tmp_path):
     d.texture_combo.setCurrentIndex(d.texture_combo.findData("chevrons"))
     d.reject()
     assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
-    assert venue.texture_pattern(store) == "bolts"
+    assert venue.texture_pattern(store) == "slant"
 
 
-def test_the_pattern_and_adjustments_travel_into_a_new_file(store, tmp_path):
-    from madtracker.board.texture import Adjust
+def test_the_pattern_travels_into_a_new_file(store, tmp_path):
     from madtracker.control.copying import CopyChoice, copy_venue
 
-    keys = (
+    assert venue.TEXTURE_PATTERN_KEY == "board/texture_pattern"
+    assert venue.TEXTURE_PATTERN_KEY in venue.SETTING_KEYS
+    assert [k for k in venue.SETTING_KEYS if k.startswith("board/texture_")] == [
+        venue.TEXTURE_KEY,
+        venue.TEXTURE_NAME_KEY,
         venue.TEXTURE_PATTERN_KEY,
-        venue.TEXTURE_SIZE_KEY,
-        venue.TEXTURE_ROTATION_KEY,
-        venue.TEXTURE_SPACING_KEY,
-        venue.TEXTURE_OPACITY_KEY,
-        venue.TEXTURE_TONE_KEY,
-    )
-    assert keys[0] == "board/texture_pattern" and keys[-1] == "board/texture_tone"
-    assert all(k in venue.SETTING_KEYS for k in keys)
-    chosen = Adjust(size=120, rotation=-10, spacing=90, opacity=150, tone=40)
-    venue.save(store, name="R", backup="", texture_pattern="chevrons", texture_adjust=chosen)
+    ]
+    venue.save(store, name="R", backup="", texture_pattern="chevrons")
     with Store.open(tmp_path / "new.sqlite") as new:
         copy_venue(store, new, CopyChoice())
         assert venue.texture_pattern(new) == "chevrons"
-        assert venue.texture_adjust(new) == chosen
 
 
-def test_saving_other_settings_keeps_the_pattern_and_adjustments(store):
-    from madtracker.board.texture import Adjust
-
-    chosen = Adjust(size=80)
-    venue.save(store, name="R", backup="", texture_pattern="dots", texture_adjust=chosen)
+def test_saving_other_settings_keeps_the_pattern(store):
+    venue.save(store, name="R", backup="", texture_pattern="dots")
     venue.save(store, name="Riverside", backup="")
-    assert venue.texture_pattern(store) == "dots" and venue.texture_adjust(store) == chosen
+    assert venue.texture_pattern(store) == "dots"
 
 
-def test_bad_stored_adjustments_clamp_or_default(store):
-    from madtracker.board.texture import Adjust
-
-    store.set_setting(venue.TEXTURE_SIZE_KEY, 5000)
-    store.set_setting(venue.TEXTURE_ROTATION_KEY, -999)
-    store.set_setting(venue.TEXTURE_SPACING_KEY, "wide")
-    store.set_setting(venue.TEXTURE_OPACITY_KEY, True)
-    store.set_setting(venue.TEXTURE_TONE_KEY, 12.6)
-    assert venue.texture_adjust(store) == Adjust(size=200, rotation=-45, tone=13)
+def test_a_pattern_that_is_not_offered_reads_as_the_default(store):
     store.set_setting(venue.TEXTURE_PATTERN_KEY, "swirls")
-    assert venue.texture_pattern(store) == "bolts"
-    # A venue choice with no stored shape is the bolts.
+    assert venue.texture_pattern(store) == "slant"
+    # A venue choice with no stored shape is the default pattern.
     store.set_setting(venue.TEXTURE_PATTERN_KEY, "venue")
-    assert venue.texture_pattern(store) == "bolts"
+    assert venue.texture_pattern(store) == "slant"
     with pytest.raises(ValueError):
         venue.save(store, name="R", backup="", texture_pattern="swirls")
+    with pytest.raises(ValueError):
+        venue.save(store, name="R", backup="", texture_pattern="bolts")
 
 
-def test_a_stored_shape_with_no_pattern_opens_on_bolts_and_lists_it(store, qtbot, tmp_path):
+def test_a_file_that_stores_the_bolts_draws_the_default_pattern(store, board):
+    from madtracker.board.texture import make_texture
+
+    store.set_setting(venue.TEXTURE_PATTERN_KEY, "bolts")
+    # Keys the app does not read are left where they are and change nothing.
+    store.set_setting("board/texture_size", 150)
+    store.set_setting("board/texture_opacity", 0)
+    assert venue.texture_pattern(store) == "slant"
+    board.set_texture(venue.texture_pattern(store), venue.texture_setting(store))
+    default = make_texture("slant", None).cell(1.0, 1.0)
+    for page in board.pages.values():
+        assert page.texture is not None and page.texture.builtin
+        assert page.texture.cell(1.0, 1.0) == default
+
+
+def test_a_stored_shape_with_no_pattern_opens_on_the_default_and_lists_it(store, qtbot, tmp_path):
     venue.save(
         store, name="R", backup="", texture=CHEVRON, texture_name="old.svg", keep_texture=False
     )
     assert store.get_setting(venue.TEXTURE_PATTERN_KEY) is None
-    assert venue.texture_pattern(store) == "bolts"
+    assert venue.texture_pattern(store) == "slant"
     d = _settings(store, tmp_path, qtbot)
-    assert d.texture_combo.currentText() == "Lightning Bolts"
+    assert d.texture_combo.currentText() == "Slant Strokes"
     assert "old.svg" in _items(d)
     d.texture_combo.setCurrentIndex(d.texture_combo.findData("venue"))
     assert d.save() and venue.texture_pattern(store) == "venue"
@@ -814,36 +802,36 @@ def test_the_texture_travels_with_the_file_and_into_a_new_file(store, tmp_path):
     assert venue.TEXTURE_KEY == "board/texture_svg"
     assert venue.TEXTURE_KEY in venue.SETTING_KEYS and venue.TEXTURE_NAME_KEY in venue.SETTING_KEYS
     venue.save(
-        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+        store, name="R", backup="", texture=CHEVRON, texture_name="kite.svg", keep_texture=False
     )
     with Store.open(tmp_path / "new.sqlite") as new:
         copy_venue(store, new, CopyChoice())
         assert venue.texture_setting(new) == CHEVRON
-        assert venue.texture_name(new) == "bolt.svg"
+        assert venue.texture_name(new) == "kite.svg"
 
 
 def test_saving_other_settings_keeps_the_texture(store):
     venue.save(
-        store, name="R", backup="", texture=CHEVRON, texture_name="bolt.svg", keep_texture=False
+        store, name="R", backup="", texture=CHEVRON, texture_name="kite.svg", keep_texture=False
     )
     venue.save(store, name="Riverside", backup="")
     assert venue.texture_setting(store) == CHEVRON
-    assert venue.texture_name(store) == "bolt.svg"
+    assert venue.texture_name(store) == "kite.svg"
 
 
 def test_the_board_gives_every_page_the_texture(board):
-    from madtracker.board.texture import Adjust, Texture
+    from madtracker.board.texture import Texture
 
     assert all(p.texture.builtin for p in board.pages.values())
-    board.set_texture("venue", CHEVRON, Adjust())
+    board.set_texture("venue", CHEVRON)
     shared = {id(p.texture) for p in board.pages.values()}
     assert len(shared) == 1 and not next(iter(board.pages.values())).texture.builtin
-    board.set_texture("bolts", None, Adjust())
+    board.set_texture("chevrons", None)
     assert all(isinstance(p.texture, Texture) and p.texture.builtin for p in board.pages.values())
 
 
 def test_choosing_a_texture_then_cancelling_saves_nothing(store, qtbot, tmp_path):
-    path = tmp_path / "bolt.svg"
+    path = tmp_path / "kite.svg"
     path.write_bytes(CHEVRON)
     d = _settings(store, tmp_path, qtbot)
     assert d.choose_texture(path)
@@ -858,15 +846,15 @@ def test_choosing_a_texture_then_cancelling_saves_nothing(store, qtbot, tmp_path
     d.texture_combo.setCurrentIndex(d.texture_combo.findData("none"))
     d.reject()
     assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == "old.svg"
-    assert venue.texture_pattern(store) == "bolts"
+    assert venue.texture_pattern(store) == "slant"
 
 
 def test_a_stored_shape_without_a_name_is_no_venue_shape(store, qtbot, tmp_path):
     venue.save(store, name="R", backup="", texture=CHEVRON, texture_name="", keep_texture=False)
     store.set_setting(venue.TEXTURE_PATTERN_KEY, "venue")
     assert venue.texture_setting(store) == CHEVRON and venue.texture_name(store) == ""
-    assert venue.texture_pattern(store) == "bolts"
+    assert venue.texture_pattern(store) == "slant"
     d = _settings(store, tmp_path, qtbot)
-    assert d.texture_combo.currentText() == "Lightning Bolts"
+    assert d.texture_combo.currentText() == "Slant Strokes"
     assert d.texture_combo.findData("venue") == -1
     assert d.save() and venue.texture_setting(store) == CHEVRON

@@ -4156,7 +4156,6 @@ def test_a_points_race_sprint_plays_on_the_board_and_undo_stops_it(make_app, tmp
 
 
 def test_the_app_gives_every_canvas_the_chosen_pattern(make_app, tmp_path):
-    from madtracker.board.texture import Adjust
     from madtracker.control import venue
 
     shape = (
@@ -4168,15 +4167,14 @@ def test_the_app_gives_every_canvas_the_chosen_pattern(make_app, tmp_path):
     assert len(c.boards) == 2 and all(p.texture.builtin for p in pages)
     # A stored shape alone changes nothing: the chosen pattern says to draw it.
     venue.save(
-        c.store, name="R", backup="", texture=shape, texture_name="bolt.svg", keep_texture=False
+        c.store, name="R", backup="", texture=shape, texture_name="kite.svg", keep_texture=False
     )
     c.apply_venue()
     assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
-    chosen = Adjust(size=150, rotation=15, opacity=80)
-    venue.save(c.store, name="R", backup="", texture_pattern="venue", texture_adjust=chosen)
+    venue.save(c.store, name="R", backup="", texture_pattern="venue")
     c.apply_venue()
     pages = [p for b in c.boards for p in b.pages.values()]
-    assert all(not p.texture.builtin and p.texture.adjust == chosen for p in pages)
+    assert all(not p.texture.builtin for p in pages)
     venue.save(c.store, name="R", backup="", texture_pattern="none")
     c.apply_venue()
     assert all(p.texture is None for b in c.boards for p in b.pages.values())
@@ -4185,7 +4183,7 @@ def test_the_app_gives_every_canvas_the_chosen_pattern(make_app, tmp_path):
     assert all(p.texture.builtin for b in c.boards for p in b.pages.values())
 
 
-def test_a_file_with_no_texture_puts_the_bolts_back(make_app, tmp_path):
+def test_a_file_with_no_texture_puts_the_default_pattern_back(make_app, tmp_path):
     from madtracker.control import venue
 
     shape = (
@@ -4198,13 +4196,13 @@ def test_a_file_with_no_texture_puts_the_bolts_back(make_app, tmp_path):
         name="R",
         backup="",
         texture=shape,
-        texture_name="bolt.svg",
+        texture_name="kite.svg",
         keep_texture=False,
         texture_pattern="venue",
     )
     c.apply_venue()
     assert all(not p.texture.builtin for b in c.boards for p in b.pages.values())
-    # The next file has no shape stored, so a venue choice is the bolts.
+    # The next file has no shape stored, so a venue choice is the default pattern.
     venue.save(c.store, name="R", backup="", texture=None, keep_texture=False)
     assert c.store.get_setting(venue.TEXTURE_KEY) is None
     c.apply_venue()

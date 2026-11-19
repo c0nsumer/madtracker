@@ -37,7 +37,6 @@ from madtracker.inputs import clean_line
 from madtracker.store import Store, StoreError
 from madtracker.ui import style
 from madtracker.ui.icons import mdi
-from madtracker.ui.texture_dialog import TextureDialog
 from madtracker.ui.widgets import (
     Form,
     apply_style,
@@ -187,22 +186,13 @@ class SettingsDialog(QDialog):
         logo_row.addWidget(default)
 
         # Pending until Save, like every other value here: the venue's own
-        # shape (None when none is stored), the chosen pattern, and the
-        # adjustments, which "None" keeps so a pattern chosen again is as it was.
+        # shape (None when none is stored) and the chosen pattern.
         self.texture_data: bytes | None = venue.texture_setting(store)
         self.texture_file = venue.texture_name(store)
         self.pending_pattern = venue.texture_pattern(store)
-        self.pending_adjust = venue.texture_adjust(store)
         self.texture_combo = NoWheelCombo()
         self._fill_texture_combo()
         self.texture_combo.currentIndexChanged.connect(self._texture_picked)
-        # Opens the adjustments dialog; it is off while no pattern is drawn.
-        self.adjust_button = QPushButton("Adjust...")
-        self.adjust_button.clicked.connect(self.open_adjustments)
-        self.adjust_button.setEnabled(self.pending_pattern != "none")
-        texture_row = QHBoxLayout()
-        texture_row.addWidget(self.texture_combo, 1)
-        texture_row.addWidget(self.adjust_button)
         self.texture_label = QLabel("Scoreboard texture")
         for w in (self.texture_label, self.texture_combo):
             w.setToolTip(TEXTURE_TIP)
@@ -282,7 +272,7 @@ class SettingsDialog(QDialog):
         form.addRow("Venue name", self.venue_name)
         form.addRow("Scoreboard logo", logo_row)
         form.addRow("", self.preview)
-        form.addRow(self.texture_label, texture_row)
+        form.addRow(self.texture_label, self.texture_combo)
         form.addRow("Riders on the scoreboard", self.rider_label)
         form.addRow("Accent color", accent_row)
         form.addRow("Backup folder", backup_row)
@@ -352,7 +342,6 @@ class SettingsDialog(QDialog):
             return
         self.pending_pattern = key
         show_message(self.error, "")
-        self.adjust_button.setEnabled(key != "none")
 
     def _pick_texture(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -388,7 +377,6 @@ class SettingsDialog(QDialog):
         self.pending_pattern = "venue"
         show_message(self.error, "")
         self._fill_texture_combo()
-        self.adjust_button.setEnabled(True)
         return True
 
     def _show_accent(self) -> None:
@@ -451,11 +439,6 @@ class SettingsDialog(QDialog):
         if not data:
             self.logo_name.setText("Default logo")
 
-    def open_adjustments(self) -> None:
-        dialog = TextureDialog(self.pending_pattern, self.texture_data, self.pending_adjust, self)
-        if run_dialog(dialog) == QDialog.DialogCode.Accepted:
-            self.pending_adjust = dialog.adjust()
-
     def open_rulesets(self) -> None:
         from madtracker.ui.rulesets import open_rulesets
 
@@ -480,7 +463,6 @@ class SettingsDialog(QDialog):
                 texture_name=self.texture_file,
                 keep_texture=False,
                 texture_pattern=self.pending_pattern,
-                texture_adjust=self.pending_adjust,
                 name=self.venue_name.text(),
                 backup=self.backup.text(),
                 rider_label=self.rider_label.currentData(),

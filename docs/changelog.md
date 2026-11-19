@@ -22,6 +22,10 @@ entry names the version shown in About.
 - The results PDF prints the points of a rider or team marked Did Not Finish, in gray. Before, the row had no figures, though the points still counted in a Team Omnium by Points.
 - The Scoring help's shared rules open with what each of **Did Not Start**, **Did Not Finish**, **Disqualify**, and **Withdrawn** does to the rider's place.
 - The Scoring help for the Win-and-Out no longer describes a dead heat on a bell lap or a lap winner marked Did Not Finish, which the scoring window does not offer.
+- The scoreboard has a new look, contributed by a rider at the venue: rows with a color bar and a faint texture, larger names and totals, and no column headings or format line on the Madison table.
+- The scoreboard shows a score change as it happens: each sprint, lap, and penalty plays as a chip on the rider's or team's total, in sprint order, and then the rows move to their new places. The separate sprint card is gone.
+- The Madison scoreboard names each team's riders, and turns to the team's color and name for a few seconds at a time.
+- Settings has **Scoreboard texture**: Slant Strokes, Chevrons, Dots, None, or the venue's own shape from an SVG file.
 
 ## 1.1.5 (2026-Oct-30)
 

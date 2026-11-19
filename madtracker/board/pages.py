@@ -43,16 +43,16 @@ from madtracker.board.payloads import (
     total_text,
 )
 from madtracker.board.scorebug import Frame, Key, Play, ScoreQueue, Step
-from madtracker.board.texture import Adjust, Texture, make_texture
+from madtracker.board.texture import DEFAULT_PATTERN, Texture, make_texture
 
 _default_texture: Texture | None = None
 
 
 def default_texture() -> Texture | None:
-    """The bolts at default adjustments, built once for every page."""
+    """The default pattern, built once for every page."""
     global _default_texture
     if _default_texture is None:
-        _default_texture = make_texture("bolts", None, Adjust())
+        _default_texture = make_texture(DEFAULT_PATTERN, None)
     return _default_texture
 
 

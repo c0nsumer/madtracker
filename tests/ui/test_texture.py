@@ -1,7 +1,5 @@
 """The board's texture engine: a shape tiled in a staggered grid."""
 
-import math
-
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QImage
 
@@ -26,7 +24,7 @@ def _chevron() -> texture.Texture:
 
 
 def test_the_builtin_tile_is_a_stroke_at_the_boards_slant(qapp):
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     assert tex.builtin
     cell = tex.cell(1.0, 1.0)
     h = texture.TILE_H
@@ -123,10 +121,11 @@ def test_an_unusable_svg_falls_back_to_the_builtin(qapp):
 
 
 def test_the_brush_keeps_its_pattern_fixed_to_the_origin(qapp):
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     brush = tex.brush(1.0, 1.0, QColor(255, 0, 0, 90), QPointF(37, 11))
     t = brush.transform()
     assert (t.dx(), t.dy()) == (37, 11)
+    assert t.isTranslating() and not t.isRotating()
     tinted = brush.textureImage()
     ink = [
         tinted.pixelColor(x, y)
@@ -142,7 +141,7 @@ def test_the_brush_paints_the_cell_pixel_for_pixel_at_any_pixel_ratio(qapp):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QPainter
 
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     for dpr in (1.0, 1.5, 2.0):
         img = QImage(round(300 * dpr), round(150 * dpr), QImage.Format.Format_ARGB32_Premultiplied)
         img.setDevicePixelRatio(dpr)
@@ -159,7 +158,7 @@ def test_the_brush_paints_the_cell_pixel_for_pixel_at_any_pixel_ratio(qapp):
 
 
 def test_cells_and_brushes_are_cached(qapp, monkeypatch):
-    tex = texture.make_texture("slant", None, texture.Adjust())
+    tex = texture.make_texture("slant", None)
     built = []
     draw = tex._draw_shape
     monkeypatch.setattr(tex, "_draw_shape", lambda *a: (built.append(1), draw(*a)))
@@ -169,6 +168,18 @@ def test_cells_and_brushes_are_cached(qapp, monkeypatch):
     assert len(built) == count
     tex.cell(2.0, 1.0)
     assert len(built) > count
+
+
+def test_the_caches_keep_only_the_latest_scales(qapp):
+    """A preview resized step by step makes a scale per step; only the latest few are kept."""
+    tex = texture.make_texture("slant", None)
+    for k in range(3 * texture.CACHE_KEPT):
+        u = 0.5 + k / 100
+        tex.cell(u, 1.0)
+        tex.brush(u, 1.0, QColor("white"), QPointF(0, 0))
+    assert len(tex._cells) == len(tex._brushes) == texture.CACHE_KEPT
+    newest = 0.5 + (3 * texture.CACHE_KEPT - 1) / 100
+    assert (newest, 1.0) in tex._cells
 
 
 NS = 'xmlns="http://www.w3.org/2000/svg"'
@@ -228,33 +239,33 @@ def test_a_very_wide_shape_is_refused_quickly_and_a_wide_one_tiles(qapp):
 
 
 def test_a_cell_side_is_capped(qapp):
-    cell = texture.make_texture("slant", None, texture.Adjust()).cell(200.0, 1.0)
+    cell = texture.make_texture("slant", None).cell(200.0, 1.0)
     assert max(cell.width(), cell.height()) <= texture.MAX_CELL_PX
 
 
-def _tex(pattern: str = "slant", **adjust) -> texture.Texture:
-    made = texture.make_texture(pattern, None, texture.Adjust(**adjust))
+def _tex(pattern: str = "slant") -> texture.Texture:
+    made = texture.make_texture(pattern, None)
     assert made is not None
     return made
 
 
 def test_patterns_list_reads_as_approved():
     assert texture.PATTERNS == (
-        ("bolts", "Lightning Bolts"),
         ("slant", "Slant Strokes"),
         ("chevrons", "Chevrons"),
         ("dots", "Dots"),
         ("none", "None"),
     )
-    assert texture.DEFAULT_PATTERN == "bolts"
+    assert texture.DEFAULT_PATTERN == "slant"
     assert texture.pattern_svg("none") is None and texture.pattern_svg("venue") is None
+    assert texture.pattern_svg("bolts") is None
 
 
 def test_every_bundled_pattern_tiles(qapp):
-    for key in ("bolts", "slant", "chevrons", "dots"):
+    for key in ("slant", "chevrons", "dots"):
         svg = texture.pattern_svg(key)
         assert svg is not None, key
-        tex = texture.make_texture(key, None, texture.Adjust())
+        tex = texture.make_texture(key, None)
         assert tex is not None and tex.builtin, key
         cell = tex.cell(1.0, 1.0)
         assert any(
@@ -262,44 +273,6 @@ def test_every_bundled_pattern_tiles(qapp):
             for x in range(0, cell.width(), 2)
             for y in range(0, cell.height(), 2)
         ), key
-
-
-def _run(cell: QImage, scale: str = "dots") -> int:
-    """The inked length of the cell's top row of shapes, left to right."""
-    y = round(texture.TILE_H * texture.BASE_SCALE[scale] / 2)
-    line = [cell.pixelColor(x, y).alpha() > 0 for x in range(cell.width())]
-    first = line.index(True)
-    end = first
-    while end < len(line) and line[end]:
-        end += 1
-    return end - first
-
-
-def test_size_and_spacing_scale_the_cell(qapp):
-    base = _tex("dots").cell(1.0, 1.0)
-    big = _tex("dots", size=150).cell(1.0, 1.0)
-    assert abs(big.width() - 1.5 * base.width()) <= 2
-    assert abs(big.height() - 1.5 * base.height()) <= 2
-    wide = _tex("dots", spacing=140).cell(1.0, 1.0)
-    assert abs(wide.width() - 1.4 * base.width()) <= 2
-    assert abs(wide.height() - 1.4 * base.height()) <= 2
-    # Spacing moves the shapes apart without resizing them: the first dot
-    # is as wide in a spread cell as in the base one.
-    assert abs(_run(wide) - _run(base)) <= 2
-
-
-def test_rotation_turns_the_pattern_about_the_row(qapp):
-    origin = QPointF(37, 11)
-    flat = _tex("slant").brush(1.0, 1.0, QColor("white"), origin)
-    turned = _tex("slant", rotation=30).brush(1.0, 1.0, QColor("white"), origin)
-    assert (flat.transform().dx(), flat.transform().dy()) == (37, 11)
-    t = turned.transform()
-    # The row's origin stays put under the turn.
-    mapped = t.map(QPointF(0, 0))
-    assert (round(mapped.x()), round(mapped.y())) == (37, 11)
-    assert abs(t.m12() - math.sin(math.radians(30))) < 1e-6
-    assert abs(t.m11() - math.cos(math.radians(30))) < 1e-6
-    assert flat.transform().m12() == 0
 
 
 def _paint(tex: texture.Texture, base: QColor) -> QImage:
@@ -318,74 +291,36 @@ def _paint(tex: texture.Texture, base: QColor) -> QImage:
     return img
 
 
-def test_opacity_and_tone_change_the_drawn_texture_not_the_row(qapp):
-    base = QColor("#c03030")
-    plain = _paint(_tex("dots", opacity=100), base)
-    dark = _paint(_tex("dots", tone=-100), base)
-    light = _paint(_tex("dots", tone=100), base)
-    strong = _paint(_tex("dots", opacity=200), base)
-    ys, xs = range(12, 108, 2), range(60, 800, 2)
-
-    def lum(img, x, y):
-        return img.pixelColor(x, y).lightness()
-
-    inked = [(x, y) for x in xs for y in ys if plain.pixelColor(x, y) != strong.pixelColor(x, y)]
-    assert inked
-    assert sum(lum(dark, x, y) for x, y in inked) < sum(lum(plain, x, y) for x, y in inked)
-    assert sum(lum(light, x, y) for x, y in inked) > sum(lum(plain, x, y) for x, y in inked)
-    # Where no shape lies, the band is the band whatever the tone.
-    bare = [(x, y) for x in xs for y in ys if (x, y) not in set(inked)]
-    same = sum(1 for x, y in bare if dark.pixelColor(x, y) == light.pixelColor(x, y))
-    assert same / len(bare) > 0.5
-    spots = [(x, y) for x, y in bare if dark.pixelColor(x, y) == light.pixelColor(x, y)]
-    assert all(dark.pixelColor(x, y) == plain.pixelColor(x, y) for x, y in spots)
-
-
-def test_none_and_zero_opacity_draw_no_texture(qapp):
-    assert texture.make_texture("none", None, texture.Adjust()) is None
-    assert texture.make_texture("bolts", None, texture.Adjust(opacity=0)) is None
-    assert texture.make_texture("venue", CHEVRON, texture.Adjust(opacity=0)) is None
+def test_none_draws_no_texture(qapp):
+    assert texture.make_texture("none", None) is None
+    assert texture.make_texture("none", CHEVRON) is None
     base = QColor("#c03030")
     assert _paint(None, base) != _paint(_tex("dots"), base)
 
 
 def test_venue_unknown_and_missing_patterns(qapp):
     svg = texture.first_shape_svg(CHEVRON)
-    venue = texture.make_texture("venue", svg, texture.Adjust())
+    venue = texture.make_texture("venue", svg)
     assert venue is not None and not venue.builtin
-    assert texture.make_texture("venue", None, texture.Adjust()).builtin
-    assert texture.make_texture("nonsense", None, texture.Adjust()).builtin
+    default = texture.make_texture(texture.DEFAULT_PATTERN, None).cell(1.0, 1.0)
+    for key in ("nonsense", "bolts"):
+        tex = texture.make_texture(key, None)
+        assert tex.builtin and tex.cell(1.0, 1.0) == default, key
+    assert texture.make_texture("venue", None).cell(1.0, 1.0) == default
 
 
-def test_adjust_clamps_and_tone_mixes_toward_black_and_white():
-    a = texture.Adjust(size=500, rotation=-90, spacing=0, opacity=999, tone=-500).clamped()
-    assert (a.size, a.rotation, a.spacing, a.opacity, a.tone) == (200, -45, 60, 200, -100)
-    assert texture.SIZE == (50, 200) and texture.TONE == (-100, 100)
-    tex = _tex("dots", tone=-100)
-    assert tex.fade_color(QColor(200, 100, 50)).rgb() == QColor(0, 0, 0).rgb()
-    assert (
-        _tex("dots", tone=100).fade_color(QColor(200, 100, 50)).rgb() == QColor(255, 255, 255).rgb()
-    )
-    mid = _tex("dots", tone=50).fade_color(QColor(200, 100, 50))
-    assert (mid.red(), mid.green(), mid.blue()) == (228, 178, 152)
-    assert abs(_tex("dots", opacity=150).fade_share - texture.FADE_SHARE * 1.5) < 1e-9
-    assert abs(_tex("dots", opacity=150).solid_alpha - texture.SOLID_ALPHA * 1.5) < 1e-9
+def test_every_pattern_tiles_within_the_cell_cap_at_any_scale(qapp):
+    for key in ("slant", "chevrons", "dots"):
+        tex = _tex(key)
+        for u, dpr in ((1.0, 1.0), (3.0, 2.0), (200.0, 1.0)):
+            cell = tex.cell(u, dpr)
+            assert 0 < cell.width() <= texture.MAX_CELL_PX
+            assert 0 < cell.height() <= texture.MAX_CELL_PX
+        tex.brush(1.0, 1.0, QColor("white"), QPointF(5, 5))
 
 
-def test_adjust_extremes_tile_without_error_and_within_the_cell_cap(qapp):
-    for key in ("bolts", "slant", "chevrons", "dots"):
-        for size, spacing in ((200, 60), (50, 60), (200, 200), (50, 200)):
-            for rotation in (-45, 45):
-                tex = _tex(key, size=size, spacing=spacing, rotation=rotation)
-                for u, dpr in ((1.0, 1.0), (3.0, 2.0), (200.0, 1.0)):
-                    cell = tex.cell(u, dpr)
-                    assert 0 < cell.width() <= texture.MAX_CELL_PX
-                    assert 0 < cell.height() <= texture.MAX_CELL_PX
-                tex.brush(1.0, 1.0, QColor("white"), QPointF(5, 5))
-
-
-def test_dots_are_a_fine_grain_beside_the_bolts(qapp):
-    bolt, dot = _tex("bolts").cell(1.0, 1.0), _tex("dots").cell(1.0, 1.0)
-    assert dot.height() < bolt.height() / 3
-    venue = texture.make_texture("venue", texture.first_shape_svg(CHEVRON), texture.Adjust())
+def test_dots_are_a_fine_grain_beside_the_slant_strokes(qapp):
+    stroke, dot = _tex("slant").cell(1.0, 1.0), _tex("dots").cell(1.0, 1.0)
+    assert dot.height() < stroke.height() / 3
+    venue = texture.make_texture("venue", texture.first_shape_svg(CHEVRON))
     assert abs(venue.cell(1.0, 1.0).height() - 2 * texture.PITCH_Y * texture.TILE_H) <= 1

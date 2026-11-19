@@ -230,14 +230,9 @@ The schema_ver rule: when a payload's shape changes, that kind's `SCHEMA_VER` go
 | `backup` | `{"taken_at": "2026-10-10T21:45:12", "source": string, "event": string}` | Present only in a backup: when it was taken (local time), the data file it came from, and the event that was open. It makes the file a backup whatever it's called. A restore deletes it from its copy. |
 | `board/rider_label` | string | How the scoreboard names a rider: `names`, `bibs_names`, or `bibs`. Absent means `bibs_names`. |
 | `board/accent` | string | The scoreboard's accent color, eg: `#ffc83d` (the default when absent). |
-| `board/texture_pattern` | string | The pattern tiled across the scoreboard's rows: `bolts`, `slant`, `chevrons`, `dots`, `none`, or `venue` (the stored shape). Absent means `bolts`. |
+| `board/texture_pattern` | string | The pattern tiled across the scoreboard's rows: `slant`, `chevrons`, `dots`, `none`, or `venue` (the stored shape). Absent or any other value means `slant`. |
 | `board/texture_svg` | string | The venue's own shape as base64 SVG bytes, reduced to its first filled shape. Absent means none stored. |
 | `board/texture_name` | string | The file name the shape was chosen under. Absent means none. |
-| `board/texture_size` | integer | The shape's size, 50 to 200 percent. Absent means 100. |
-| `board/texture_rotation` | integer | The turn in degrees, -45 to 45. Absent means 0. |
-| `board/texture_spacing` | integer | The space between shapes, 60 to 200 percent. Absent means 100. |
-| `board/texture_opacity` | integer | The texture's strength, 0 to 200 percent. Absent means 100; 0 draws nothing. |
-| `board/texture_tone` | integer | Darker (negative) or lighter (positive), -100 to 100. Absent means 0. |
 | `rules/default_ruleset` | string | `rulebook` or a `ruleset.name`. |
 | `ui/live_race_id` | integer | The race that was live, selected on the next open. |
 | `event/{event_id}/groups` | list of strings | Groups made in Edit Groups > New Group that may have no rider or race yet. A group with riders is only the label on their roster entries. Deleting the event deletes the row. |

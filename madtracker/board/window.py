@@ -19,7 +19,7 @@ from madtracker.board import wordmark
 from madtracker.board.motion import Clock, default_clock
 from madtracker.board.pages import PAGES, EliminationPage, Page, lap_chip_height
 from madtracker.board.payloads import LAYOUT_PAYLOADS, Header, coerce
-from madtracker.board.texture import Adjust, make_texture
+from madtracker.board.texture import make_texture
 from madtracker.displays import ScreenInfo, friendly_label
 
 # The board is designed on a 1080-line canvas; every size is a multiple
@@ -483,12 +483,12 @@ class BoardCanvas(QWidget):
         self.top_bar.update()
         self.logo_page.update()
 
-    def set_texture(self, pattern: str, svg: bytes | None, adjust: Adjust) -> None:
-        """The chosen pattern, the venue's SVG, and the adjustments, for every page.
+    def set_texture(self, pattern: str, svg: bytes | None) -> None:
+        """The chosen pattern and the venue's SVG, for every page.
 
         One Texture is shared, so the pages' caches are shared too.
         """
-        shared = make_texture(pattern, svg, adjust)
+        shared = make_texture(pattern, svg)
         for page in self.pages.values():
             page.texture = shared
             page.update()

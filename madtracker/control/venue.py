@@ -17,7 +17,6 @@ from pathlib import Path
 
 from madtracker.assets import bundled_logo_path
 from madtracker.board import texture as board_texture
-from madtracker.board.texture import Adjust
 from madtracker.control.exports import documents_dir
 from madtracker.inputs import clean_line
 from madtracker.store import Store
@@ -31,20 +30,8 @@ NAME_KEY = "venue/name"
 TEXTURE_KEY = "board/texture_svg"
 TEXTURE_NAME_KEY = "board/texture_name"
 # Which pattern the board tiles: a bundled key, "none", or "venue" for the
-# stored SVG; and the venue's adjustments to it, one integer each.
+# stored SVG.
 TEXTURE_PATTERN_KEY = "board/texture_pattern"
-TEXTURE_SIZE_KEY = "board/texture_size"
-TEXTURE_ROTATION_KEY = "board/texture_rotation"
-TEXTURE_SPACING_KEY = "board/texture_spacing"
-TEXTURE_OPACITY_KEY = "board/texture_opacity"
-TEXTURE_TONE_KEY = "board/texture_tone"
-_ADJUST_KEYS = (
-    ("size", TEXTURE_SIZE_KEY),
-    ("rotation", TEXTURE_ROTATION_KEY),
-    ("spacing", TEXTURE_SPACING_KEY),
-    ("opacity", TEXTURE_OPACITY_KEY),
-    ("tone", TEXTURE_TONE_KEY),
-)
 BACKUP_KEY = "backup/dir"
 # Where the exports are offered to be saved; Documents until the venue
 # chooses.
@@ -119,7 +106,7 @@ def texture_name(store: Store) -> str:
 
 
 def texture_pattern(store: Store) -> str:
-    """The chosen pattern key; the bolts when unset, unknown, or "venue" with no shape or no file name stored."""
+    """The chosen pattern key; the default pattern when unset, unknown, or "venue" with no shape or no file name stored."""
     value = store.get_setting(TEXTURE_PATTERN_KEY)
     offered = {key for key, _label in board_texture.PATTERNS}
     if value == "venue":
@@ -128,20 +115,6 @@ def texture_pattern(store: Store) -> str:
     if isinstance(value, str) and value in offered:
         return value
     return board_texture.DEFAULT_PATTERN
-
-
-def texture_adjust(store: Store) -> Adjust:
-    """The stored adjustments, each clamped to its range; a stored value that is not a number is the default."""
-    fields = {}
-    for name, key in _ADJUST_KEYS:
-        value = store.get_setting(key)
-        # bool is an int to Python and is no setting.
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and value == value:
-            try:
-                fields[name] = int(round(value))
-            except OverflowError:
-                continue
-    return Adjust(**fields).clamped()
 
 
 def logo_bytes(store: Store) -> bytes | None:
@@ -230,7 +203,6 @@ def save(
     texture_name: str = "",
     keep_texture: bool = True,
     texture_pattern: str | None = None,
-    texture_adjust: Adjust | None = None,
     rider_label: str | None = None,
     accent: str | None = None,
     exports: str | None = None,
@@ -243,8 +215,8 @@ def save(
     ``exports`` (the folder the exports are offered in; blank means
     Documents) when None. ``texture`` replaces the stored texture (None
     clears the stored shape) only when ``keep_texture`` is off, so a
-    caller that does not mention it leaves it alone. ``texture_pattern`` and
-    ``texture_adjust`` stay as they were when None.
+    caller that does not mention it leaves it alone. ``texture_pattern``
+    stays as it was when None.
     """
     if rider_label is not None and rider_label not in RIDER_LABELS:
         raise ValueError(f"rider_label must be one of {RIDER_LABELS}, not {rider_label!r}")
@@ -265,10 +237,6 @@ def save(
         if texture_pattern not in {key for key, _label in board_texture.PATTERNS} | {"venue"}:
             raise ValueError(f"texture_pattern is not offered: {texture_pattern!r}")
         values[TEXTURE_PATTERN_KEY] = texture_pattern
-    if texture_adjust is not None:
-        clamped = texture_adjust.clamped()
-        for name, key in _ADJUST_KEYS:
-            values[key] = getattr(clamped, name)
     if rider_label is not None:
         values[RIDER_LABEL_KEY] = rider_label
     if exports is not None:
@@ -292,10 +260,5 @@ SETTING_KEYS = (
     TEXTURE_KEY,
     TEXTURE_NAME_KEY,
     TEXTURE_PATTERN_KEY,
-    TEXTURE_SIZE_KEY,
-    TEXTURE_ROTATION_KEY,
-    TEXTURE_SPACING_KEY,
-    TEXTURE_OPACITY_KEY,
-    TEXTURE_TONE_KEY,
     "rules/default_ruleset",
 )

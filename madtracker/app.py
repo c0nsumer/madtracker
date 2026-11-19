@@ -828,10 +828,9 @@ class AppController:
         name = venue.venue_name(self.store, self.event.venue if self.event else "")
         pattern = venue.texture_pattern(self.store)
         texture_svg = venue.texture_setting(self.store)
-        adjust = venue.texture_adjust(self.store)
         for b in self.boards:
             b.set_logo_bytes(data)
-            b.set_texture(pattern, texture_svg, adjust)
+            b.set_texture(pattern, texture_svg)
             b.set_rider_label(venue.rider_label(self.store))
             b.set_accent(venue.accent(self.store))
             b.set_venue_name(name)
@@ -1703,19 +1702,22 @@ class AppController:
         view = self.live.view()
         before = self._board_actions.get(screen.race_id)
         self._board_actions[screen.race_id] = view.actions
-        self._set_board(*board_feed.board_for(view, before=before))
-        # A result just became provisional or final: back it up, the
-        # moment it would hurt most to lose (design section 12). After the
-        # redraw has reached the screen, so the screen and the board
-        # already show the result the file holds, whatever the backup
-        # folder does. The entries are committed already; only the copy
-        # waits.
-        if (
-            known is not None
-            and known != self.live.state
-            and self.live.state in ("provisional", "final")
-        ):
-            self._schedule_result_backup()
+        try:
+            self._set_board(*board_feed.board_for(view, before=before))
+        finally:
+            # A result just became provisional or final: back it up, the
+            # moment it would hurt most to lose (design section 12). After
+            # the redraw has reached the screen, so the screen and the
+            # board already show the result the file holds, whatever the
+            # backup folder does. The entries are committed already; only
+            # the copy waits, and a board that fails to draw never costs
+            # the copy.
+            if (
+                known is not None
+                and known != self.live.state
+                and self.live.state in ("provisional", "final")
+            ):
+                self._schedule_result_backup()
 
     def _schedule_result_backup(self) -> None:
         from PySide6.QtCore import QTimer
